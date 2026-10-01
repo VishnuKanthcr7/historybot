@@ -1,0 +1,23 @@
+# Development phases
+
+- Phase 0 — Workspace Audit — COMPLETE
+- Phase 1 — Architecture — COMPLETE
+- Phase 2 — Project Foundation — CURRENT
+- Phase 3 — Database
+- Phase 4 — Textbook Ingestion
+- Phase 5 — RAG
+- Phase 6 — AI Engine
+- Phase 7 — Backend APIs
+- Phase 8 — Frontend
+- Phase 9 — Chat + History
+- Phase 10 — E-content
+- Phase 11 — PDF
+- Phase 12 — Images
+- Phase 13 — Analytics
+- Phase 14 — Security
+- Phase 15 — Testing
+- Phase 16 — UI Polish
+- Phase 17 — Deployment
+- Phase 18 — Final QA
+
+Do not skip phases. Do not start the next phase until the current phase is approved.
