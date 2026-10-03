@@ -4,8 +4,8 @@
 - Phase 1 — Architecture — COMPLETE
 - Phase 2 — Project Foundation — COMPLETE
 - Phase 3 — Database — COMPLETE
-- Phase 4 — Textbook Ingestion — COMPLETE (awaiting review)
-- Phase 5 — RAG
+- Phase 4 — Textbook Ingestion — COMPLETE
+- Phase 5 — RAG / Chroma embeddings — COMPLETE (awaiting review)
 
 - Phase 6 — AI Engine
 - Phase 7 — Backend APIs
