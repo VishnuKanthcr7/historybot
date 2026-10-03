@@ -48,6 +48,8 @@ def validate_answer(answer: str, language: str, evidence: list[dict], grounded_e
         return False, "model_refused_despite_evidence"
     if language == "kn" and not looks_kannada(text):
         return False, "kannada_script_missing"
+    if language == "kn" and _kannada_loops(text):
+        return False, "kannada_repetition"
     allowed_pages = {int(item["textbook_page_number"]) for item in evidence if item.get("textbook_page_number") is not None}
     mentioned = extract_mentioned_pages(text)
     if mentioned and not mentioned.issubset(allowed_pages):
@@ -59,3 +61,13 @@ def validate_answer(answer: str, language: str, evidence: list[dict], grounded_e
         if term in lowered and term not in evidence_blob:
             return False, f"unsupported_term:{term}"
     return True, "ok"
+
+
+def _kannada_loops(text: str) -> bool:
+    tokens = re.findall(r"[\u0C80-\u0CFF]+", text or "")
+    if len(tokens) < 8:
+        return False
+    window = " ".join(tokens[:12])
+    rest = " ".join(tokens[4:])
+    phrase = " ".join(tokens[:4])
+    return bool(phrase) and rest.count(phrase) >= 2 and len(window) > 0

@@ -70,9 +70,14 @@ def _public_sources(result: dict) -> list[dict]:
     for item in result.get("sources") or []:
         sources.append(
             {
-                "textbook_page_number": item.get("textbook_page_number"),
+                "textbook_page_number": item.get("textbook_page_number") or item.get("printed_page_number"),
+                "printed_page_number": item.get("printed_page_number") or item.get("textbook_page_number"),
                 "pdf_page_number": item.get("pdf_page_number"),
                 "chunk_id": item.get("chunk_id"),
+                "citation_label": item.get("citation_label"),
+                "authority": item.get("authority"),
+                "source_type": item.get("source_type"),
+                "document_name": item.get("document_name"),
             }
         )
     return sources
@@ -99,6 +104,7 @@ def query(body: QueryRequest, x_internal_secret: str | None = Header(default=Non
         "grounded": bool(result.get("grounded")),
         "sources": _public_sources(result),
         "intent": result.get("intent"),
+        "mode": result.get("mode"),
     }
 
 
@@ -116,9 +122,15 @@ def econtent(body: EcontentRequest, x_internal_secret: str | None = Header(defau
         "grounded": bool(result.get("grounded")),
         "content": result.get("content"),
         "sources": [
-            {"textbook_page_number": item.get("textbook_page_number")}
+            {
+                "textbook_page_number": item.get("textbook_page_number") or item.get("printed_page_number"),
+                "printed_page_number": item.get("printed_page_number") or item.get("textbook_page_number"),
+                "citation_label": item.get("citation_label"),
+                "authority": item.get("authority"),
+                "source_type": item.get("source_type"),
+            }
             for item in result.get("sources") or []
-            if item.get("textbook_page_number") is not None
+            if item.get("textbook_page_number") is not None or item.get("printed_page_number") is not None
         ],
         "message": None if result.get("grounded") else result.get("answer"),
     }

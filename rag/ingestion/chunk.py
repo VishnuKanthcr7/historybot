@@ -18,19 +18,24 @@ from .config import (
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9I•])")
 _HEADING_HINTS = (
     "in this chapter you learn",
+    "we will learn about the following",
     "do you know this?",
     "exercises",
     "activities",
     "project work",
     "fill in the blanks",
     "answer the following",
+    "let's explore",
+    "don't miss out",
+    "think about it",
+    "questions and activities",
 )
 
 
 def chunk_pages(pages: list[dict]) -> list[dict]:
     chunks: list[dict] = []
     for page in pages:
-        page_chunks = _chunk_page(page["text"], page["pdf_page_number"], page["textbook_page_number"])
+        page_chunks = _chunk_page(page)
         chunks.extend(page_chunks)
     return chunks
 
@@ -44,14 +49,20 @@ def _is_heading(line: str) -> bool:
         return True
     if stripped.isupper() and 8 <= len(stripped) <= 80:
         return True
-    if re.match(r"^(CHAPTER|Rule of |Babar|Humayun|Akbar|Jahangir|Shahjahan|Aurangzeb|Shivaji|Maratha|Peshwa|Bajirao|Madhav Rao)", stripped):
+    if re.match(
+        r"^(CHAPTER|Rule of |Babar|Babur|Humayun|Akbar|Jahangir|Shahjahan|Shah Jahan|Aurangzeb|Shivaji|Maratha|Peshwa|Bajirao|Madhav Rao|Ahom|Sher Shah|Sukaphaa|Lachit)",
+        stripped,
+    ):
         return True
     if re.match(r"^[IVX]+\.\s", stripped):
         return True
     return False
 
 
-def _chunk_page(text: str, pdf_page: int, textbook_page: int) -> list[dict]:
+def _chunk_page(page: dict) -> list[dict]:
+    text = page["text"]
+    pdf_page = page["pdf_page_number"]
+    textbook_page = page["textbook_page_number"]
     sentences = _sentences_with_headings(text)
     packed = _pack_sentences(sentences)
     out = []
@@ -68,22 +79,34 @@ def _chunk_page(text: str, pdf_page: int, textbook_page: int) -> list[dict]:
         chunk_text = body if not overlap else f"{overlap} {body}".strip()
         if len(chunk_text) > CHUNK_MAX_CHARS + 120:
             chunk_text = body
-        chunk_id = f"kseeb_c9_ss2_ch5_pdf{pdf_page}_tb{textbook_page}_{index:02d}"
+        prefix = page.get("id_prefix") or "kseeb_c9_ss2_ch5"
+        chunk_id = f"{prefix}_pdf{pdf_page}_tb{textbook_page}_{index:02d}"
         section = _section_from_text(body)
-        out.append(
-            {
-                "chunk_id": chunk_id,
-                "document_name": DOCUMENT_NAME,
-                "chapter": CHAPTER,
-                "section": section,
-                "source_file": SOURCE_FILE,
-                "ingest_version": INGEST_VERSION,
-                "pdf_page_number": pdf_page,
-                "textbook_page_number": textbook_page,
-                "text": chunk_text,
-                "char_count": len(chunk_text),
-            }
-        )
+        record = {
+            "chunk_id": chunk_id,
+            "document_name": page.get("document_name") or DOCUMENT_NAME,
+            "chapter": page.get("chapter") or CHAPTER,
+            "section": section,
+            "source_file": page.get("source_file") or SOURCE_FILE,
+            "ingest_version": page.get("ingest_version", INGEST_VERSION),
+            "pdf_page_number": pdf_page,
+            "textbook_page_number": textbook_page,
+            "printed_page_number": page.get("printed_page_number", textbook_page),
+            "text": chunk_text,
+            "char_count": len(chunk_text),
+        }
+        for key in (
+            "source_id",
+            "source_type",
+            "authority",
+            "language",
+            "publisher",
+            "topic",
+            "citation_label",
+        ):
+            if page.get(key) is not None:
+                record[key] = page[key]
+        out.append(record)
         prev_text = body
     return out
 

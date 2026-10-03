@@ -6,6 +6,7 @@ import { requireOwnedConversation, requireSession } from "../middleware/access.j
 import { recordEvent } from "../services/analytics.js";
 import { queryRag } from "../services/ragClient.js";
 import { findVerifiedImages, publicImage } from "../services/images.js";
+import { publicSources } from "../utils/sources.js";
 import { config } from "../config/env.js";
 
 const createSchema = z.object({
@@ -152,9 +153,7 @@ export async function postMessage(req, res, next) {
     });
 
     const assistantId = newId();
-    const publicSources = (rag.sources || [])
-      .filter((item) => item && item.textbook_page_number != null)
-      .map((item) => ({ textbook_page_number: item.textbook_page_number }));
+    const publicSourceList = publicSources(rag.sources);
     const chunkIds = (rag.sources || []).map((item) => item.chunk_id).filter(Boolean);
 
     await pool.query(
@@ -166,7 +165,7 @@ export async function postMessage(req, res, next) {
         conversation.id,
         rag.answer,
         rag.language,
-        JSON.stringify(publicSources),
+        JSON.stringify(publicSourceList),
         JSON.stringify(chunkIds),
         rag.grounded ? 1 : 0,
       ]
@@ -191,7 +190,7 @@ export async function postMessage(req, res, next) {
         content: rag.answer,
         language: rag.language,
         grounded: rag.grounded,
-        sources: publicSources,
+        sources: publicSourceList,
         images: imageRows.map(publicImage),
         created_at: utcNow(),
       },

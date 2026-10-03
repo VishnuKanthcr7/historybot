@@ -44,7 +44,10 @@ export const LABELS = {
     exam: "Exam-oriented questions",
     revision: "Revision",
     mcq: "Multiple-choice questions",
-    figure: "Textbook figure",
+    class9Textbook: "What the Class 9 textbook says",
+    additionalDetail: "Additional school-book detail",
+    mainEvents: "Main events",
+    places: "Important places",
   },
   kn: {
     brand: "HistoryBot",
@@ -92,22 +95,38 @@ export const LABELS = {
     revision: "ಪುನರಾವರ್ತನೆ",
     mcq: "ಬಹು ಆಯ್ಕೆಯ ಪ್ರಶ್ನೆಗಳು",
     figure: "ಪಠ್ಯಪುಸ್ತಕದ ಚಿತ್ರ",
+    class9Textbook: "9ನೇ ತರಗತಿ ಪಠ್ಯಪುಸ್ತಕದಲ್ಲಿ ಏನಿದೆ",
+    additionalDetail: "ಹೆಚ್ಚುವರಿ ಶಾಲಾ-ಪುಸ್ತಕ ವಿವರ",
+    mainEvents: "ಮುಖ್ಯ ಘಟನೆಗಳು",
+    places: "ಮುಖ್ಯ ಸ್ಥಳಗಳು",
   },
 };
 
 export function formatSourcePages(sources, language = "en") {
-  const pages = [
-    ...new Set(
-      (sources || [])
-        .map((item) => Number(item.textbook_page_number))
-        .filter((n) => Number.isFinite(n))
-    ),
-  ].sort((a, b) => a - b);
-  const t = LABELS[language] || LABELS.en;
-  if (!pages.length) return "";
+  const groups = new Map();
+  for (const item of sources || []) {
+    const page = Number(item.printed_page_number ?? item.textbook_page_number);
+    if (!Number.isFinite(page)) continue;
+    const label =
+      item.citation_label ||
+      (item.authority === "approved_supplementary"
+        ? "Additional school-book source"
+        : language === "kn"
+          ? "9ನೇ ತರಗತಿ ಕರ್ನಾಟಕ ರಾಜ್ಯ ಪಠ್ಯಪುಸ್ತಕ 2026–27"
+          : "Class 9 Karnataka State Board 2026–27 textbook");
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(page);
+  }
+  if (!groups.size) return "";
   const joiner = language === "kn" ? " ಮತ್ತು " : " and ";
-  if (pages.length === 1) return `${t.textbookPage} ${pages[0]}`;
-  if (pages.length === 2) return `${t.textbookPages} ${pages[0]}${joiner}${pages[1]}`;
-  const head = pages.slice(0, -1).join(", ");
-  return `${t.textbookPages} ${head}${joiner}${pages[pages.length - 1]}`;
+  const parts = [];
+  for (const [label, rawPages] of groups.entries()) {
+    const pages = [...new Set(rawPages)].sort((a, b) => a - b);
+    const pageBit =
+      pages.length === 1
+        ? `page ${pages[0]}`
+        : `pages ${pages.slice(0, -1).join(", ")}${pages.length > 1 ? joiner + pages[pages.length - 1] : ""}`;
+    parts.push(`${label}, ${pageBit}`);
+  }
+  return parts.join(" · ");
 }

@@ -22,8 +22,12 @@ TOPIC_ALIASES: dict[str, tuple[str, ...]] = {
     "guerilla": ("guerilla", "guerrilla", "ಗೆರಿಲ್ಲಾ"),
     "din": ("din-e-ilahi", "din e ilahi", "dine ilahi", "din-i-ilahi", "ದೀನ್-ಇ-ಇಲಾಹಿ", "ದೀನ್"),
     "maratha": ("maratha", "ಮರಾಠ"),
+    "mughal": ("mughal", "moghul", "ಮೊಘಲ"),
     "raigad": ("raigad", "raigadh"),
     "plassey": ("plassey",),
+    "ahom": ("ahom", "sukaphaa", "lachit", "saraighat", "charaideo"),
+    "sher": ("sher shah", "farid khan", "sadak-e-azam"),
+    "mansab": ("mansab", "mansabdari", "zat ranking"),
 }
 
 STANDALONE_START = re.compile(
@@ -176,3 +180,26 @@ def classify_intent(question: str, history: list[dict] | None) -> str:
         if len((question or "").split()) <= 10:
             return "FOLLOW_UP"
     return "STANDALONE"
+
+
+DETAILED_RE = re.compile(
+    r"\b(tell me more|more detail|more details|in detail|explain fully|"
+    r"detailed explanation|everything about|more information|"
+    r"i want more|explain this topic in detail|give me more)\b",
+    re.I,
+)
+ECONTENT_RE = re.compile(
+    r"\b(learning module|e-?content|make a module|create a (learning )?module)\b",
+    re.I,
+)
+KANNADA_DETAIL_RE = re.compile(r"ವಿವರ|ಹೆಚ್ಚಿನ ಮಾಹಿತಿ")
+
+
+def classify_answer_mode(question: str) -> str:
+    """Return ECONTENT, DETAILED, or NORMAL. Casual is handled separately."""
+    text = question or ""
+    if ECONTENT_RE.search(text):
+        return "ECONTENT"
+    if DETAILED_RE.search(text) or KANNADA_DETAIL_RE.search(text):
+        return "DETAILED"
+    return "NORMAL"

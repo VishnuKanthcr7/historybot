@@ -147,13 +147,17 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
     section_order = [
         ("introduction", "Introduction"),
         ("learning_objectives", "Learning objectives"),
+        ("class9_textbook", "What the Class 9 textbook says"),
         ("easy_english", "Easy English explanation"),
         ("simple_kannada", "Simple Kannada explanation"),
         ("historical_context", "Historical context"),
+        ("detailed_explanation", "Detailed explanation"),
         ("important_people", "Important people"),
         ("important_terms", "Important terms"),
         ("timeline", "Timeline / events"),
-        ("detailed_explanation", "Detailed explanation"),
+        ("main_events", "Main events"),
+        ("additional_school_book_detail", "Additional school-book detail"),
+        ("important_places", "Important places"),
         ("key_points", "Key points"),
         ("exam_questions", "Exam-oriented questions"),
         ("revision", "Revision"),
@@ -182,18 +186,30 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
             story.append(img)
             story.append(Paragraph(_esc(caption), styles["HBMeta"]))
 
-    pages = sorted(
-        {
-            int(item.get("textbook_page_number"))
-            for item in sources
-            if item.get("textbook_page_number") is not None
-        }
-        | {int(p) for p in (content.get("textbook_source_pages") or []) if str(p).isdigit()}
-    )
-    if pages:
-        story.append(Paragraph("Textbook source pages", styles["HBH"]))
-        joined = ", ".join(str(p) for p in pages)
-        story.append(Paragraph(_esc(f"Textbook pages {joined}"), styles["HBBody"]))
+    source_lines = []
+    for item in sources or []:
+        label = item.get("citation_label") or (
+            "Additional school-book source"
+            if item.get("authority") == "approved_supplementary"
+            else "Class 9 Karnataka State Board 2026–27 textbook"
+        )
+        page = item.get("printed_page_number") or item.get("textbook_page_number")
+        if page is None:
+            continue
+        if "Additional" in str(label):
+            source_lines.append(f"{label}, page {page}")
+        else:
+            source_lines.append(f"Source: {label}, page {page}")
+    extra_pages = [int(p) for p in (content.get("textbook_source_pages") or []) if str(p).isdigit()]
+    if extra_pages and not source_lines:
+        source_lines.append(
+            "Source: Class 9 Karnataka State Board 2026–27 textbook, pages "
+            + ", ".join(str(p) for p in sorted(set(extra_pages)))
+        )
+    if source_lines:
+        story.append(Paragraph("Sources", styles["HBH"]))
+        for line in source_lines:
+            story.append(Paragraph(_esc(line), styles["HBBody"]))
 
     doc = SimpleDocTemplate(
         buffer,

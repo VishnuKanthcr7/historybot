@@ -1,4 +1,4 @@
-"""Grounded structured E-content from textbook evidence only."""
+"""Grounded structured E-content. Primary textbook first, labelled supplements second."""
 
 from __future__ import annotations
 
@@ -13,23 +13,27 @@ from rag.llm.client import complete
 from rag.llm.config import RAG_TOP_K
 from rag.prompts.econtent import ECONTENT_SYSTEM
 from rag.prompts.tutor import refusal_text
-from rag.vectorstore.retrieve import retrieve
+from rag.vectorstore.retrieve import retrieve_primary, retrieve_supplementary
 
 ALLOWED_KEYS = (
     "title",
     "introduction",
     "learning_objectives",
+    "class9_textbook",
     "easy_english",
     "simple_kannada",
     "historical_context",
+    "detailed_explanation",
     "important_people",
     "important_terms",
     "timeline",
-    "detailed_explanation",
+    "main_events",
+    "additional_school_book_detail",
+    "important_places",
     "key_points",
     "exam_questions",
-    "revision",
     "mcqs",
+    "revision",
 )
 
 ECONTENT_TOP_K = max(RAG_TOP_K, 8)
@@ -42,18 +46,27 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
         return _refused(language, topic, [], [])
     needs_rewrite = language == "kn" or looks_kannada(topic)
     retrieval_query = rewrite_for_retrieval(topic, [], force=needs_rewrite)
-    hits = retrieve(retrieval_query, top_k=ECONTENT_TOP_K)
-    selected = select_evidence(topic, retrieval_query, hits, max_keep=6)
-    if not evidence_is_sufficient(selected) or not evidence_matches_topic(topic, retrieval_query, selected):
-        return _refused(language, retrieval_query, hits, selected)
+    primary_hits = retrieve_primary(retrieval_query, top_k=ECONTENT_TOP_K, language=language)
+    primary_selected = select_evidence(topic, retrieval_query, primary_hits, max_keep=6)
+    if not evidence_is_sufficient(primary_selected) or not evidence_matches_topic(topic, retrieval_query, primary_selected):
+        return _refused(language, retrieval_query, primary_hits, primary_selected)
 
-    raw = _ask(topic, language, selected)
+    supp_hits = retrieve_supplementary(retrieval_query, top_k=ECONTENT_TOP_K)
+    supp_selected = select_evidence(topic, retrieval_query, supp_hits, max_keep=4)
+    selected = list(primary_selected) + list(supp_selected)
+
+    raw = _ask(topic, language, primary_selected, supp_selected)
     content = _parse_content(raw)
-    if not content.get("title") and not content.get("introduction"):
-        return _refused(language, retrieval_query, hits, selected)
+    if not content.get("title") and not content.get("introduction") and not content.get("class9_textbook"):
+        return _refused(language, retrieval_query, primary_hits, primary_selected)
     sources = _sources(selected)
     content["textbook_source_pages"] = sorted(
-        {int(item["textbook_page_number"]) for item in sources if item.get("textbook_page_number") is not None}
+        {
+            int(item["printed_page_number"] or item["textbook_page_number"])
+            for item in sources
+            if item.get("authority") != "approved_supplementary"
+            and (item.get("printed_page_number") is not None or item.get("textbook_page_number") is not None)
+        }
     )
     return {
         "answer": refusal_text(language) if not content else "",
@@ -63,8 +76,9 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
         "content": content,
         "sources": sources,
         "retrieval_query": retrieval_query,
-        "retrieved": _public_hits(hits),
+        "retrieved": _public_hits(primary_hits + supp_hits),
         "selected_chunk_ids": [item["chunk_id"] for item in selected],
+        "used_supplementary": bool(supp_selected),
     }
 
 
@@ -75,18 +89,23 @@ def _refused(language: str, retrieval_query: str, hits: list, selected: list) ->
     return base
 
 
-def _ask(topic: str, language: str, evidence: list[dict]) -> str:
-    blocks = []
-    for item in evidence:
-        blocks.append(
-            f"[textbook_page={item['textbook_page_number']}]\n{item.get('text') or ''}"
-        )
+def _ask(topic: str, language: str, primary: list[dict], supplement: list[dict]) -> str:
+    def pack(items, label):
+        return "\n".join(
+            f"[{label}; printed_page={item.get('printed_page_number') or item.get('textbook_page_number')}]\n{item.get('text') or ''}"
+            for item in items
+        ) or f"[{label}] (none)"
+
     user = (
         f"Output language preference: {language}\n"
-        f"Student topic: {topic}\n\n"
-        f"Textbook evidence:\n{chr(10).join(blocks)}\n\n"
-        "Return JSON only. Omit any section that the evidence does not support. "
-        "Do not invent dates, names, or events."
+        f"Student topic: {topic}\n"
+        "Build a 40-minute Class 9 learning module.\n"
+        "Put Karnataka Class 9 2026–27 facts in class9_textbook and the main sections.\n"
+        "Put NCERT extra facts only in additional_school_book_detail.\n"
+        "Omit any section the evidence does not support. Do not invent dates, names, or events.\n\n"
+        f"PRIMARY evidence:\n{pack(primary, 'PRIMARY')}\n\n"
+        f"SUPPLEMENTARY evidence:\n{pack(supplement, 'SUPPLEMENTARY')}\n\n"
+        "Return JSON only."
     )
     return complete(
         [
@@ -94,8 +113,8 @@ def _ask(topic: str, language: str, evidence: list[dict]) -> str:
             {"role": "user", "content": user},
         ],
         temperature=0.1,
-        max_tokens=1800,
-        timeout=240,
+        max_tokens=2200,
+        timeout=300,
     )
 
 

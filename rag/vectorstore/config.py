@@ -7,6 +7,8 @@ CHROMA_PATH = PROJECT_ROOT / "data" / "chroma"
 CHUNKS_PATH = PROJECT_ROOT / "data" / "extracted" / "chapter5_chunks.json"
 
 COLLECTION_NAME = "historybot_class9_ss"
+COLLECTION_NAME_V2 = "historybot_class9_ss_v2"
+ACTIVE_COLLECTION = COLLECTION_NAME_V2
 EMBEDDING_MODEL = "nomic-embed-text"
 OLLAMA_HOST = "http://127.0.0.1:11434"
 CHAT_TOP_K = 5

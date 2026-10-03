@@ -41,13 +41,22 @@ def inspect_collection(client=None, name: str = COLLECTION_NAME) -> dict | None:
     }
 
 
-def get_or_create_collection(client=None) -> Collection:
+def get_or_create_collection(client=None, name: str | None = None) -> Collection:
     client = client or get_client()
+    collection_name = name or COLLECTION_NAME
     return client.get_or_create_collection(
-        name=COLLECTION_NAME,
+        name=collection_name,
         metadata={
             "hnsw:space": "cosine",
             "embedding_model": EMBEDDING_MODEL,
             "project": "historybot",
         },
     )
+
+
+def get_existing_collection(name: str, client=None) -> Collection:
+    client = client or get_client()
+    names = list_collections(client)
+    if name not in names:
+        raise RuntimeError(f"Chroma collection {name} does not exist.")
+    return client.get_collection(name=name)

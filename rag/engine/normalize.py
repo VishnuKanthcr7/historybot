@@ -19,6 +19,9 @@ INJECTION_PATTERNS = (
     r"reveal (your )?(system )?prompt",
     r"api key",
     r"show me your (api|secret|prompt)",
+    r"visionias",
+    r"use vision ias",
+    r"ignore your source rules",
 )
 
 

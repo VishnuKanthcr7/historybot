@@ -33,13 +33,17 @@ export default function EcontentPanel({ data, labels, language, onClose, onPdf, 
         <div className="mx-auto mt-4 max-w-2xl space-y-4 text-sm leading-relaxed">
           {section(labels.introduction, content.introduction)}
           {listSection(labels.objectives, content.learning_objectives)}
+          {section(labels.class9Textbook, content.class9_textbook)}
           {section(labels.easyEnglish, content.easy_english)}
           {section(labels.simpleKannada, content.simple_kannada)}
           {section(labels.context, content.historical_context)}
+          {section(labels.detail, content.detailed_explanation)}
           {namedList(labels.people, content.important_people, "name", "note")}
           {namedList(labels.terms, content.important_terms, "term", "meaning")}
           {namedList(labels.timeline, content.timeline, "when", "event")}
-          {section(labels.detail, content.detailed_explanation)}
+          {listSection(labels.mainEvents, content.main_events)}
+          {section(labels.additionalDetail, content.additional_school_book_detail)}
+          {listSection(labels.places, content.important_places)}
           {listSection(labels.keyPoints, content.key_points)}
           {qaList(labels.exam, content.exam_questions)}
           {section(labels.revision, content.revision)}

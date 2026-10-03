@@ -6,6 +6,7 @@ import { requireOwnedConversation, requireSession } from "../middleware/access.j
 import { recordEvent } from "../services/analytics.js";
 import { generateEcontent, renderEcontentPdf } from "../services/ragClient.js";
 import { findVerifiedImages, publicImage } from "../services/images.js";
+import { publicSources } from "../utils/sources.js";
 
 const createSchema = z.object({
   session_id: z.string().uuid(),
@@ -40,9 +41,7 @@ export async function createEcontent(req, res, next) {
       });
     }
     const id = newId();
-    const publicSources = (rag.sources || [])
-      .filter((item) => item && item.textbook_page_number != null)
-      .map((item) => ({ textbook_page_number: item.textbook_page_number }));
+    const publicSourceList = publicSources(rag.sources);
     const imageRows = await findVerifiedImages(`${body.topic} ${rag.title || ""}`);
     await pool.query(
       `INSERT INTO econtent_documents
@@ -59,7 +58,7 @@ export async function createEcontent(req, res, next) {
           content: rag.content,
           images: imageRows.map(publicImage),
         }),
-        JSON.stringify(publicSources),
+        JSON.stringify(publicSourceList),
       ]
     );
     await recordEvent({
@@ -75,7 +74,7 @@ export async function createEcontent(req, res, next) {
       title: rag.title,
       language,
       content: rag.content,
-      sources: publicSources,
+      sources: publicSourceList,
       images: imageRows.map(publicImage),
       created_at: utcNow(),
     });
