@@ -11,11 +11,14 @@ export default function MessageList({ messages, loading, language }) {
   }, [messages, loading]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-10">
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-8">
       {messages.length === 0 && !loading ? (
-        <p className="mx-auto max-w-2xl text-stone-600">{t.emptyChat}</p>
+        <div className="mx-auto max-w-2xl border border-rule bg-cream p-5">
+          <p className="font-serif text-lg text-navy">{t.emptyChat}</p>
+          <p className="mt-2 text-sm text-stone-600">{t.how2}</p>
+        </div>
       ) : null}
-      <ol className="mx-auto max-w-2xl space-y-5">
+      <ol className="mx-auto max-w-2xl space-y-4">
         {messages.map((msg) => (
           <li key={msg.id}>
             <MessageBubble message={msg} language={language} />

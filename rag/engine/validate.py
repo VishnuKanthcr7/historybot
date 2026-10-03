@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from rag.engine.normalize import looks_kannada
 from rag.prompts.tutor import refusal_text
 
 LEAK_MARKERS = (
@@ -45,6 +46,8 @@ def validate_answer(answer: str, language: str, evidence: list[dict], grounded_e
         return True, "ok_ungrounded"
     if is_refusal(text, language):
         return False, "model_refused_despite_evidence"
+    if language == "kn" and not looks_kannada(text):
+        return False, "kannada_script_missing"
     allowed_pages = {int(item["textbook_page_number"]) for item in evidence if item.get("textbook_page_number") is not None}
     mentioned = extract_mentioned_pages(text)
     if mentioned and not mentioned.issubset(allowed_pages):

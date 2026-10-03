@@ -5,25 +5,17 @@ const SESSION_KEY = "historybot_session_id";
 const LANG_KEY = "historybot_language";
 const CURRENT_KEY = "historybot_current_conversation_id";
 
-function convKey(sessionId) {
-  return `historybot_conversations_${sessionId}`;
-}
-
-function isUntitled(title) {
-  const value = String(title || "").trim();
-  return !value || value === "New Chat" || value === "New chat" || value === "ಹೊಸ ಚಾಟ್";
-}
-
-function readJson(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 const AppContext = createContext(null);
+
+function mapList(payload) {
+  const rows = payload?.conversations || [];
+  return rows.map((row) => ({
+    id: row.conversation_id,
+    title: row.title,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }));
+}
 
 export function AppProvider({ children }) {
   const [sessionId, setSessionId] = useState(() => localStorage.getItem(SESSION_KEY) || "");
@@ -34,8 +26,17 @@ export function AppProvider({ children }) {
   const [currentId, setCurrentId] = useState(() => localStorage.getItem(CURRENT_KEY) || "");
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [econtentLoading, setEcontentLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [econtent, setEcontent] = useState(null);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
+
+  const refreshList = useCallback(async (sid) => {
+    if (!sid) return;
+    const payload = await api.listConversations(sid);
+    setConversations(mapList(payload));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +50,7 @@ export function AppProvider({ children }) {
         }
         if (cancelled) return;
         setSessionId(sid);
-        setConversations(readJson(convKey(sid), []));
+        await refreshList(sid);
       } catch (err) {
         if (!cancelled) setError(err.message || "Could not start a session.");
       } finally {
@@ -59,12 +60,7 @@ export function AppProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  const persistConversations = useCallback((sid, list) => {
-    setConversations(list);
-    localStorage.setItem(convKey(sid), JSON.stringify(list));
-  }, []);
+  }, [refreshList]);
 
   const setLanguage = useCallback((next) => {
     const value = next === "kn" ? "kn" : "en";
@@ -76,6 +72,7 @@ export function AppProvider({ children }) {
     async (conversationId, sid = sessionId) => {
       if (!sid || !conversationId) return;
       setError("");
+      setEcontent(null);
       const data = await api.getConversation(conversationId, sid);
       setCurrentId(conversationId);
       localStorage.setItem(CURRENT_KEY, conversationId);
@@ -88,18 +85,15 @@ export function AppProvider({ children }) {
     async (title) => {
       if (!sessionId) throw new Error("No session");
       const created = await api.createConversation(sessionId, title);
-      const entry = {
-        id: created.conversation_id,
-        title: created.title || title || "New chat",
-      };
-      persistConversations(sessionId, [entry, ...conversations.filter((c) => c.id !== entry.id)]);
-      setCurrentId(entry.id);
-      localStorage.setItem(CURRENT_KEY, entry.id);
+      setCurrentId(created.conversation_id);
+      localStorage.setItem(CURRENT_KEY, created.conversation_id);
       setMessages([]);
+      setEcontent(null);
       setError("");
-      return entry.id;
+      await refreshList(sessionId);
+      return created.conversation_id;
     },
-    [sessionId, conversations, persistConversations]
+    [sessionId, refreshList]
   );
 
   const send = useCallback(
@@ -114,6 +108,7 @@ export function AppProvider({ children }) {
         content: question,
         language,
         sources: [],
+        images: [],
         grounded: null,
       };
       setMessages((prev) => [...prev, userMsg]);
@@ -121,18 +116,10 @@ export function AppProvider({ children }) {
         let conversationId = currentId;
         if (!conversationId) {
           conversationId = await newChat(question.slice(0, 80));
-        } else {
-          persistConversations(
-            sessionId,
-            conversations.map((c) =>
-              c.id === conversationId && isUntitled(c.title)
-                ? { ...c, title: question.slice(0, 80) }
-                : c
-            )
-          );
         }
         const result = await api.sendMessage(conversationId, sessionId, question, language);
         setMessages((prev) => [...prev, result.message]);
+        await refreshList(sessionId);
       } catch (err) {
         setError(err.message || "Request failed.");
         setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
@@ -140,8 +127,50 @@ export function AppProvider({ children }) {
         setLoading(false);
       }
     },
-    [currentId, language, loading, newChat, sessionId, conversations, persistConversations]
+    [currentId, language, loading, newChat, sessionId, refreshList]
   );
+
+  const requestEcontent = useCallback(
+    async (topic) => {
+      if (!sessionId || econtentLoading) return;
+      const subject = String(topic || "").trim();
+      if (!subject) return;
+      setError("");
+      setEcontentLoading(true);
+      try {
+        const result = await api.createEcontent(sessionId, currentId, subject, language);
+        setEcontent(result);
+        if (!result.grounded) {
+          setError(result.message || "This topic is not available in the textbook.");
+        }
+      } catch (err) {
+        setError(err.message || "Request failed.");
+      } finally {
+        setEcontentLoading(false);
+      }
+    },
+    [sessionId, currentId, language, econtentLoading]
+  );
+
+  const downloadPdf = useCallback(async () => {
+    if (!econtent?.id || !sessionId || pdfLoading) return;
+    setPdfLoading(true);
+    try {
+      const blob = await api.downloadEcontentPdf(econtent.id, sessionId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${(econtent.title || "historybot").slice(0, 40)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message || "PDF download failed.");
+    } finally {
+      setPdfLoading(false);
+    }
+  }, [econtent, sessionId, pdfLoading]);
 
   const value = useMemo(
     () => ({
@@ -152,12 +181,18 @@ export function AppProvider({ children }) {
       currentId,
       messages,
       loading,
+      econtentLoading,
+      pdfLoading,
+      econtent,
       error,
       setError,
       ready,
       openConversation,
       newChat,
       send,
+      requestEcontent,
+      downloadPdf,
+      setEcontent,
     }),
     [
       sessionId,
@@ -167,11 +202,16 @@ export function AppProvider({ children }) {
       currentId,
       messages,
       loading,
+      econtentLoading,
+      pdfLoading,
+      econtent,
       error,
       ready,
       openConversation,
       newChat,
       send,
+      requestEcontent,
+      downloadPdf,
     ]
   );
 

@@ -1,4 +1,4 @@
-# HistoryBot frontend (Phase 8)
+# HistoryBot frontend
 
 Student UI is React + Vite + Tailwind. It talks **only** to the public Express API.
 
@@ -17,6 +17,13 @@ The browser must not call `:8000`, MySQL, Chroma, or Ollama.
 
 Open `http://localhost:5173` (must be **localhost**, not `127.0.0.1`, so CORS matches `CORS_ORIGIN`).
 
+Optional image seed after extracting textbook crops:
+
+```text
+python scripts/extract_chapter5_images.py
+node backend/scripts/seed-verified-images.mjs
+```
+
 ## Environment
 
 `frontend/.env` (gitignored) and `frontend/.env.example`:
@@ -31,25 +38,29 @@ No secrets in `VITE_` variables.
 
 | Path | Page |
 |---|---|
-| `/` | Home — research identity + start learning |
-| `/chat` | Academic chat |
+| `/` | Home — hero, ask box, how it works, research context |
+| `/chat` | Chat, history sidebar, optional learning module / PDF |
 
 `/chat?q=...` sends that question once after an anonymous session exists.
 
 ## Anonymous session
 
-On first load, `POST /api/v1/sessions`. `session_id` is stored in `localStorage`. Conversation **metadata** (id + title) is stored per session in localStorage because Phase 7 has no list-conversations endpoint. Opening a chat uses `GET /api/v1/conversations/:id?session_id=`.
+On first load, `POST /api/v1/sessions`. `session_id` is stored in `localStorage`. Conversation list comes from `GET /api/v1/conversations?session_id=`. Opening a chat uses `GET /api/v1/conversations/:id?session_id=`.
+
+Clearing site data forgets the session id; server rows remain (expected).
 
 ## Language
 
-`en` / `kn` sent on each `POST .../messages`. Major UI labels are translated. The whole site is not a complete localization.
+`en` / `kn` sent on each message and e-content request. Major UI labels are translated. The whole site is not a complete localization.
 
-## Sources
+## Sources and figures
 
-Uses `message.sources[].textbook_page_number` only. No chunk IDs.
+Uses `message.sources[].textbook_page_number` only. Verified textbook crops may appear when the topic matches. No chunk IDs, paths, or internet image search.
 
-Reload restores `historybot_current_conversation_id` via `GET /conversations/:id`. Untitled sidebar rows (`New Chat` / `ಹೊಸ ಚಾಟ್`) are renamed from the first question.
+## E-content / PDF
+
+`Make a learning module` calls `POST /econtent`. `Download PDF` posts to `/econtent/:id/pdf` and saves a blob. Duplicate clicks are blocked while a request is in flight.
 
 ## Limitation
 
-Not production-ready. Chat history list is local to the browser. Kannada answer quality is still the Phase 6 model. Asking a new topic in a thread that already has strong context can still retrieve the previous topic (Phase 6 RAG, not a frontend fallback).
+Not production-ready. Kannada generation quality follows local llama3. Topic switching is heuristic, not perfect.

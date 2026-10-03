@@ -37,7 +37,7 @@ Structured E-content JSON (PDF is generated later from this; **no PDF BLOB**). `
 
 ### verified_images
 
-Image **metadata only**. `verification_status`: `verified` | `unverified` | `rejected`. Students must only see `verified` rows in later phases.
+Image **metadata plus optional `textbook_page_number` and `alt_text`**. `verification_status`: `verified` | `unverified` | `rejected`. Students must only see `verified` rows.
 
 ## Relationships
 

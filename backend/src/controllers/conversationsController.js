@@ -5,6 +5,7 @@ import { newId, utcNow } from "../utils/ids.js";
 import { requireOwnedConversation, requireSession } from "../middleware/access.js";
 import { recordEvent } from "../services/analytics.js";
 import { queryRag } from "../services/ragClient.js";
+import { findVerifiedImages, publicImage } from "../services/images.js";
 import { config } from "../config/env.js";
 
 const createSchema = z.object({
@@ -43,6 +44,33 @@ export async function createConversation(req, res, next) {
   }
 }
 
+export async function listConversations(req, res, next) {
+  try {
+    const sessionId = req.query.session_id;
+    if (!sessionId) {
+      throw new AppError(400, "VALIDATION_ERROR", "session_id is required.");
+    }
+    await requireSession(sessionId);
+    const [rows] = await pool.query(
+      `SELECT id, title, created_at, updated_at
+       FROM conversations
+       WHERE session_id = ?
+       ORDER BY updated_at DESC`,
+      [sessionId]
+    );
+    res.json({
+      conversations: rows.map((row) => ({
+        conversation_id: row.id,
+        title: row.title,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getConversation(req, res, next) {
   try {
     const sessionId = req.query.session_id || req.get("x-session-id");
@@ -55,19 +83,29 @@ export async function getConversation(req, res, next) {
        FROM messages WHERE conversation_id = ? ORDER BY created_at ASC`,
       [conversation.id]
     );
-    res.json({
-      conversation_id: conversation.id,
-      title: conversation.title,
-      created_at: conversation.created_at,
-      messages: messages.map((row) => ({
+    const mapped = [];
+    for (const row of messages) {
+      const sources = parseSources(row.source_pages);
+      let images = [];
+      if (row.role === "assistant" && row.retrieval_ok) {
+        images = (await findVerifiedImages(row.content)).map(publicImage);
+      }
+      mapped.push({
         id: row.id,
         role: row.role,
         content: row.content,
         language: row.language,
         grounded: row.retrieval_ok === null ? null : Boolean(row.retrieval_ok),
-        sources: parseSources(row.source_pages),
+        sources,
+        images,
         created_at: row.created_at,
-      })),
+      });
+    }
+    res.json({
+      conversation_id: conversation.id,
+      title: conversation.title,
+      created_at: conversation.created_at,
+      messages: mapped,
     });
   } catch (err) {
     next(err);
@@ -101,6 +139,12 @@ export async function postMessage(req, res, next) {
     });
 
     const history = await loadHistory(conversation.id, userId);
+    if (!conversation.title || /^new chat$/i.test(conversation.title) || conversation.title === "ಹೊಸ ಚಾಟ್") {
+      await pool.query("UPDATE conversations SET title = ?, updated_at = UTC_TIMESTAMP(3) WHERE id = ?", [
+        body.message.slice(0, 80),
+        conversation.id,
+      ]);
+    }
     const rag = await queryRag({
       question: body.message,
       language,
@@ -136,6 +180,10 @@ export async function postMessage(req, res, next) {
       metadata: { grounded: rag.grounded },
     });
 
+    const imageRows = rag.grounded
+      ? await findVerifiedImages(`${body.message} ${rag.answer || ""}`)
+      : [];
+
     res.status(201).json({
       message: {
         id: assistantId,
@@ -144,6 +192,7 @@ export async function postMessage(req, res, next) {
         language: rag.language,
         grounded: rag.grounded,
         sources: publicSources,
+        images: imageRows.map(publicImage),
         created_at: utcNow(),
       },
     });

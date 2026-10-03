@@ -8,8 +8,8 @@
 - Phase 5 — RAG / Chroma embeddings — COMPLETE
 - Phase 6 — AI Engine — COMPLETE
 - Phase 7 — Backend APIs — COMPLETE
-- Phase 8 — Frontend — COMPLETE (awaiting review)
-- Phase 9 — Chat + History
+- Phase 8 — Frontend — COMPLETE
+- Phase 9 — Chat + History / core product — COMPLETE (awaiting review)
 - Phase 10 — E-content
 - Phase 11 — PDF
 - Phase 12 — Images

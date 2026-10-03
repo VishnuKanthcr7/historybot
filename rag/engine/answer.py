@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rag.engine.classify import classify_intent, last_user_question
 from rag.engine.evidence import evidence_is_sufficient, select_evidence
 from rag.engine.normalize import (
     looks_kannada,
@@ -25,14 +26,21 @@ def answer_question(
     language = "kn" if language == "kn" else "en"
     question = normalize_question(question)
     history = trim_history(history)
-    needs_rewrite = bool(history) or language == "kn" or looks_kannada(question)
-    retrieval_query = rewrite_for_retrieval(question, history, force=needs_rewrite)
+    intent = classify_intent(question, history)
+    rewrite_history = []
+    if intent == "FOLLOW_UP":
+        previous = last_user_question(history)
+        if previous:
+            rewrite_history = [{"role": "user", "content": previous}]
+    kannada_input = language == "kn" or looks_kannada(question)
+    needs_rewrite = bool(rewrite_history) or kannada_input
+    retrieval_query = rewrite_for_retrieval(question, rewrite_history, force=needs_rewrite)
     hits = retrieve(retrieval_query, top_k=RAG_TOP_K)
     selected = select_evidence(question, retrieval_query, hits)
     if looks_like_injection(question) and not evidence_is_sufficient(selected):
-        return _unavailable(language, retrieval_query, hits, selected)
+        return _unavailable(language, retrieval_query, hits, selected, intent=intent)
     if not evidence_is_sufficient(selected):
-        return _unavailable(language, retrieval_query, hits, selected)
+        return _unavailable(language, retrieval_query, hits, selected, intent=intent)
 
     payload = _ask_llm(question, language, selected, strict=False)
     ok, reason = validate_answer(payload["raw"], language, selected, grounded_expected=True)
@@ -40,7 +48,7 @@ def answer_question(
         payload = _ask_llm(question, language, selected, strict=True)
         ok, reason = validate_answer(payload["raw"], language, selected, grounded_expected=True)
     if not ok or is_refusal(payload["raw"], language):
-        result = _unavailable(language, retrieval_query, hits, selected)
+        result = _unavailable(language, retrieval_query, hits, selected, intent=intent)
         result["validation_reason"] = reason
         return result
 
@@ -56,6 +64,7 @@ def answer_question(
         "retrieved": _public_hits(hits),
         "selected_chunk_ids": [item["chunk_id"] for item in selected],
         "validation_reason": reason,
+        "intent": intent,
     }
 
 
@@ -72,11 +81,17 @@ def _ask_llm(question: str, language: str, evidence: list[dict], strict: bool) -
             "\nSTRICT MODE: If any part of the answer is not clearly supported by the evidence, "
             "output only the required not-available sentence."
         )
+    kannada_rule = ""
+    if language == "kn":
+        kannada_rule = (
+            "\nWrite the whole answer in simple Kannada script. "
+            "Do not answer in English. Keep names that appear in the evidence."
+        )
     user = (
         f"Language: {language}\n"
         f"Student question: {question}\n\n"
         f"Textbook evidence:\n{chr(10).join(blocks)}\n"
-        f"{extra}\n"
+        f"{extra}{kannada_rule}\n"
         "Answer using only the evidence. Do not add page numbers; the system will attach them."
     )
     raw = complete(
@@ -90,7 +105,7 @@ def _ask_llm(question: str, language: str, evidence: list[dict], strict: bool) -
     return {"raw": raw}
 
 
-def _unavailable(language: str, retrieval_query: str, hits: list[dict], selected: list[dict]) -> dict:
+def _unavailable(language: str, retrieval_query: str, hits: list[dict], selected: list[dict], intent: str | None = None) -> dict:
     return {
         "answer": refusal_text(language),
         "language": language,
@@ -100,6 +115,7 @@ def _unavailable(language: str, retrieval_query: str, hits: list[dict], selected
         "retrieved": _public_hits(hits),
         "selected_chunk_ids": [item["chunk_id"] for item in selected],
         "validation_reason": "insufficient_evidence",
+        "intent": intent,
     }
 
 

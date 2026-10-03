@@ -5,6 +5,7 @@ import { LABELS } from "../i18n/labels.js";
 import MessageList from "../components/MessageList.jsx";
 import ChatComposer from "../components/ChatComposer.jsx";
 import HistorySidebar from "../components/HistorySidebar.jsx";
+import EcontentPanel from "../components/EcontentPanel.jsx";
 
 export default function Chat() {
   const {
@@ -14,11 +15,17 @@ export default function Chat() {
     currentId,
     messages,
     loading,
+    econtentLoading,
+    pdfLoading,
+    econtent,
     error,
     ready,
     openConversation,
     newChat,
     send,
+    requestEcontent,
+    downloadPdf,
+    setEcontent,
   } = useApp();
   const t = LABELS[language];
   const [params, setParams] = useSearchParams();
@@ -54,36 +61,46 @@ export default function Chat() {
     setMenuOpen(false);
   }
 
+  const lastUser = [...messages].reverse().find((item) => item.role === "user");
+
   return (
     <div className="flex h-screen min-h-0 flex-col bg-paper text-ink">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-rule bg-cream px-4 py-3">
-        <div className="flex items-center gap-3">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-rule bg-cream px-3 py-2.5 md:px-4">
+        <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
-            className="rounded border border-rule px-3 py-1 text-sm md:hidden"
+            className="min-h-10 border border-rule px-3 text-sm md:hidden"
             aria-label={menuOpen ? t.closeMenu : t.openMenu}
             onClick={() => setMenuOpen((v) => !v)}
           >
             {t.history}
           </button>
-          <Link to="/" className="font-serif text-xl text-navy">
+          <Link to="/" className="truncate font-serif text-xl text-navy">
             HistoryBot
           </Link>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
             onClick={handleNewChat}
-            className="rounded border border-navy px-3 py-1.5 text-sm text-navy hover:bg-navy hover:text-cream"
+            className="min-h-10 border border-navy px-3 text-sm text-navy hover:bg-navy hover:text-cream"
           >
             {t.newChat}
+          </button>
+          <button
+            type="button"
+            disabled={econtentLoading || !lastUser || loading}
+            onClick={() => requestEcontent(lastUser?.content)}
+            className="min-h-10 border border-brass px-3 text-sm text-navy disabled:opacity-50"
+          >
+            {econtentLoading ? t.econtentWorking : t.makeEcontent}
           </button>
           <label htmlFor="chat-lang" className="sr-only">
             {t.language}
           </label>
           <select
             id="chat-lang"
-            className="rounded border border-rule bg-cream px-2 py-1.5 text-sm"
+            className="min-h-10 border border-rule bg-cream px-2 text-sm"
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
           >
@@ -104,11 +121,18 @@ export default function Chat() {
         />
         <section className="flex min-w-0 flex-1 flex-col">
           {error ? (
-            <p className="mx-4 mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+            <p className="mx-4 mt-3 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
               {error}
             </p>
           ) : null}
           <MessageList messages={messages} loading={loading} language={language} />
+          <EcontentPanel
+            data={econtent}
+            labels={t}
+            onClose={() => setEcontent(null)}
+            onPdf={downloadPdf}
+            pdfLoading={pdfLoading}
+          />
           <ChatComposer disabled={loading || !ready} onSend={send} labels={t} />
         </section>
       </div>

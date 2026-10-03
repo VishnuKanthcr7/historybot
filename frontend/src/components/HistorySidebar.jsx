@@ -12,12 +12,12 @@ export default function HistorySidebar({ open, conversations, currentId, onOpen,
         />
       ) : null}
       <aside
-        className={`z-30 w-64 shrink-0 border-r border-rule bg-cream p-4 md:static md:block ${
-          open ? "fixed inset-y-0 left-0" : "hidden md:block"
+        className={`z-30 flex w-64 shrink-0 flex-col border-r border-rule bg-cream p-3 md:static md:flex ${
+          open ? "fixed inset-y-0 left-0" : "hidden md:flex"
         }`}
       >
         <h2 className="text-xs font-semibold uppercase tracking-wide text-brass">{labels.history}</h2>
-        <ul className="mt-3 space-y-1 overflow-y-auto">
+        <ul className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
           {conversations.length === 0 ? (
             <li className="text-sm text-stone-500">{labels.emptyChat}</li>
           ) : (

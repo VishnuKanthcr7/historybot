@@ -68,6 +68,11 @@ export function createConversation(sessionId, title) {
   });
 }
 
+export function listConversations(sessionId) {
+  const query = new URLSearchParams({ session_id: sessionId });
+  return request(`/conversations?${query.toString()}`);
+}
+
 export function getConversation(conversationId, sessionId) {
   const query = new URLSearchParams({ session_id: sessionId });
   return request(`/conversations/${conversationId}?${query.toString()}`);
@@ -82,6 +87,49 @@ export function sendMessage(conversationId, sessionId, message, language) {
       language,
     }),
   });
+}
+
+export function createEcontent(sessionId, conversationId, topic, language) {
+  return request("/econtent", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: sessionId,
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+      topic,
+      language,
+    }),
+  });
+}
+
+export function getEcontent(econtentId, sessionId) {
+  const query = new URLSearchParams({ session_id: sessionId });
+  return request(`/econtent/${econtentId}?${query.toString()}`);
+}
+
+export async function downloadEcontentPdf(econtentId, sessionId) {
+  let response;
+  try {
+    response = await fetch(`${BASE}/econtent/${econtentId}/pdf`, {
+      method: "POST",
+      headers: {
+        Accept: "application/pdf",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  } catch {
+    throw new ApiError("NETWORK", friendlyMessage("NETWORK"), 0);
+  }
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    const code = data?.error?.code || "INTERNAL_ERROR";
+    throw new ApiError(code, friendlyMessage(code, data?.error?.message), response.status);
+  }
+  return response.blob();
+}
+
+export function imageUrl(id) {
+  return `${BASE}/images/${id}`;
 }
 
 export function checkHealth() {

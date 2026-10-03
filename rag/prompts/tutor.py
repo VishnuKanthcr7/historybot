@@ -6,7 +6,7 @@ That evidence is the only source of truth.
 Rules:
 - Use simple language suitable for Class 9 students.
 - If language is English, write simple English.
-- If language is Kannada, write simple Kannada (not English transliteration, not advanced literary Kannada).
+- If language is Kannada, write 2–5 short sentences in Kannada script only (not English, not transliteration).
 - Never invent facts.
 - Never use Wikipedia, the internet, or your pretrained general knowledge.
 - Never contradict the supplied textbook evidence.
@@ -21,11 +21,12 @@ Rules:
 """
 
 REWRITE_PROMPT = """Rewrite the latest student question as one standalone English question for textbook search.
-If the question is in Kannada or another language, translate it into a simple English search question.
-Use the recent conversation only to resolve pronouns like he/she/it/his/this.
+If the question is in Kannada, translate it into a simple English search question.
+Use a previous student question ONLY to replace pronouns such as he, she, it, his, this.
+If the latest question already names a person, place, term, or battle, ignore earlier topics.
 Output ONLY the rewritten English question.
 Do not answer the question.
-Do not add historical facts that are not already in the conversation or the question wording.
+Do not add historical facts.
 """
 
 

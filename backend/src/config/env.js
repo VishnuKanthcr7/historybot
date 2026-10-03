@@ -28,6 +28,7 @@ export const config = {
     url: (process.env.RAG_INTERNAL_URL || "http://127.0.0.1:8000").replace(/\/$/, ""),
     secret: required("INTERNAL_RAG_SECRET"),
     timeoutMs: Number(process.env.RAG_TIMEOUT_MS || 180000),
+    econtentTimeoutMs: Number(process.env.RAG_ECONTENT_TIMEOUT_MS || 300000),
   },
   rateLimit: {
     windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),

@@ -18,81 +18,106 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-paper text-ink">
       <header className="border-b border-rule bg-cream">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3">
           <Link to="/" className="font-serif text-2xl tracking-tight text-navy">
             HistoryBot
           </Link>
-          <div className="flex items-center gap-3 text-sm">
-            <label htmlFor="home-lang" className="sr-only">
-              {t.language}
-            </label>
-            <select
-              id="home-lang"
-              className="rounded border border-rule bg-cream px-2 py-1"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-            >
-              <option value="en">{t.english}</option>
-              <option value="kn">{t.kannada}</option>
-            </select>
-          </div>
+          <label htmlFor="home-lang" className="sr-only">
+            {t.language}
+          </label>
+          <select
+            id="home-lang"
+            className="min-h-10 rounded border border-rule bg-cream px-2 py-1 text-sm"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+          >
+            <option value="en">{t.english}</option>
+            <option value="kn">{t.kannada}</option>
+          </select>
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-16">
-        <p className="text-sm uppercase tracking-[0.18em] text-brass">Karnataka State Board · Class 9</p>
-        <h1 className="mt-3 font-serif text-4xl text-navy md:text-5xl">{t.brand}</h1>
-        <p className="mt-3 max-w-2xl text-lg text-navydeep">{t.tagline}</p>
-        <p className="mt-6 max-w-2xl leading-relaxed text-stone-700">
-          Ask questions from the prescribed Class 9 Karnataka State Board History textbook. HistoryBot
-          answers from the textbook only and shows the printed page number. It is not a general-purpose
-          chatbot.
-        </p>
-
-        <form onSubmit={start} className="mt-10 max-w-2xl">
-          <label htmlFor="home-ask" className="block text-sm font-medium text-navy">
-            {t.ask}
-          </label>
-          <div className="mt-2 flex flex-col gap-3 sm:flex-row">
-            <input
-              id="home-ask"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t.askPlaceholderHome}
-              className="min-h-12 flex-1 rounded border border-rule bg-cream px-4 py-3"
-            />
-            <button
-              type="submit"
-              className="min-h-12 rounded bg-navy px-6 text-sm font-semibold text-cream hover:bg-navydeep"
-            >
-              {t.start}
-            </button>
-          </div>
-        </form>
-
-        <section className="mt-16 border-t border-rule pt-10">
-          <h2 className="font-serif text-2xl text-navy">Research context</h2>
-          <div className="mt-6 grid gap-10 md:grid-cols-2">
+      <main>
+        <section className="border-b border-rule bg-cream">
+          <div className="mx-auto grid max-w-5xl gap-8 px-5 py-10 md:grid-cols-[1.2fr_0.8fr] md:items-end">
             <div>
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-brass">Research scholar</h3>
-              <p className="mt-2 font-medium">Pandurang Vajranthi</p>
-              <p className="text-sm text-stone-600">Reg. No.: PHD23EDR09</p>
-              <p className="text-sm text-stone-600">Research Scholar, VSKU Bellary</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-brass">
+                Karnataka State Board · Class 9
+              </p>
+              <h1 className="mt-2 font-serif text-4xl text-navy md:text-5xl">{t.brand}</h1>
+              <p className="mt-2 text-lg text-navydeep">{t.tagline}</p>
+              <p className="mt-4 max-w-xl leading-relaxed text-stone-700">
+                Ask questions from the prescribed Class 9 Karnataka State Board History textbook.
+                HistoryBot answers from the textbook only and cites printed page numbers.
+              </p>
             </div>
-            <div>
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-brass">Guide</h3>
-              <p className="mt-2 font-medium">Dr. Sushma N. Jogan</p>
-              <p className="text-sm text-stone-600">Assistant Professor</p>
-              <p className="text-sm text-stone-600">Department of Studies in Education, VSKU Bellary</p>
-            </div>
+            <form onSubmit={start} className="border border-rule bg-paper p-4">
+              <label htmlFor="home-ask" className="block text-sm font-medium text-navy">
+                {t.ask}
+              </label>
+              <input
+                id="home-ask"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t.askPlaceholderHome}
+                className="mt-2 min-h-12 w-full border border-rule bg-cream px-3 py-2"
+              />
+              <button
+                type="submit"
+                className="mt-3 min-h-11 w-full bg-navy px-4 text-sm font-semibold text-cream hover:bg-navydeep"
+              >
+                {t.start}
+              </button>
+            </form>
           </div>
-          <p className="mt-8 max-w-3xl text-sm leading-relaxed text-stone-700">
-            Research topic: “The Impact of Crossover Instructional Modules through Artificial Intelligence
-            on Digital Attitude, Social Engagement and Academic Achievement in Social Science at Secondary
-            Level.”
-          </p>
+        </section>
+
+        <section className="mx-auto max-w-5xl px-5 py-10">
+          <h2 className="font-serif text-2xl text-navy">{t.howTitle}</h2>
+          <ol className="mt-5 grid gap-4 md:grid-cols-3">
+            {[t.how1, t.how2, t.how3].map((item, index) => (
+              <li key={item} className="border border-rule bg-cream p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brass">
+                  {index + 1}
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-stone-700">{item}</p>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section className="border-t border-rule bg-cream">
+          <div className="mx-auto max-w-5xl px-5 py-10">
+            <h2 className="font-serif text-2xl text-navy">Research context</h2>
+            <div className="mt-6 grid gap-8 md:grid-cols-2">
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-brass">
+                  Research scholar
+                </h3>
+                <p className="mt-2 font-medium">Pandurang Vajranthi</p>
+                <p className="text-sm text-stone-600">Reg. No.: PHD23EDR09</p>
+                <p className="text-sm text-stone-600">Research Scholar, VSKU Bellary</p>
+              </div>
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-brass">Guide</h3>
+                <p className="mt-2 font-medium">Dr. Sushma N. Jogan</p>
+                <p className="text-sm text-stone-600">Assistant Professor</p>
+                <p className="text-sm text-stone-600">
+                  Department of Studies in Education, VSKU Bellary
+                </p>
+              </div>
+            </div>
+            <p className="mt-6 max-w-3xl text-sm leading-relaxed text-stone-700">
+              Research topic: “The Impact of Crossover Instructional Modules through Artificial
+              Intelligence on Digital Attitude, Social Engagement and Academic Achievement in Social
+              Science at Secondary Level.”
+            </p>
+          </div>
         </section>
       </main>
+      <footer className="border-t border-rule px-5 py-4 text-center text-xs text-stone-500">
+        HistoryBot · textbook-grounded classroom assistant · not a general internet chatbot
+      </footer>
     </div>
   );
 }

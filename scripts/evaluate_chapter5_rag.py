@@ -43,6 +43,7 @@ def compact(result: dict) -> dict:
         "retrieval_query": result.get("retrieval_query"),
         "selected_chunk_ids": result.get("selected_chunk_ids"),
         "validation_reason": result.get("validation_reason"),
+        "intent": result.get("intent"),
         "refused": result["answer"].startswith(refusal_text(result["language"]))
         or "not available in the textbook" in result["answer"].lower(),
     }
@@ -57,6 +58,7 @@ def main() -> int:
         "unsupported": [],
         "kannada": [],
         "follow_up": [],
+        "topic_switch": [],
         "injection": [],
     }
 
@@ -80,6 +82,29 @@ def main() -> int:
         {"question": "ಶಿವಾಜಿ ಯಾರು?", **kn},
     ]
     print(json.dumps({"en_grounded": en["grounded"], "en_pages": [s["textbook_page_number"] for s in en["sources"]], "kn_grounded": kn["grounded"], "kn_pages": [s["textbook_page_number"] for s in kn["sources"]], "kn_answer": kn["answer"][:400]}, ensure_ascii=False))
+
+    print("=== TOPIC SWITCH ===")
+    babar = compact(answer_question("Who was Babar?", language="en"))
+    shivaji_switch = compact(
+        answer_question(
+            "Who was Shivaji?",
+            language="en",
+            history=[
+                {"role": "user", "content": "Who was Babar?"},
+                {"role": "assistant", "content": babar["answer"]},
+            ],
+        )
+    )
+    report["topic_switch"] = [
+        {"step": "babar", **babar},
+        {"step": "shivaji_after_babar", "question": "Who was Shivaji?", **shivaji_switch},
+    ]
+    print(json.dumps({
+        "intent": shivaji_switch.get("intent"),
+        "query": shivaji_switch["retrieval_query"],
+        "pages": [s["textbook_page_number"] for s in shivaji_switch["sources"]],
+        "preview": shivaji_switch["answer"][:240],
+    }, ensure_ascii=False))
 
     print("=== FOLLOW-UP ===")
     first = compact(answer_question("Who was Shivaji?", language="en"))

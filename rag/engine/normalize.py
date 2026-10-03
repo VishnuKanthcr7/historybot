@@ -14,7 +14,11 @@ INJECTION_PATTERNS = (
     r"use wikipedia",
     r"from your (own )?knowledge",
     r"even if it isn'?t in the textbook",
+    r"outside the textbook",
     r"system prompt",
+    r"reveal (your )?(system )?prompt",
+    r"api key",
+    r"show me your (api|secret|prompt)",
 )
 
 
@@ -56,12 +60,14 @@ def rewrite_for_retrieval(question: str, history: list[dict] | None, force: bool
         return question
     lines = []
     for item in history:
-        lines.append(f"{item['role']}: {item['content']}")
-    lines.append(f"user: {question}")
+        if item["role"] == "user":
+            lines.append(f"previous student question: {item['content']}")
+    lines.append(f"latest student question: {question}")
     messages = [
         {"role": "system", "content": REWRITE_PROMPT},
         {"role": "user", "content": "\n".join(lines)},
     ]
     rewritten = complete(messages, temperature=0.0, max_tokens=80)
     rewritten = normalize_question(rewritten.splitlines()[0])
+    rewritten = re.sub(r"^(rewritten question|search query)\s*:\s*", "", rewritten, flags=re.I)
     return rewritten or question

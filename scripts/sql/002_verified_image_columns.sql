@@ -1,0 +1,4 @@
+-- Phase 9: optional columns textbook_page_number and alt_text on verified_images.
+-- Prefer: node backend/scripts/seed-verified-images.mjs
+-- That script adds columns only if missing and seeds Chapter 5 textbook crops.
+-- Do not DROP tables. Do not run this file if columns already exist.

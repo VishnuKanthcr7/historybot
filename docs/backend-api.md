@@ -31,8 +31,13 @@ Requires `.env` with `MYSQL_*` and `INTERNAL_RAG_SECRET` (never commit `.env`).
 | GET | `/api/v1/health` | API + MySQL ping |
 | POST | `/api/v1/sessions` | Anonymous session UUID |
 | POST | `/api/v1/conversations` | `{ session_id, title? }` |
+| GET | `/api/v1/conversations?session_id=` | Conversation list for **this** session |
 | GET | `/api/v1/conversations/:id?session_id=` | Messages for **this** session only |
 | POST | `/api/v1/conversations/:id/messages` | `{ session_id, message, language }` |
+| POST | `/api/v1/econtent` | `{ session_id, conversation_id?, topic, language }` grounded module |
+| GET | `/api/v1/econtent/:id?session_id=` | Stored module for this session |
+| POST | `/api/v1/econtent/:id/pdf` | `{ session_id }` PDF download |
+| GET | `/api/v1/images/:id` | Verified textbook figure (PNG) |
 
 `language`: `en` or `kn`. Message length 1–2000 characters.
 
@@ -62,11 +67,11 @@ Codes include `VALIDATION_ERROR`, `SESSION_NOT_FOUND`, `CONVERSATION_NOT_FOUND`,
 
 ## Analytics (anonymous)
 
-Uses existing enum only: `SESSION_STARTED`, `NEW_CHAT`, `QUESTION_ASKED`, `ANSWER_GENERATED`. No name/email/phone/IP.
+Uses existing enum: `SESSION_STARTED`, `NEW_CHAT`, `QUESTION_ASKED`, `ANSWER_GENERATED`, `E_CONTENT_GENERATED`, `PDF_DOWNLOADED`. No name/email/phone/IP.
 
 ## Internal RAG
 
-`POST http://127.0.0.1:8000/internal/query` with header `X-Internal-Secret`. Not public. Calls Phase 6 `answer_question`.
+`POST http://127.0.0.1:8000/internal/query`, `/internal/econtent`, `/internal/econtent/pdf` with header `X-Internal-Secret`. Not public.
 
 ## Security
 

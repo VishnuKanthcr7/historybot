@@ -13,16 +13,16 @@ class LlmError(RuntimeError):
     pass
 
 
-def complete(messages: list[dict], temperature: float = 0.1, max_tokens: int = 500) -> str:
+def complete(messages: list[dict], temperature: float = 0.1, max_tokens: int = 500, timeout: int = 180) -> str:
     provider = LLM_PROVIDER.lower()
     if provider != "ollama":
         raise LlmError(
-            f"LLM_PROVIDER={provider} is not enabled in Phase 6. Use ollama locally."
+            f"LLM_PROVIDER={provider} is not enabled. Use ollama locally in this phase."
         )
-    return _ollama_chat(messages, temperature=temperature, max_tokens=max_tokens)
+    return _ollama_chat(messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout)
 
 
-def _ollama_chat(messages: list[dict], temperature: float, max_tokens: int) -> str:
+def _ollama_chat(messages: list[dict], temperature: float, max_tokens: int, timeout: int = 180) -> str:
     payload = {
         "model": OLLAMA_MODEL,
         "messages": messages,
@@ -39,7 +39,7 @@ def _ollama_chat(messages: list[dict], temperature: float, max_tokens: int) -> s
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=180) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urllib.error.URLError as exc:
         raise LlmError(f"Ollama chat failed: {exc}") from exc
