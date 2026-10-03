@@ -35,6 +35,98 @@ PRONOUN_RE = re.compile(
     re.I,
 )
 
+GREETING_PHRASES = (
+    "hi",
+    "hello",
+    "hey",
+    "hey there",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "good night",
+    "namaste",
+    "namaskar",
+    "hi there",
+    "hello there",
+    "ನಮಸ್ಕಾರ",
+    "ಹಾಯ್",
+    "ಹಲೋ",
+)
+THANKS_PHRASES = (
+    "thanks",
+    "thank you",
+    "thank you so much",
+    "thanks a lot",
+    "thx",
+    "ty",
+    "ಧನ್ಯವಾದ",
+    "ಧನ್ಯವಾದಗಳು",
+)
+CLARIFY_PHRASES = (
+    "ok",
+    "okay",
+    "k",
+    "hmm",
+    "hmmm",
+    "yes",
+    "no",
+    "yeah",
+    "yep",
+    "?",
+    ".",
+    "...",
+    "??",
+)
+LEADING_GREETING = re.compile(
+    r"^\s*(hi|hello|hey|namaste|namaskar|ನಮಸ್ಕಾರ|ಹಾಯ್|ಹಲೋ)\s*[,!.]?\s+",
+    re.I,
+)
+
+
+def _folded(text: str) -> str:
+    return re.sub(r"[!?.،,]+$", "", (text or "").strip()).strip().lower()
+
+
+def strip_leading_greeting(question: str) -> str:
+    cleaned = LEADING_GREETING.sub("", question or "", count=1).strip()
+    return cleaned or (question or "").strip()
+
+
+def classify_casual(question: str) -> str | None:
+    """Return GREETING, THANKS, CLARIFY, or None (run RAG). Never uses Chroma."""
+    raw = (question or "").strip()
+    if not raw:
+        return "CLARIFY"
+    if LEADING_GREETING.match(raw) and strip_leading_greeting(raw) != raw:
+        remainder = strip_leading_greeting(raw)
+        if remainder and remainder.lower() not in GREETING_PHRASES + THANKS_PHRASES + CLARIFY_PHRASES:
+            return None
+    folded = _folded(raw)
+    if folded in GREETING_PHRASES:
+        return "GREETING"
+    if folded in THANKS_PHRASES:
+        return "THANKS"
+    if folded in CLARIFY_PHRASES:
+        return "CLARIFY"
+    if len(folded) <= 2 and not re.search(r"[A-Za-z\u0C80-\u0CFF]{3,}", raw):
+        return "CLARIFY"
+    return None
+
+
+def casual_reply(kind: str, language: str) -> str:
+    kn = language == "kn"
+    if kind == "GREETING":
+        if kn:
+            return "ನಮಸ್ಕಾರ! ನಿಮ್ಮ ಇತಿಹಾಸ ಪಠ್ಯಪುಸ್ತಕದಿಂದ ಏನು ಕಲಿಯಲು ಬಯಸುತ್ತೀರಿ?"
+        return "Hello! What would you like to learn from your History textbook?"
+    if kind == "THANKS":
+        if kn:
+            return "ಸ್ವಾಗತ. ಇನ್ನೊಂದು ಪ್ರಶ್ನೆ ಕೇಳಬಹುದು."
+        return "You're welcome. Ask another question from your History textbook when you're ready."
+    if kn:
+        return "ದಯವಿಟ್ಟು ಇತಿಹಾಸ ಪಠ್ಯಪುಸ್ತಕದ ಬಗ್ಗೆ ಪ್ರಶ್ನೆ ಕೇಳಿ."
+    return "Please ask a question about the History textbook."
+
 
 def extract_topics(text: str) -> set[str]:
     blob = text or ""

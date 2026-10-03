@@ -129,6 +129,7 @@ export default function Chat() {
           <EcontentPanel
             data={econtent}
             labels={t}
+            language={language}
             onClose={() => setEcontent(null)}
             onPdf={downloadPdf}
             pdfLoading={pdfLoading}

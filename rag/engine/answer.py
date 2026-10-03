@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from rag.engine.classify import classify_intent, last_user_question
+from rag.engine.classify import (
+    casual_reply,
+    classify_casual,
+    classify_intent,
+    last_user_question,
+    strip_leading_greeting,
+)
 from rag.engine.evidence import evidence_is_sufficient, select_evidence
 from rag.engine.normalize import (
     looks_kannada,
@@ -26,26 +32,41 @@ def answer_question(
     language = "kn" if language == "kn" else "en"
     question = normalize_question(question)
     history = trim_history(history)
-    intent = classify_intent(question, history)
+    casual = classify_casual(question)
+    if casual:
+        return {
+            "answer": casual_reply(casual, language),
+            "language": language,
+            "grounded": False,
+            "sources": [],
+            "retrieval_query": None,
+            "retrieved": [],
+            "selected_chunk_ids": [],
+            "validation_reason": f"casual:{casual}",
+            "intent": casual,
+        }
+
+    rag_question = strip_leading_greeting(question)
+    intent = classify_intent(rag_question, history)
     rewrite_history = []
     if intent == "FOLLOW_UP":
         previous = last_user_question(history)
         if previous:
             rewrite_history = [{"role": "user", "content": previous}]
-    kannada_input = language == "kn" or looks_kannada(question)
+    kannada_input = language == "kn" or looks_kannada(rag_question)
     needs_rewrite = bool(rewrite_history) or kannada_input
-    retrieval_query = rewrite_for_retrieval(question, rewrite_history, force=needs_rewrite)
+    retrieval_query = rewrite_for_retrieval(rag_question, rewrite_history, force=needs_rewrite)
     hits = retrieve(retrieval_query, top_k=RAG_TOP_K)
-    selected = select_evidence(question, retrieval_query, hits)
-    if looks_like_injection(question) and not evidence_is_sufficient(selected):
+    selected = select_evidence(rag_question, retrieval_query, hits)
+    if looks_like_injection(rag_question) and not evidence_is_sufficient(selected):
         return _unavailable(language, retrieval_query, hits, selected, intent=intent)
     if not evidence_is_sufficient(selected):
         return _unavailable(language, retrieval_query, hits, selected, intent=intent)
 
-    payload = _ask_llm(question, language, selected, strict=False)
+    payload = _ask_llm(rag_question, language, selected, strict=False)
     ok, reason = validate_answer(payload["raw"], language, selected, grounded_expected=True)
     if not ok and MAX_REGENERATIONS >= 1:
-        payload = _ask_llm(question, language, selected, strict=True)
+        payload = _ask_llm(rag_question, language, selected, strict=True)
         ok, reason = validate_answer(payload["raw"], language, selected, grounded_expected=True)
     if not ok or is_refusal(payload["raw"], language):
         result = _unavailable(language, retrieval_query, hits, selected, intent=intent)
@@ -89,7 +110,8 @@ def _ask_llm(question: str, language: str, evidence: list[dict], strict: bool) -
         )
     user = (
         f"Language: {language}\n"
-        f"Student question: {question}\n\n"
+        f"Student question: {question}\n"
+        "If this is a short factual Who/When question, start with one direct sentence.\n\n"
         f"Textbook evidence:\n{chr(10).join(blocks)}\n"
         f"{extra}{kannada_rule}\n"
         "Answer using only the evidence. Do not add page numbers; the system will attach them."

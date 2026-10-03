@@ -55,6 +55,10 @@ def _register_fonts() -> tuple[str, str]:
     return FONT_REG, FONT_REG
 
 
+def _has_kannada(text: str) -> bool:
+    return any("\u0C80" <= ch <= "\u0CFF" for ch in str(text or ""))
+
+
 def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> bytes:
     body_font, heading_font = _register_fonts()
     buffer = BytesIO()
@@ -62,6 +66,7 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
     language = document.get("language") or "en"
     title = document.get("title") or content.get("title") or "HistoryBot E-content"
     sources = document.get("sources") or []
+    title_font = "HistoryBotKannada" if language == "kn" or _has_kannada(title) else heading_font
 
     def footer(canvas, doc):
         canvas.saveState()
@@ -84,7 +89,7 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
     styles.add(
         ParagraphStyle(
             "HBTitle",
-            fontName=heading_font,
+            fontName=title_font,
             fontSize=18,
             leading=22,
             textColor=NAVY,

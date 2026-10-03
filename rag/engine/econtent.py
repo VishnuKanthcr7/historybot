@@ -6,6 +6,7 @@ import json
 import re
 
 from rag.engine.answer import _public_hits, _sources, _unavailable
+from rag.engine.classify import classify_casual
 from rag.engine.evidence import evidence_is_sufficient, evidence_matches_topic, select_evidence
 from rag.engine.normalize import looks_kannada, looks_like_injection, normalize_question, rewrite_for_retrieval
 from rag.llm.client import complete
@@ -37,7 +38,7 @@ ECONTENT_TOP_K = max(RAG_TOP_K, 8)
 def generate_econtent(topic: str, language: str = "en") -> dict:
     language = "kn" if language == "kn" else "en"
     topic = normalize_question(topic)
-    if looks_like_injection(topic):
+    if classify_casual(topic) or looks_like_injection(topic):
         return _refused(language, topic, [], [])
     needs_rewrite = language == "kn" or looks_kannada(topic)
     retrieval_query = rewrite_for_retrieval(topic, [], force=needs_rewrite)

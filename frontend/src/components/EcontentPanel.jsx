@@ -1,6 +1,7 @@
 import { imageUrl } from "../services/api.js";
+import SourceCite from "./SourceCite.jsx";
 
-export default function EcontentPanel({ data, labels, onClose, onPdf, pdfLoading }) {
+export default function EcontentPanel({ data, labels, language, onClose, onPdf, pdfLoading }) {
   if (!data) return null;
   const content = data.content || {};
   return (
@@ -49,6 +50,7 @@ export default function EcontentPanel({ data, labels, onClose, onPdf, pdfLoading
               <figcaption className="mt-1 text-xs text-stone-600">{img.title}</figcaption>
             </figure>
           ))}
+          <SourceCite sources={data.sources} language={language} />
         </div>
       )}
     </aside>
