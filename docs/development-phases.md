@@ -2,10 +2,11 @@
 
 - Phase 0 — Workspace Audit — COMPLETE
 - Phase 1 — Architecture — COMPLETE
-- Phase 2 — Project Foundation — CURRENT
-- Phase 3 — Database
-- Phase 4 — Textbook Ingestion
+- Phase 2 — Project Foundation — COMPLETE
+- Phase 3 — Database — COMPLETE
+- Phase 4 — Textbook Ingestion — COMPLETE (awaiting review)
 - Phase 5 — RAG
+
 - Phase 6 — AI Engine
 - Phase 7 — Backend APIs
 - Phase 8 — Frontend

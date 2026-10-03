@@ -40,6 +40,10 @@ data/chroma/**
 data/textbooks/**
 !data/textbooks/.gitkeep
 
+# Extracted textbook text (regenerate with scripts/ingest_chapter5.py)
+data/extracted/**
+!data/extracted/.gitkeep
+
 # Generated PDFs and temp output
 data/generated/
 *.pdf
