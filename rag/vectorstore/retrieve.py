@@ -35,6 +35,7 @@ def retrieve(query: str, top_k: int = CHAT_TOP_K) -> list[dict]:
                 "section": meta.get("section"),
                 "chapter": meta.get("chapter"),
                 "ingest_version": meta.get("ingest_version"),
+                "text": text or "",
                 "preview": (text or "").replace("\n", " ")[:220],
             }
         )
