@@ -7,11 +7,8 @@
 - Phase 4 — Textbook Ingestion — COMPLETE
 - Phase 5 — RAG / Chroma embeddings — COMPLETE
 - Phase 6 — AI Engine — COMPLETE
-- Phase 7 — Backend APIs — COMPLETE (awaiting review)
-
-- Phase 6 — AI Engine
-- Phase 7 — Backend APIs
-- Phase 8 — Frontend
+- Phase 7 — Backend APIs — COMPLETE
+- Phase 8 — Frontend — COMPLETE (awaiting review)
 - Phase 9 — Chat + History
 - Phase 10 — E-content
 - Phase 11 — PDF
