@@ -29,6 +29,9 @@ INJECTION_PATTERNS = (
     r"from another book",
     r"from another textbook",
     r"use another book",
+    r"from training",
+    r"not in the textbook",
+    r"that are not in the textbook",
 )
 
 

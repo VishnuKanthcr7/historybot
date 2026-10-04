@@ -18,7 +18,16 @@ STOPWORDS = {
 
 def content_tokens(text: str) -> set[str]:
     words = re.findall(r"[A-Za-z]{4,}|[\u0C80-\u0CFF]{3,}", text.lower())
-    return {word for word in words if word not in STOPWORDS}
+    aliases = {
+        "mughals": "mughal",
+        "marathas": "maratha",
+        "babur": "babar",
+        "ahoms": "ahom",
+        "hindus": "hindu",
+        "ministers": "minister",
+        "temples": "temple",
+    }
+    return {aliases.get(word, word) for word in words if word not in STOPWORDS}
 
 
 def overlap_count(query: str, chunk_text: str) -> int:

@@ -196,6 +196,7 @@ ECONTENT_RE = re.compile(
     re.I,
 )
 KANNADA_DETAIL_RE = re.compile(r"ವಿವರ|ಹೆಚ್ಚಿನ ಮಾಹಿತಿ")
+DYNASTY_RE = re.compile(r"\b(mughals?|marathas?|ahoms?)\b", re.I)
 
 
 def classify_answer_mode(question: str) -> str:
@@ -208,3 +209,34 @@ def classify_answer_mode(question: str) -> str:
     if EXPLAIN_RE.search(text) and not (SHORT_FACT_RE.match(text) and len(text.split()) <= 10):
         return "DETAILED"
     return "NORMAL"
+
+
+def classify_question_type(question: str, intent: str | None = None) -> str:
+    """Return DIRECT, EXPLANATION, BROAD_TOPIC, or FOLLOW_UP."""
+    if intent == "FOLLOW_UP":
+        return "FOLLOW_UP"
+    text = question or ""
+    lowered = text.lower()
+    topics = extract_topics(text)
+    has_admin = "administration" in lowered or "administrative" in lowered
+    dynasty_only = bool(DYNASTY_RE.search(text)) and not (
+        topics & {"babar", "akbar", "shivaji", "shahjahan", "aurangzeb", "bajirao", "humayun"}
+    )
+    if "in detail" in lowered and dynasty_only:
+        return "BROAD_TOPIC"
+    if re.search(r"\btell me (more )?about the (mughals|marathas|ahoms)\b", lowered):
+        return "BROAD_TOPIC"
+    if has_admin or (EXPLAIN_RE.search(text) and ("policy" in lowered or "expansion" in lowered)):
+        return "EXPLANATION"
+    if EXPLAIN_RE.search(text) and dynasty_only:
+        return "BROAD_TOPIC"
+    if DETAILED_RE.search(text) and dynasty_only:
+        return "BROAD_TOPIC"
+    if DETAILED_RE.search(text) or (EXPLAIN_RE.search(text) and not SHORT_FACT_RE.match(text)):
+        if dynasty_only:
+            return "BROAD_TOPIC"
+        if EXPLAIN_RE.search(text) or "tell me more" in lowered:
+            return "EXPLANATION" if has_admin or EXPLAIN_RE.search(text) else "BROAD_TOPIC"
+    if EXPLAIN_RE.search(text):
+        return "EXPLANATION"
+    return "DIRECT"

@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
+import re
+
 from rag.engine.citations import supporting_evidence
 from rag.engine.classify import (
     casual_reply,
     classify_answer_mode,
     classify_casual,
     classify_intent,
+    classify_question_type,
     extract_topics,
     last_user_question,
     strip_leading_greeting,
 )
-from rag.engine.evidence import (
-    evidence_is_sufficient,
-    evidence_matches_topic,
-    expand_evidence,
-    overlap_count,
-    select_evidence,
-)
+from rag.engine.evidence import evidence_is_sufficient, evidence_matches_topic, overlap_count
 from rag.engine.normalize import (
     looks_kannada,
     looks_like_injection,
@@ -26,11 +23,12 @@ from rag.engine.normalize import (
     rewrite_for_retrieval,
     trim_history,
 )
+from rag.engine.pack import build_evidence_pack
 from rag.engine.validate import is_refusal, unsupported_named_items, validate_answer
 from rag.llm.client import complete
 from rag.llm.config import RAG_TOP_K
 from rag.prompts.tutor import KANNADA_UNAVAILABLE, SYSTEM_PROMPT, refusal_text
-from rag.vectorstore.retrieve import retrieve_primary, retrieve_same_pages
+from rag.vectorstore.retrieve import retrieve_primary
 
 LIMITED_EN = (
     "The Class 9 Karnataka State Board 2026–27 textbook has limited information on this topic."
@@ -68,40 +66,30 @@ def answer_question(
         return _kannada_unavailable(question)
 
     rag_question = strip_leading_greeting(question)
+    if _asks_outside_textbook(rag_question):
+        return _outside_textbook(language, rag_question)
     mode = classify_answer_mode(rag_question)
     intent = classify_intent(rag_question, history)
+    question_type = classify_question_type(rag_question, intent)
+    previous = last_user_question(history) if intent == "FOLLOW_UP" else ""
+    if intent == "FOLLOW_UP" and not extract_topics(previous) and not extract_topics(rag_question):
+        return _clarify(language, rag_question, intent, mode)
     rewrite_history = []
-    if intent == "FOLLOW_UP":
-        previous = last_user_question(history)
-        if previous:
-            rewrite_history = [{"role": "user", "content": previous}]
+    if intent == "FOLLOW_UP" and previous:
+        rewrite_history = [{"role": "user", "content": previous}]
     retrieval_query = rewrite_for_retrieval(rag_question, rewrite_history, force=bool(rewrite_history))
 
-    top_k = max(RAG_TOP_K, 14) if mode == "DETAILED" else max(RAG_TOP_K, 10)
+    top_k = 16 if question_type == "BROAD_TOPIC" else (14 if mode == "DETAILED" else 10)
+    top_k = max(RAG_TOP_K, top_k)
     primary_hits = retrieve_primary(retrieval_query, top_k=top_k, language="en")
-    seed_keep = 5 if mode == "DETAILED" else 4
-    primary_selected = select_evidence(rag_question, retrieval_query, primary_hits, max_keep=seed_keep)
-    same_pages = retrieve_same_pages(
-        retrieval_query,
-        [
-            item.get("printed_page_number") or item.get("textbook_page_number")
-            for item in primary_selected
-        ],
-    )
-    merged_hits = list(primary_hits)
-    seen_ids = {item.get("chunk_id") for item in merged_hits}
-    for hit in same_pages:
-        if hit.get("chunk_id") not in seen_ids:
-            merged_hits.append(hit)
-            seen_ids.add(hit.get("chunk_id"))
-    primary_selected = expand_evidence(
+    pack = build_evidence_pack(
         rag_question,
         retrieval_query,
-        primary_selected,
-        merged_hits,
-        max_keep=8 if mode == "DETAILED" else 6,
-        page_window=2 if mode == "DETAILED" else 1,
+        question_type,
+        raw_hits=primary_hits,
+        history=history,
     )
+    primary_selected = pack.chunks
 
     if looks_like_injection(rag_question) and not extract_topics(rag_question):
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
@@ -117,7 +105,7 @@ def answer_question(
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
 
     selected = list(primary_selected)
-    payload = _ask_llm(rag_question, primary_selected, mode, strict=False)
+    payload = _ask_llm(rag_question, primary_selected, mode, strict=False, question_type=question_type)
     regenerations = 0
     ok, reason = validate_answer(
         payload["raw"],
@@ -130,7 +118,7 @@ def answer_question(
     )
     if not ok:
         regenerations = 1
-        payload = _ask_llm(rag_question, primary_selected, mode, strict=True)
+        payload = _ask_llm(rag_question, primary_selected, mode, strict=True, question_type=question_type)
         ok, reason = validate_answer(
             payload["raw"],
             "en",
@@ -145,47 +133,48 @@ def answer_question(
         if evidence_is_sufficient(selected) and not looks_like_injection(rag_question):
             raw = _safe_from_evidence(selected, rag_question)
             reason = f"{reason}+extractive_fallback"
-            sources = _sources(selected)
+            sources = _sources(supporting_evidence(raw, selected, min_overlap=1))
             answer = f"{raw}\n\n{_citation_block(sources)}"
-            return {
-                "answer": answer,
-                "language": "en",
-                "grounded": True,
-                "sources": sources,
-                "retrieval_query": retrieval_query,
-                "retrieved": _public_hits(primary_hits),
-                "selected_chunk_ids": [item["chunk_id"] for item in selected],
-                "validation_reason": reason,
-                "intent": intent,
-                "mode": mode,
-                "used_supplementary": False,
-                "regeneration_count": regenerations,
-                "unsupported_claims": claims,
-            }
+            return _payload(
+                answer,
+                language,
+                retrieval_query,
+                primary_hits,
+                selected,
+                reason,
+                intent,
+                mode,
+                regenerations,
+                claims,
+                pack,
+                fallback=True,
+            )
         result = _unavailable(language, retrieval_query, primary_hits, selected, intent=intent, mode=mode)
         result["validation_reason"] = reason
         result["regeneration_count"] = regenerations
         result["unsupported_claims"] = claims
+        result["evidence_pack"] = pack.as_public()
+        result["question_type"] = question_type
         return result
 
     raw = _strip_invented_pages(payload["raw"])
-    sources = _sources(supporting_evidence(raw, primary_selected, min_overlap=1 if mode == "DETAILED" else 2))
+    raw = _apply_partial_refusals(rag_question, raw, selected)
+    sources = _sources(supporting_evidence(raw, selected, min_overlap=1 if mode == "DETAILED" else 2))
     answer = f"{raw}\n\n{_citation_block(sources)}"
-    return {
-        "answer": answer,
-        "language": "en",
-        "grounded": True,
-        "sources": sources,
-        "retrieval_query": retrieval_query,
-        "retrieved": _public_hits(primary_hits),
-        "selected_chunk_ids": [item["chunk_id"] for item in selected],
-        "validation_reason": reason,
-        "intent": intent,
-        "mode": mode,
-        "used_supplementary": False,
-        "regeneration_count": regenerations,
-        "unsupported_claims": [],
-    }
+    return _payload(
+        answer,
+        language,
+        retrieval_query,
+        primary_hits,
+        selected,
+        reason,
+        intent,
+        mode,
+        regenerations,
+        [],
+        pack,
+        fallback=False,
+    )
 
 
 def _looks_limited(question: str) -> bool:
@@ -193,7 +182,110 @@ def _looks_limited(question: str) -> bool:
     return any(term in lowered for term in LIMITED_TERMS)
 
 
-def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool) -> dict:
+def _asks_outside_textbook(question: str) -> bool:
+    lowered = (question or "").lower()
+    return (
+        "not in the textbook" in lowered
+        or "not in the provided textbook" in lowered
+        or "outside the textbook" in lowered
+    )
+
+
+def _outside_textbook(language: str, question: str) -> dict:
+    return {
+        "answer": (
+            "Information that is not in the provided textbook cannot be given. "
+            "This topic is not available in the provided textbook."
+        ),
+        "language": language,
+        "grounded": False,
+        "sources": [],
+        "retrieval_query": question,
+        "retrieved": [],
+        "selected_chunk_ids": [],
+        "validation_reason": "outside_textbook_request",
+        "intent": None,
+        "mode": "NORMAL",
+        "question_type": "DIRECT",
+        "used_supplementary": False,
+        "regeneration_count": 0,
+        "unsupported_claims": [],
+        "fallback_used": False,
+    }
+
+
+def _clarify(language: str, question: str, intent: str, mode: str) -> dict:
+    return {
+        "answer": "Which person or event from the textbook should I continue with?",
+        "language": language,
+        "grounded": False,
+        "sources": [],
+        "retrieval_query": question,
+        "retrieved": [],
+        "selected_chunk_ids": [],
+        "validation_reason": "followup_clarify",
+        "intent": intent,
+        "mode": mode,
+        "question_type": "FOLLOW_UP",
+        "used_supplementary": False,
+        "regeneration_count": 0,
+        "unsupported_claims": [],
+        "fallback_used": False,
+    }
+
+
+def _apply_partial_refusals(question: str, answer: str, evidence: list[dict]) -> str:
+    lowered = (question or "").lower()
+    blob = " ".join(item.get("text") or "" for item in evidence).lower()
+    prefix = []
+    if "exact" in lowered and "date" in lowered:
+        has_full_date = bool(
+            re.search(r"\b\d{1,2}\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b", blob)
+            or re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}", blob)
+        )
+        if not has_full_date:
+            prefix.append("The exact birth date is not available in the provided textbook.")
+    if not prefix:
+        return answer
+    return "\n\n".join(prefix + [answer])
+
+
+def _payload(
+    answer: str,
+    language: str,
+    retrieval_query: str,
+    hits: list[dict],
+    selected: list[dict],
+    reason: str,
+    intent: str | None,
+    mode: str | None,
+    regenerations: int,
+    claims: list,
+    pack,
+    fallback: bool,
+) -> dict:
+    return {
+        "answer": answer,
+        "language": language,
+        "grounded": True,
+        "sources": _sources(supporting_evidence(answer, selected, min_overlap=1)),
+        "retrieval_query": retrieval_query,
+        "retrieved": _public_hits(hits),
+        "selected_chunk_ids": [item["chunk_id"] for item in selected if item.get("chunk_id")],
+        "validation_reason": reason,
+        "intent": intent,
+        "mode": mode,
+        "question_type": pack.question_type,
+        "resolved_topic": pack.entity or (pack.topics[0] if pack.topics else None),
+        "evidence_pack": pack.as_public(),
+        "used_supplementary": False,
+        "regeneration_count": regenerations,
+        "unsupported_claims": claims,
+        "fallback_used": fallback,
+    }
+
+
+def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, question_type: str = "DIRECT") -> dict:
     primary_blocks = _blocks(primary, "TEXTBOOK")
     extra = ""
     if strict:
@@ -201,7 +293,20 @@ def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool) -> dic
             "\nSTRICT MODE: Use only names, dates, and events that appear in the evidence. "
             "If a detail is missing from the evidence, omit it. Do not guess."
         )
-    if mode == "DETAILED":
+    if question_type == "BROAD_TOPIC":
+        primary_blocks = _blocks(primary, "TEXTBOOK", max_chars=650)
+        user = (
+            f"Language: en\nMode: DETAILED\nQuestion type: BROAD_TOPIC\n"
+            f"Student question: {question}\n"
+            "The evidence is ordered by textbook page. Cover EVERY person and section that appears in the evidence. "
+            "Do not stop after the first page. Use simple Class 9 English. "
+            "Do not add facts from other books or general knowledge.\n\n"
+            f"TEXTBOOK evidence:\n{chr(10).join(primary_blocks)}\n"
+            f"{extra}\n"
+            "Do not add page numbers; the system will attach them."
+        )
+        max_tokens = 1200
+    elif mode == "DETAILED":
         user = (
             f"Language: en\nMode: DETAILED\n"
             f"Student question: {question}\n"
@@ -212,7 +317,7 @@ def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool) -> dic
             f"{extra}\n"
             "Do not add page numbers; the system will attach them."
         )
-        max_tokens = 1000
+        max_tokens = 1200 if question_type == "BROAD_TOPIC" else 1000
     else:
         user = (
             f"Language: en\nMode: NORMAL\n"
@@ -236,11 +341,14 @@ def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool) -> dic
     return {"raw": raw}
 
 
-def _blocks(evidence: list[dict], label: str) -> list[str]:
+def _blocks(evidence: list[dict], label: str, max_chars: int | None = None) -> list[str]:
     blocks = []
     for item in evidence:
         page = item.get("printed_page_number") or item.get("textbook_page_number")
-        blocks.append(f"[{label}; printed_page={page}]\n{item.get('text') or ''}")
+        text = item.get("text") or ""
+        if max_chars and len(text) > max_chars:
+            text = text[: max_chars - 3].rsplit(" ", 1)[0] + "..."
+        blocks.append(f"[{label}; printed_page={page}]\n{text}")
     return blocks or [f"[{label}] (none)"]
 
 
@@ -268,7 +376,12 @@ def _safe_from_evidence(evidence: list[dict], question: str = "") -> str:
         snippet = text if len(text) <= 420 else text[:417].rsplit(" ", 1)[0] + "..."
         lines.append(f"• {snippet}")
     if len(lines) == 1:
-        lines.append("The provided textbook does not give enough information for a fuller answer.")
+        return (
+            "The provided textbook does not give enough information to answer this fully.\n\n"
+            "No extra facts are added beyond the textbook."
+        )
+    if len(kept) <= 1:
+        lines.insert(1, "The provided textbook does not give enough information to answer this fully.")
     return "\n\n".join(lines)
 
 
