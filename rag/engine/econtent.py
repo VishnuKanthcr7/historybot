@@ -1,4 +1,4 @@
-"""Grounded structured E-content. Sectioned generation, primary first."""
+"""Grounded structured E-content from the approved Class 9 textbook only."""
 
 from __future__ import annotations
 
@@ -8,13 +8,19 @@ import re
 from rag.engine.answer import _public_hits, _sources, _unavailable
 from rag.engine.citations import supporting_evidence
 from rag.engine.classify import classify_casual
-from rag.engine.evidence import evidence_is_sufficient, evidence_matches_topic, select_evidence
-from rag.engine.normalize import looks_kannada, looks_like_injection, normalize_question, rewrite_for_retrieval
+from rag.engine.evidence import (
+    evidence_is_sufficient,
+    evidence_matches_topic,
+    expand_evidence,
+    select_evidence,
+)
+from rag.engine.normalize import looks_kannada, looks_like_injection, normalize_question
+from rag.engine.validate import unsupported_named_items
 from rag.llm.client import LlmError, complete
 from rag.llm.config import RAG_TOP_K
 from rag.prompts.econtent import ECONTENT_SYSTEM, SECTION_SPECS
-from rag.prompts.tutor import refusal_text
-from rag.vectorstore.retrieve import retrieve_primary, retrieve_supplementary
+from rag.prompts.tutor import KANNADA_UNAVAILABLE, refusal_text
+from rag.vectorstore.retrieve import retrieve_primary, retrieve_same_pages
 
 ALLOWED_KEYS = (
     "title",
@@ -22,14 +28,12 @@ ALLOWED_KEYS = (
     "learning_objectives",
     "class9_textbook",
     "easy_english",
-    "simple_kannada",
     "historical_context",
     "detailed_explanation",
     "important_people",
     "important_terms",
     "timeline",
     "main_events",
-    "additional_school_book_detail",
     "important_places",
     "key_points",
     "exam_questions",
@@ -37,41 +41,52 @@ ALLOWED_KEYS = (
     "revision",
 )
 
-ECONTENT_TOP_K = max(RAG_TOP_K, 8)
+ECONTENT_TOP_K = max(RAG_TOP_K, 12)
 SECTION_TIMEOUT = 75
 
 
 def generate_econtent(topic: str, language: str = "en") -> dict:
     language = "kn" if language == "kn" else "en"
     topic = normalize_question(topic)
+    if language == "kn" or looks_kannada(topic):
+        refused = _refused("kn", topic, [], [])
+        refused["answer"] = KANNADA_UNAVAILABLE
+        refused["validation_reason"] = "kannada_corpus_unavailable"
+        return refused
     if classify_casual(topic) or looks_like_injection(topic):
         return _refused(language, topic, [], [])
-    needs_rewrite = language == "kn" or looks_kannada(topic)
-    retrieval_query = rewrite_for_retrieval(topic, [], force=needs_rewrite)
-    primary_hits = retrieve_primary(retrieval_query, top_k=ECONTENT_TOP_K, language=language)
+    retrieval_query = topic
+    primary_hits = retrieve_primary(retrieval_query, top_k=ECONTENT_TOP_K, language="en")
     primary_selected = select_evidence(topic, retrieval_query, primary_hits, max_keep=5)
-    if not evidence_is_sufficient(primary_selected) or not evidence_matches_topic(topic, retrieval_query, primary_selected):
+    same_pages = retrieve_same_pages(
+        retrieval_query,
+        [item.get("printed_page_number") or item.get("textbook_page_number") for item in primary_selected],
+    )
+    merged = list(primary_hits)
+    seen = {item.get("chunk_id") for item in merged}
+    for hit in same_pages:
+        if hit.get("chunk_id") not in seen:
+            merged.append(hit)
+            seen.add(hit.get("chunk_id"))
+    primary_selected = expand_evidence(
+        topic, retrieval_query, primary_selected, merged, max_keep=8, page_window=2
+    )
+    if not evidence_is_sufficient(primary_selected) or not evidence_matches_topic(
+        topic, retrieval_query, primary_selected
+    ):
         return _refused(language, retrieval_query, primary_hits, primary_selected)
-
-    supp_hits = retrieve_supplementary(retrieval_query, top_k=ECONTENT_TOP_K)
-    supp_selected = select_evidence(topic, retrieval_query, supp_hits, max_keep=3)
-    selected = list(primary_selected) + list(supp_selected)
 
     content: dict = {}
     for spec in SECTION_SPECS:
-        keys = spec["keys"]
-        if language != "kn" and keys == ("simple_kannada",):
+        if spec.get("supplement") or spec["keys"] == ("simple_kannada",):
             continue
-        evidence = supp_selected if spec.get("supplement") else primary_selected
-        if spec.get("supplement") and not evidence:
-            continue
-        packed = _pack(evidence[: spec.get("max_chunks", 3)], spec.get("label") or "PRIMARY")
-        parsed = _ask_section(topic, language, spec, packed)
+        packed = _pack(primary_selected[: spec.get("max_chunks", 4)], "TEXTBOOK")
+        parsed = _ask_section(topic, spec, packed, primary_selected)
         if not parsed:
-            parsed = _ask_section(topic, language, spec, packed, strict=True)
+            parsed = _ask_section(topic, spec, packed, primary_selected, strict=True)
         if not parsed:
             continue
-        for key in keys:
+        for key in spec["keys"]:
             value = parsed.get(key)
             if _usable(value):
                 content[key] = value
@@ -79,20 +94,13 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
     if not content.get("title") and not content.get("introduction") and not content.get("class9_textbook"):
         return _refused(language, retrieval_query, primary_hits, primary_selected)
 
-    extra_text = str(content.get("additional_school_book_detail") or "")
-    primary_blob = json.dumps(
-        {k: v for k, v in content.items() if k != "additional_school_book_detail"},
-        ensure_ascii=False,
-    )
-    primary_sources = _sources(supporting_evidence(primary_blob, primary_selected))
-    extra_sources = _sources(supporting_evidence(extra_text, supp_selected)) if extra_text else []
-    sources = primary_sources + extra_sources
+    blob = json.dumps(content, ensure_ascii=False)
+    sources = _sources(supporting_evidence(blob, primary_selected, min_overlap=1))
     content["textbook_source_pages"] = sorted(
         {
             int(item["printed_page_number"] or item["textbook_page_number"])
             for item in sources
-            if item.get("authority") != "approved_supplementary"
-            and (item.get("printed_page_number") is not None or item.get("textbook_page_number") is not None)
+            if item.get("printed_page_number") is not None or item.get("textbook_page_number") is not None
         }
     )
     return {
@@ -103,9 +111,9 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
         "content": content,
         "sources": sources,
         "retrieval_query": retrieval_query,
-        "retrieved": _public_hits(primary_hits + supp_hits),
-        "selected_chunk_ids": [item["chunk_id"] for item in selected],
-        "used_supplementary": bool(extra_sources),
+        "retrieved": _public_hits(primary_hits),
+        "selected_chunk_ids": [item["chunk_id"] for item in primary_selected],
+        "used_supplementary": False,
     }
 
 
@@ -120,18 +128,19 @@ def _pack(items: list[dict], label: str) -> str:
     if not items:
         return f"[{label}] (none)"
     return "\n".join(
-        f"[{label}; printed_page={item.get('printed_page_number') or item.get('textbook_page_number')}]\n{(item.get('text') or '')[:900]}"
+        f"[{label}; printed_page={item.get('printed_page_number') or item.get('textbook_page_number')}]\n"
+        f"{(item.get('text') or '')[:1100]}"
         for item in items
     )
 
 
-def _ask_section(topic: str, language: str, spec: dict, packed: str, strict: bool = False) -> dict:
+def _ask_section(topic: str, spec: dict, packed: str, evidence: list[dict], strict: bool = False) -> dict:
     keys = list(spec["keys"])
-    extra = " If evidence is thin, omit the key. JSON object only."
+    extra = " If evidence is thin, omit the key. JSON object only. No names or dates unless they appear in the evidence."
     if strict:
         extra = " STRICT: omit any claim not clearly in the evidence. JSON object only."
     user = (
-        f"Output language: {language}\n"
+        f"Output language: en\n"
         f"Student topic: {topic}\n"
         f"Fill ONLY these JSON keys: {json.dumps(keys)}\n"
         f"{spec['instruction']}{extra}\n\n"
@@ -150,7 +159,11 @@ def _ask_section(topic: str, language: str, spec: dict, packed: str, strict: boo
     except (LlmError, TimeoutError, OSError):
         return {}
     parsed = _parse_content(raw)
-    return {key: parsed[key] for key in keys if key in parsed}
+    kept = {key: parsed[key] for key in keys if key in parsed}
+    blob = json.dumps(kept, ensure_ascii=False)
+    if unsupported_named_items(blob, evidence):
+        return {}
+    return kept
 
 
 def _parse_content(raw: str) -> dict:

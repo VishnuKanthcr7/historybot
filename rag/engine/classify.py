@@ -185,9 +185,12 @@ def classify_intent(question: str, history: list[dict] | None) -> str:
 DETAILED_RE = re.compile(
     r"\b(tell me more|more detail|more details|in detail|explain fully|"
     r"detailed explanation|everything about|more information|"
-    r"i want more|explain this topic in detail|give me more)\b",
+    r"i want more|explain this topic in detail|give me more|"
+    r"tell me about)\b",
     re.I,
 )
+EXPLAIN_RE = re.compile(r"\b(explain|describe)\b", re.I)
+SHORT_FACT_RE = re.compile(r"^\s*(who|what|when|where)\b", re.I)
 ECONTENT_RE = re.compile(
     r"\b(learning module|e-?content|make a module|create a (learning )?module)\b",
     re.I,
@@ -201,5 +204,7 @@ def classify_answer_mode(question: str) -> str:
     if ECONTENT_RE.search(text):
         return "ECONTENT"
     if DETAILED_RE.search(text) or KANNADA_DETAIL_RE.search(text):
+        return "DETAILED"
+    if EXPLAIN_RE.search(text) and not (SHORT_FACT_RE.match(text) and len(text.split()) <= 10):
         return "DETAILED"
     return "NORMAL"

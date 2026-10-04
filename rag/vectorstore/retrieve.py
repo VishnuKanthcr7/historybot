@@ -71,6 +71,26 @@ def retrieve_primary(query: str, top_k: int = CHAT_TOP_K, language: str = "en") 
     return hits
 
 
+def retrieve_same_pages(query: str, pages: list[int], source_type: str = "primary_textbook", per_page: int = 8) -> list[dict]:
+    """Load other chunks on the same printed pages so pronouns like 'he' keep their subject."""
+    rows = []
+    seen = set()
+    for page in sorted({int(p) for p in pages if p is not None}):
+        try:
+            hits = retrieve(query, top_k=per_page, where={"printed_page_number": page})
+        except Exception:
+            continue
+        for hit in hits:
+            if hit.get("source_type") != source_type:
+                continue
+            chunk_id = hit.get("chunk_id")
+            if not chunk_id or chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            rows.append(hit)
+    return rows
+
+
 def retrieve_supplementary(query: str, top_k: int = CHAT_TOP_K) -> list[dict]:
     from rag.engine.classify import extract_topics
 

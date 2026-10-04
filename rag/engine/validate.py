@@ -25,8 +25,13 @@ EXTRA_HEADING = re.compile(r"^##\s*Additional school-book detail\s*$", re.I | re
 
 def is_refusal(answer: str, language: str) -> bool:
     text = (answer or "").strip()
+    lowered = text.lower()
+    if "not available in the provided textbook" in lowered or "not available in the textbook" in lowered:
+        return True
+    if "kannada textbook support is currently unavailable" in lowered:
+        return True
     expected = refusal_text(language)
-    return expected in text or "not available in the textbook" in text.lower()
+    return expected in text or "ಲಭ್ಯವಿಲ್ಲ" in text
 
 
 def is_kannada_safe_fallback(answer: str) -> bool:
@@ -89,7 +94,7 @@ def validate_answer(
     if mentioned and not mentioned.issubset(allowed_pages):
         return False, "invented_page_citation"
     evidence_blob = " ".join(item.get("text") or "" for item in evidence).lower()
-    extra_terms = ("plassey", "gdp", "prime minister", "wikipedia")
+    extra_terms = ("plassey", "gdp", "prime minister", "wikipedia", "visionias", "world war")
     for term in extra_terms:
         if term in lowered and term not in evidence_blob:
             return False, f"unsupported_term:{term}"
@@ -99,7 +104,183 @@ def validate_answer(
         ok, reason = validate_detailed_separation(text, primary or [], supplement)
         if not ok:
             return False, reason
+    bad = unsupported_named_items(text, evidence)
+    if bad:
+        return False, "unsupported_claim:" + ",".join(bad[:6])
     return True, "ok"
+
+
+CLAIM_SKIP = {
+    "class",
+    "karnataka",
+    "history",
+    "historybot",
+    "textbook",
+    "source",
+    "introduction",
+    "main",
+    "points",
+    "detailed",
+    "explanation",
+    "important",
+    "people",
+    "terms",
+    "events",
+    "key",
+    "remember",
+    "simple",
+    "words",
+    "board",
+    "student",
+    "question",
+    "english",
+    "section",
+    "chapter",
+    "primary",
+    "evidence",
+    "india",
+    "indian",
+    "social",
+    "science",
+    "state",
+    "society",
+    "after",
+    "before",
+    "during",
+    "this",
+    "that",
+    "they",
+    "their",
+    "then",
+    "from",
+    "your",
+    "king",
+    "kings",
+    "kingdom",
+    "empire",
+    "army",
+    "north",
+    "south",
+    "east",
+    "west",
+    "however",
+    "therefore",
+    "although",
+    "because",
+    "explain",
+    "according",
+    "moreover",
+    "besides",
+    "finally",
+    "firstly",
+    "secondly",
+    "using",
+    "based",
+    "under",
+    "over",
+    "between",
+    "among",
+    "through",
+    "without",
+    "within",
+    "later",
+    "early",
+    "several",
+    "various",
+    "another",
+    "other",
+    "many",
+    "some",
+    "such",
+    "most",
+    "more",
+    "also",
+    "only",
+    "even",
+    "still",
+    "both",
+    "each",
+    "these",
+    "those",
+    "there",
+    "where",
+    "which",
+    "while",
+    "what",
+    "when",
+    "who",
+    "whom",
+    "whose",
+    "expansion",
+    "administration",
+    "system",
+    "policy",
+    "period",
+    "order",
+    "religion",
+    "religious",
+    "tolerance",
+    "approach",
+    "towards",
+    "different",
+    "religions",
+}
+
+
+def _norm_claim(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def _supported_in_evidence(phrase: str, evidence_norm: str, evidence_lower: str) -> bool:
+    compact = _norm_claim(phrase)
+    if len(compact) < 4:
+        return True
+    if compact in evidence_norm:
+        return True
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]+", phrase.lower())
+        if token not in CLAIM_SKIP and len(token) > 2
+    ]
+    if not tokens:
+        return True
+    return all(token in evidence_lower for token in tokens)
+
+
+def unsupported_named_items(answer: str, evidence: list[dict]) -> list[str]:
+    """Reject new people/places/years/orgs. Allows paraphrase of supported names."""
+    blob = " ".join(item.get("text") or "" for item in evidence)
+    evidence_lower = blob.lower()
+    evidence_norm = _norm_claim(blob)
+    body_lines = []
+    for line in (answer or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        body_lines.append(line)
+    text = "\n".join(body_lines)
+    flagged: list[str] = []
+
+    def add(item: str) -> None:
+        lowered = item.strip()
+        if not lowered or lowered in flagged:
+            return
+        if any(marker in lowered.lower() for marker in ("textbook", "karnataka", "historybot", "class 9")):
+            return
+        if not _supported_in_evidence(lowered, evidence_norm, evidence_lower):
+            flagged.append(lowered)
+
+    for match in re.finditer(r"\b([A-Z][a-zA-Z']+(?:[\s-][A-Z][a-zA-Z']+){1,3})\b", text):
+        add(match.group(1))
+    for match in re.finditer(r"\b([A-Z][a-z]{4,})\b", text):
+        add(match.group(1))
+    for match in re.finditer(r"\b([A-Z]{3,})\b", text):
+        add(match.group(1))
+    for match in re.finditer(r"\b(1[0-9]{3}|20[0-2][0-9])\b", text):
+        year = match.group(1)
+        if year not in blob and year not in evidence_lower:
+            add(year)
+    return flagged
 
 
 def validate_kannada_output(text: str) -> tuple[bool, str]:

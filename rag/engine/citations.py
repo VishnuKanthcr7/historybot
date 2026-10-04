@@ -96,6 +96,8 @@ def supporting_evidence(answer: str, evidence: list[dict], min_overlap: int = 2)
     short = len(answer_text.split()) <= 22
     if short:
         kept = kept[:1]
+    else:
+        kept = kept[:8]
     return _dedupe_pages(kept)
 
 
