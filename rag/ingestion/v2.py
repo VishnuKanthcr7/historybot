@@ -10,6 +10,7 @@ from pathlib import Path
 import pymupdf
 
 from rag.ingestion.chunk import chunk_pages
+from rag.ingestion.chunk_quality import assess_chunk
 from rag.ingestion.clean import clean_page_text
 from rag.ingestion.config import EXTRACTED_DIR, INGEST_VERSION
 from rag.ingestion.nudi import converter_status, convert_nudi_to_unicode, looks_like_raw_nudi
@@ -90,11 +91,19 @@ def extract_source_pages(source: dict, convert_nudi: bool = False) -> dict:
     finally:
         doc.close()
     chunks = chunk_pages(pages)
+    excluded_chunks = []
+    for chunk in chunks:
+        quality = assess_chunk(chunk)
+        chunk["retrieval_excluded"] = quality["excluded"]
+        chunk["quality_notes"] = quality["reason"]
+        if quality["excluded"]:
+            excluded_chunks.append({"chunk_id": chunk["chunk_id"], "reason": quality["reason"]})
     return {
         "source_id": source["source_id"],
         "pages": pages,
         "excluded_pages": excluded,
         "chunks": chunks,
+        "excluded_chunks": excluded_chunks,
     }
 
 
@@ -233,6 +242,7 @@ def _summary(extracted: dict) -> dict:
         "page_count": len(extracted["pages"]),
         "chunk_count": len(extracted["chunks"]),
         "excluded_pages": extracted["excluded_pages"],
+        "excluded_chunks": extracted.get("excluded_chunks") or [],
         "pdf_pages": [p["pdf_page_number"] for p in extracted["pages"]],
         "printed_pages": [p["printed_page_number"] for p in extracted["pages"]],
     }

@@ -1,6 +1,56 @@
 # Phase 11 — Source-aware RAG
 
-**Status:** Complete. Old collection `historybot_class9_ss` was **not** deleted or rebuilt.
+**Status:** Phase 11 complete; **Phase 11B quality pass complete**. Old collection `historybot_class9_ss` was **not** deleted or rebuilt.
+
+## Phase 11B (quality / stabilization)
+
+Architecture unchanged. No new PDFs. No MySQL/Odoo changes. No frontend/backend contract changes. Collection `historybot_class9_ss_v2` was **not** rebuilt; records were patched in place.
+
+Commands:
+
+```text
+python scripts/phase11b_patch_index.py
+python scripts/phase11b_regression.py
+```
+
+### Mughal chunk quality (`The Mughals.pdf`)
+
+Indexed total: **23**.  
+Valid for retrieval: **7**.  
+Excluded from retrieval: **16** (`retrieval_excluded=true`; heuristic also applied at query time). Missing CID words were **not** invented.
+
+| Chunk | Reason |
+|---|---|
+| pdf1 tb39 | cropped / “was an the”, “R uling” |
+| pdf2 tb40_01 | cropped (“effectively in the Who”) |
+| pdf2 tb40_02 | truncated start; “1526 he and Agra” |
+| pdf4 tb42_02, tb42_03 | CID empty slots (`called .`, `enrolled as .`) |
+| pdf5 tb43_01–03 | CID empty slots / truncated “ries,” |
+| pdf6 tb44_03 | truncated “quare seal” |
+| pdf6 tb44_04 | truncated end (“It deals with”) |
+| pdf7 tb45_02 | broken “year of were only” |
+| pdf7 tb45_03 | truncated “f the total” |
+| pdf8 tb46_01–02 | truncated start; fill-in blanks |
+| pdf9 tb47 | exercise blanks with missing terms |
+| pdf10 tb48 | truncated exercise page |
+
+Valid remaining: succession/Rajput (41), zat ranking fragment (42_01), zamindar revolts / Nur Jahan / Ain-i Akbari (44_01, 44_02, 44_05), sulh-i kul (45_01).
+
+### OCR cleanup
+
+`@KTBS` / `NOT TO BE REPUBLISHED` stripped in `clean_page_text` and at retrieve time. 20 primary v2 documents were cleaned and re-embedded. Stored `@KTBS` count after patch: **0**. Baji Rao regression answer had no `@KTBS`.
+
+### Detailed answers
+
+Required headings are validated. If they fail after one strict regeneration, the engine returns **primary-only**. 11B regression: all five English DETAILED cases produced both headings with separate citations.
+
+### Citation filtering
+
+Student citations use token overlap against the **final answer**, not the full retrieval set.
+
+### Kannada
+
+Textbook ingest still **pending** (no Nudi converter). Kannada DETAILED does not pull supplements. Failed Kannada generation uses the safe fallback sentence after one regeneration. **Not classroom-ready.**
 
 ## Collections
 
@@ -140,11 +190,43 @@ MySQL schema unchanged. Odoo/PostgreSQL untouched.
 | 26 | ಶಿವಾಜಿಯ ಆಡಳಿತದ ಬಗ್ಗೆ ವಿವರಿಸಿ. | DETAILED. Mixed Kannada + English labelled sections + Maratha NCERT citations. |
 | 27 | ಮೊಘಲರ ಬಗ್ಗೆ ಹೆಚ್ಚಿನ ಮಾಹಿತಿ ನೀಡಿ. | DETAILED retrieved Mughal NCERT; answer fell back to short Kannada from primary pages 1, 3, 10. |
 
+## Phase 11B regression (`scripts/phase11b_regression.py`)
+
+llama3, `historybot_class9_ss_v2`. Honest results:
+
+| # | Question | Result |
+|---|---|---|
+| 1 | Who established the Moghul rule? | Grounded. Babur. **page 3 only**. |
+| 2 | Who was Babar? | Grounded. Page 3. |
+| 3 | Who was Shivaji? | Grounded. Page 12. |
+| 4 | Babar → Shivaji | `NEW_TOPIC`. Shivaji, page 12. |
+| 5 | Shivaji → administration | `FOLLOW_UP`. Page 14. |
+| 6 | Who built the Taj Mahal? | Grounded. Shah Jahan. Cited **pages 8, 9, 11** (page 8 is the building page; 9/11 are extra architecture hits — **not fully filtered**). |
+| 7 | After the Third Battle of Panipat? | Grounded. Madhav Rao I. **page 16 only** (weak page 2 no longer shown). |
+| 8 | Who was Baji Rao I? | Grounded. Page 15. No `@KTBS`. |
+| 9 | Tell me more about Shivaji. | DETAILED headings. Textbook p.13 + Marathas p.64. |
+| 10 | Explain Shivaji's administration in detail. | DETAILED. Textbook p.14 + Marathas p.71. |
+| 11 | Explain Mughal administration in detail. | DETAILED. Textbook p.10 + *The Mughals* p.44. |
+| 12 | Tell me more about mansabdari. | DETAILED. Textbook p.7 + *The Mughals* p.42 (zat ranking; corrupted mansab CID chunks excluded). |
+| 13 | GDP of India | Refused. No supplement. |
+| 14 | Battle of Plassey | Refused. |
+| 15 | Ignore textbook + Wikipedia | Refused. |
+| 16 | Hi | Casual greeting. |
+| 17 | ? | Casual clarify. |
+| 18 | ಶಿವಾಜಿ ಯಾರು? | Kannada script, page 13. Grammar weak. **Not classroom-ready.** |
+| 19 | ಶಿವಾಜಿಯ ಆಡಳಿತದ ಬಗ್ಗೆ ವಿವರಿಸಿ. | Safe Kannada fallback (model refused despite evidence). |
+| 20 | ಮೊಘಲರ ಬಗ್ಗೆ ಹೆಚ್ಚಿನ ಮಾಹಿತಿ ನೀಡಿ. | Short Kannada from page 3. No NCERT. **Not classroom-ready.** |
+
+Also: Maratha expansion DETAILED (headings, p.12 + Marathas p.73). Akbar pages 5,7. Din-e-Ilahi page 6. VisionIAS refused.
+
+E-content: Shivaji and Marathas modules generated with `class9_textbook` + labelled extra source. **Mughals module timed out** (Ollama 300s). No `@KTBS`. No paths/IDs in student citations.
+
 ## Known limitations
 
-- Kannada textbook not in Chroma until a verified Nudi converter is installed and validated.
-- Kannada answers are still model-generated from English evidence; not classroom-ready.
-- NCERT Mughal PDF remains a print-to-PDF with crop artifacts; we did not invent missing words.
-- llama3 may omit the two-heading DETAILED layout; fallback then answers from primary only.
-- Weak extra primary pages can appear in citations (e.g. Panipat citing page 2).
-- Old Chapter 5 collection remains for rollback only; do not mix its page numbers with 2026–27 pages.
+- Kannada textbook not in Chroma until a verified Nudi converter is installed.
+- Kannada answers are model-generated from English evidence; not classroom-ready. Longer Kannada prompts often hit the safe fallback.
+- 16 of 23 Mughal NCERT chunks are excluded; remaining supplement coverage is thin (no repaired CID text).
+- Taj Mahal still cites extra architecture pages 9 and 11 with page 8.
+- llama3 e-content can time out on long JSON (Mughals module in 11B).
+- Citation overlap is heuristic; it is not a guarantee that every listed page is the unique best page.
+- Old Chapter 5 collection remains for rollback only.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rag.engine.citations import supporting_evidence
 from rag.engine.classify import (
     casual_reply,
     classify_answer_mode,
@@ -18,10 +19,10 @@ from rag.engine.normalize import (
     rewrite_for_retrieval,
     trim_history,
 )
-from rag.engine.validate import is_refusal, validate_answer
+from rag.engine.validate import is_refusal, split_detailed_sections, validate_answer
 from rag.llm.client import complete
-from rag.llm.config import MAX_REGENERATIONS, RAG_TOP_K
-from rag.prompts.tutor import SYSTEM_PROMPT, refusal_text
+from rag.llm.config import RAG_TOP_K
+from rag.prompts.tutor import KANNADA_SAFE_FALLBACK, SYSTEM_PROMPT, refusal_text
 from rag.vectorstore.retrieve import retrieve_primary, retrieve_supplementary
 
 LIMITED_EN = (
@@ -70,7 +71,11 @@ def answer_question(
     primary_selected = select_evidence(rag_question, retrieval_query, primary_hits)
     supp_hits: list[dict] = []
     supp_selected: list[dict] = []
-    use_supplement = mode == "DETAILED" and not looks_like_injection(rag_question)
+    use_supplement = (
+        mode == "DETAILED"
+        and language != "kn"
+        and not looks_like_injection(rag_question)
+    )
     if use_supplement:
         supp_hits = retrieve_supplementary(retrieval_query, top_k=RAG_TOP_K)
         supp_selected = select_evidence(rag_question, retrieval_query, supp_hits, max_keep=3)
@@ -88,27 +93,66 @@ def answer_question(
         selected.extend(supp_selected)
 
     payload = _ask_llm(rag_question, language, primary_selected, supp_selected if use_supplement else [], mode, strict=False)
-    ok, reason = validate_answer(payload["raw"], language, selected, grounded_expected=True)
+    ok, reason = validate_answer(
+        payload["raw"],
+        language,
+        selected,
+        grounded_expected=True,
+        mode=mode if use_supplement else "NORMAL",
+        primary=primary_selected,
+        supplement=supp_selected if use_supplement else [],
+    )
+    if not ok:
+        payload = _ask_llm(
+            rag_question,
+            language,
+            primary_selected,
+            supp_selected if use_supplement else [],
+            mode if use_supplement else "NORMAL",
+            strict=True,
+        )
+        ok, reason = validate_answer(
+            payload["raw"],
+            language,
+            selected,
+            grounded_expected=True,
+            mode=mode if use_supplement else "NORMAL",
+            primary=primary_selected,
+            supplement=supp_selected if use_supplement else [],
+        )
+    if language == "kn" and not ok:
+        return _kannada_fallback(retrieval_query, primary_hits + supp_hits, selected, intent, mode, reason)
     if not ok and use_supplement and evidence_is_sufficient(primary_selected):
-        payload = _ask_llm(rag_question, language, primary_selected, [], "NORMAL", strict=False)
+        payload = _ask_llm(rag_question, language, primary_selected, [], "NORMAL", strict=True)
         selected = list(primary_selected)
         use_supplement = False
-        ok, reason = validate_answer(payload["raw"], language, selected, grounded_expected=True)
-    if not ok and MAX_REGENERATIONS >= 1:
-        payload = _ask_llm(rag_question, language, primary_selected, supp_selected if use_supplement else [], mode if use_supplement else "NORMAL", strict=True)
-        ok, reason = validate_answer(payload["raw"], language, selected, grounded_expected=True)
-    if language == "kn" and not ok:
-        result = _unavailable(language, retrieval_query, primary_hits + supp_hits, selected, intent=intent, mode=mode)
-        result["validation_reason"] = reason
-        return result
+        ok, reason = validate_answer(
+            payload["raw"],
+            language,
+            selected,
+            grounded_expected=True,
+            mode="NORMAL",
+            primary=primary_selected,
+            supplement=[],
+        )
     if not ok or is_refusal(payload["raw"], language):
+        if language == "kn":
+            return _kannada_fallback(retrieval_query, primary_hits + supp_hits, selected, intent, mode, reason)
         result = _unavailable(language, retrieval_query, primary_hits + supp_hits, selected, intent=intent, mode=mode)
         result["validation_reason"] = reason
         return result
 
-    sources = _sources(selected)
-    answer = _strip_invented_pages(payload["raw"])
-    answer = f"{answer}\n\n{_citation_block(sources)}"
+    raw = _strip_invented_pages(payload["raw"])
+    if use_supplement and split_detailed_sections(raw):
+        primary_section, extra_section = split_detailed_sections(raw)
+        primary_sources = _sources(supporting_evidence(primary_section, primary_selected))
+        extra_sources = _sources(supporting_evidence(extra_section, supp_selected))
+        answer = _format_detailed(primary_section, extra_section, primary_sources, extra_sources)
+        sources = primary_sources + extra_sources
+    else:
+        use_supplement = False
+        sources = _sources(supporting_evidence(raw, primary_selected))
+        answer = f"{raw}\n\n{_citation_block(sources)}"
     return {
         "answer": answer,
         "language": language,
@@ -148,12 +192,12 @@ def _ask_llm(question: str, language: str, primary: list[dict], supplement: list
         user = (
             f"Language: {language}\nMode: DETAILED\n"
             f"Student question: {question}\n"
-            "Write two labelled sections exactly:\n"
+            "Write two labelled sections exactly, with those headings on their own lines:\n"
             "## From your Class 9 textbook\n"
-            "(facts from PRIMARY evidence only)\n"
+            "Write only facts from PRIMARY evidence here. Do not mention NCERT or extra books here.\n"
             "## Additional school-book detail\n"
-            "(facts from SUPPLEMENTARY evidence only; omit this section if supplementary evidence is empty)\n"
-            "Do not present supplementary facts as Karnataka textbook content.\n\n"
+            "Write only facts from SUPPLEMENTARY evidence here. Do not copy PRIMARY sentences here.\n"
+            "Do not merge the sections. Do not omit the headings.\n"
             f"PRIMARY evidence:\n{chr(10).join(primary_blocks)}\n\n"
             f"SUPPLEMENTARY evidence:\n{chr(10).join(_blocks(supplement, 'SUPPLEMENTARY'))}\n"
             f"{extra}{kannada_rule}\n"
@@ -189,6 +233,39 @@ def _blocks(evidence: list[dict], label: str) -> list[str]:
         kind = item.get("source_type") or label
         blocks.append(f"[{label}; {kind}; printed_page={page}]\n{item.get('text') or ''}")
     return blocks or [f"[{label}] (none)"]
+
+
+def _kannada_fallback(retrieval_query: str, hits: list[dict], selected: list[dict], intent: str | None, mode: str | None, reason: str) -> dict:
+    return {
+        "answer": KANNADA_SAFE_FALLBACK,
+        "language": "kn",
+        "grounded": False,
+        "sources": [],
+        "retrieval_query": retrieval_query,
+        "retrieved": _public_hits(hits),
+        "selected_chunk_ids": [item["chunk_id"] for item in selected],
+        "validation_reason": reason,
+        "intent": intent,
+        "mode": mode,
+        "used_supplementary": False,
+    }
+
+
+def _format_detailed(primary_section: str, extra_section: str, primary_sources: list[dict], extra_sources: list[dict]) -> str:
+    parts = [
+        "## From your Class 9 textbook",
+        "",
+        primary_section.strip(),
+        "",
+        _citation_block(primary_sources),
+        "",
+        "## Additional school-book detail",
+        "",
+        extra_section.strip(),
+        "",
+        _citation_block(extra_sources),
+    ]
+    return "\n".join(parts).strip()
 
 
 def _unavailable(language: str, retrieval_query: str, hits: list[dict], selected: list[dict], intent: str | None = None, mode: str | None = None) -> dict:

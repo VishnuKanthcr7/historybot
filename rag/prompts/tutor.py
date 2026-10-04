@@ -24,6 +24,10 @@ Rules:
 - For "who was X", start with one identifying sentence, then add two to four short facts that are in the evidence. Do not pad with unrelated biography.
 - For "explain" questions, give a short structured explanation from the evidence only.
 - For policy/list questions, use short bullets from the evidence.
+- In DETAILED mode you MUST use both headings exactly, on their own lines:
+  ## From your Class 9 textbook
+  ## Additional school-book detail
+  Put PRIMARY evidence only under the first heading. Put SUPPLEMENTARY evidence only under the second. Never merge the two.
 """
 
 REWRITE_PROMPT = """Rewrite the latest student question as one standalone English question for textbook search.
@@ -40,3 +44,9 @@ def refusal_text(language: str) -> str:
     if language == "kn":
         return "ಈ ವಿಷಯ ನೀಡಲಾದ ಪಠ್ಯಪುಸ್ತಕದಲ್ಲಿ ಲಭ್ಯವಿಲ್ಲ."
     return "This topic is not available in the textbook."
+
+
+KANNADA_SAFE_FALLBACK = (
+    "ಈ ಪ್ರಶ್ನೆಗೆ ಪಠ್ಯಪುಸ್ತಕದ ಆಧಾರದ ಮೇಲೆ ಸ್ಪಷ್ಟವಾದ ಕನ್ನಡ ಉತ್ತರವನ್ನು ಈಗ ನೀಡಲು ಸಾಧ್ಯವಾಗುತ್ತಿಲ್ಲ. "
+    "ದಯವಿಟ್ಟು ಪ್ರಶ್ನೆಯನ್ನು ಸರಳವಾಗಿ ಮತ್ತೆ ಕೇಳಿ."
+)

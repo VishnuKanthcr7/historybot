@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from rag.ingestion.chunk_quality import is_retrieval_excluded
+from rag.ingestion.clean import strip_ocr_artifacts
 from .chroma_store import get_existing_collection, get_or_create_collection, list_collections
 from .config import ACTIVE_COLLECTION, CHAT_TOP_K, COLLECTION_NAME, EMBEDDING_MODEL
 from .embeddings import embed_text
@@ -16,7 +18,7 @@ def retrieve(query: str, top_k: int = CHAT_TOP_K, collection_name: str | None = 
     query_embedding = embed_text(query, model=EMBEDDING_MODEL)
     kwargs = {
         "query_embeddings": [query_embedding],
-        "n_results": top_k,
+        "n_results": max(top_k + 8, top_k),
         "include": ["documents", "metadatas", "distances"],
     }
     if where:
@@ -32,27 +34,32 @@ def retrieve(query: str, top_k: int = CHAT_TOP_K, collection_name: str | None = 
         text = documents[index] if index < len(documents) else ""
         distance = distances[index] if index < len(distances) else None
         similarity = None if distance is None else round(1.0 - float(distance), 4)
-        rows.append(
-            {
-                "chunk_id": chunk_id,
-                "distance": None if distance is None else round(float(distance), 4),
-                "cosine_similarity_approx": similarity,
-                "textbook_page_number": meta.get("textbook_page_number") or meta.get("printed_page_number"),
-                "printed_page_number": meta.get("printed_page_number") or meta.get("textbook_page_number"),
-                "pdf_page_number": meta.get("pdf_page_number"),
-                "section": meta.get("section"),
-                "chapter": meta.get("chapter"),
-                "ingest_version": meta.get("ingest_version"),
-                "source_id": meta.get("source_id"),
-                "source_type": meta.get("source_type") or "primary_textbook",
-                "authority": meta.get("authority") or "primary",
-                "language": meta.get("language") or "en",
-                "document_name": meta.get("document_name"),
-                "citation_label": meta.get("citation_label"),
-                "text": text or "",
-                "preview": (text or "").replace("\n", " ")[:220],
-            }
-        )
+        text = strip_ocr_artifacts(text or "")
+        row = {
+            "chunk_id": chunk_id,
+            "distance": None if distance is None else round(float(distance), 4),
+            "cosine_similarity_approx": similarity,
+            "textbook_page_number": meta.get("textbook_page_number") or meta.get("printed_page_number"),
+            "printed_page_number": meta.get("printed_page_number") or meta.get("textbook_page_number"),
+            "pdf_page_number": meta.get("pdf_page_number"),
+            "section": meta.get("section"),
+            "chapter": meta.get("chapter"),
+            "ingest_version": meta.get("ingest_version"),
+            "source_id": meta.get("source_id"),
+            "source_type": meta.get("source_type") or "primary_textbook",
+            "authority": meta.get("authority") or "primary",
+            "language": meta.get("language") or "en",
+            "document_name": meta.get("document_name"),
+            "citation_label": meta.get("citation_label"),
+            "retrieval_excluded": meta.get("retrieval_excluded"),
+            "text": text or "",
+            "preview": (text or "").replace("\n", " ")[:220],
+        }
+        if is_retrieval_excluded(row):
+            continue
+        rows.append(row)
+        if len(rows) >= top_k:
+            break
     return rows
 
 

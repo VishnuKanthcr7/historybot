@@ -28,6 +28,7 @@ METADATA_KEYS = (
     "printed_page_number",
     "textbook_page_number",
     "citation_label",
+    "retrieval_excluded",
 )
 
 
@@ -38,7 +39,7 @@ def load_phase11_chunks(path: Path | None = None) -> list[dict]:
     if len(ids) != len(set(ids)):
         raise RuntimeError("Phase 11 chunks contain duplicate IDs.")
     for item in chunks:
-        missing = [key for key in METADATA_KEYS if key not in item]
+        missing = [key for key in METADATA_KEYS if key not in item and key != "retrieval_excluded"]
         if missing:
             raise RuntimeError(f"{item.get('chunk_id')} missing {missing}")
         if item.get("source_file") in EXCLUDED_SOURCE_FILES:
@@ -89,5 +90,6 @@ def _metadata(chunk: dict) -> dict:
         "printed_page_number": int(chunk["printed_page_number"]),
         "textbook_page_number": int(chunk["textbook_page_number"]),
         "citation_label": str(chunk.get("citation_label") or ""),
+        "retrieval_excluded": bool(chunk.get("retrieval_excluded")),
         "embedding_model": EMBEDDING_MODEL,
     }

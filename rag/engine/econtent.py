@@ -6,6 +6,7 @@ import json
 import re
 
 from rag.engine.answer import _public_hits, _sources, _unavailable
+from rag.engine.citations import supporting_evidence
 from rag.engine.classify import classify_casual
 from rag.engine.evidence import evidence_is_sufficient, evidence_matches_topic, select_evidence
 from rag.engine.normalize import looks_kannada, looks_like_injection, normalize_question, rewrite_for_retrieval
@@ -59,7 +60,11 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
     content = _parse_content(raw)
     if not content.get("title") and not content.get("introduction") and not content.get("class9_textbook"):
         return _refused(language, retrieval_query, primary_hits, primary_selected)
-    sources = _sources(selected)
+    extra_text = str(content.get("additional_school_book_detail") or "")
+    primary_blob = json.dumps({k: v for k, v in content.items() if k != "additional_school_book_detail"}, ensure_ascii=False)
+    primary_sources = _sources(supporting_evidence(primary_blob, primary_selected))
+    extra_sources = _sources(supporting_evidence(extra_text, supp_selected)) if extra_text else []
+    sources = primary_sources + extra_sources
     content["textbook_source_pages"] = sorted(
         {
             int(item["printed_page_number"] or item["textbook_page_number"])
