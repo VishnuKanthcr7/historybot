@@ -94,7 +94,18 @@ def validate_answer(
     if mentioned and not mentioned.issubset(allowed_pages):
         return False, "invented_page_citation"
     evidence_blob = " ".join(item.get("text") or "" for item in evidence).lower()
-    extra_terms = ("plassey", "gdp", "prime minister", "wikipedia", "visionias", "world war")
+    extra_terms = (
+        "plassey",
+        "gdp",
+        "prime minister",
+        "wikipedia",
+        "visionias",
+        "world war",
+        "ronaldo",
+        "cristiano",
+        "chatgpt",
+        "openai",
+    )
     for term in extra_terms:
         if term in lowered and term not in evidence_blob:
             return False, f"unsupported_term:{term}"

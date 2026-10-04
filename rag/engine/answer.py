@@ -19,6 +19,7 @@ from rag.engine.evidence import evidence_is_sufficient, evidence_matches_topic, 
 from rag.engine.normalize import (
     looks_kannada,
     looks_like_injection,
+    looks_like_roleplay,
     normalize_question,
     rewrite_for_retrieval,
     trim_history,
@@ -35,6 +36,33 @@ LIMITED_EN = (
     "The Class 9 Karnataka State Board 2026–27 textbook has limited information on this topic."
 )
 LIMITED_TERMS = ("mansab", "mansabdari", "sulh-i", "coparcenary", "nur jahan")
+
+BOUNDARY_EN = (
+    "I can help with topics covered in your prescribed Class 9 Karnataka State Board textbook. "
+    "This information is not available in the provided textbook."
+)
+OUTSIDE_SOURCE_NOTE = (
+    "I can only use your prescribed Class 9 Karnataka State Board textbook, "
+    "not Wikipedia, NCERT, the internet, or other books."
+)
+ROLEPLAY_NOTE = (
+    "I cannot invent a fictional story or dialogue. Here is what the prescribed textbook says."
+)
+OFF_DOMAIN_CLAUSES = (
+    (r"capital of karnataka", "the capital of Karnataka"),
+    (r"world war", "World War II"),
+    (r"world cup", "the World Cup"),
+    (r"\bpython\b", "Python"),
+    (r"cristiano|\bronaldo\b", "that person"),
+    (r"tell me a joke|\ba joke\b|\bjokes\b", "jokes"),
+    (r"\bweather\b", "today's weather"),
+    (r"prime minister", "the current Prime Minister"),
+    (r"\bncert\b", "NCERT"),
+    (r"wikipedia", "Wikipedia"),
+    (r"search google|search the internet", "the internet"),
+    (r"exact birthplace|exact place of birth", "the exact birthplace"),
+    (r"chatgpt|openai", "that request"),
+)
 
 
 def answer_question(
@@ -67,53 +95,91 @@ def answer_question(
         return _kannada_unavailable(question)
 
     rag_question = strip_leading_greeting(question)
+    topics = extract_topics(rag_question)
+    if re.search(r"\bkannada\b", rag_question, re.I) and not topics:
+        return _kannada_unavailable(rag_question)
+    off_labels = _off_domain_labels(rag_question)
+    if off_labels and not topics:
+        return _boundary(language, rag_question)
+    if looks_like_injection(rag_question) and not topics:
+        return _unavailable(language, rag_question, [], [], intent=None, mode="NORMAL")
+    if looks_like_roleplay(rag_question) and not topics:
+        return _boundary(language, rag_question)
+    if (
+        re.search(r"\b(this chapter|the chapter|this topic)\b", rag_question, re.I)
+        and not topics
+        and not history
+    ):
+        return _clarify(language, rag_question, "STANDALONE", "NORMAL")
     if _asks_outside_textbook(rag_question):
         return _outside_textbook(language, rag_question)
-    mode = classify_answer_mode(rag_question)
-    intent = classify_intent(rag_question, history)
-    question_type = classify_question_type(rag_question, intent)
+    search_question = _strip_off_domain(rag_question) or rag_question
+    mode = classify_answer_mode(search_question)
+    intent = classify_intent(search_question, history)
+    question_type = classify_question_type(search_question, intent)
     previous = last_user_question(history) if intent == "FOLLOW_UP" else ""
-    if intent == "FOLLOW_UP" and not extract_topics(previous) and not extract_topics(rag_question):
+    if intent == "FOLLOW_UP" and not extract_topics(previous) and not extract_topics(search_question):
         return _clarify(language, rag_question, intent, mode)
     rewrite_history = []
     if intent == "FOLLOW_UP" and previous:
         rewrite_history = [{"role": "user", "content": previous}]
-    retrieval_query = rewrite_for_retrieval(rag_question, rewrite_history, force=bool(rewrite_history))
+    retrieval_query = rewrite_for_retrieval(search_question, rewrite_history, force=bool(rewrite_history))
 
     top_k = 16 if question_type == "BROAD_TOPIC" else (14 if mode == "DETAILED" else 10)
     top_k = max(RAG_TOP_K, top_k)
     primary_hits = retrieve_primary(retrieval_query, top_k=top_k, language="en")
     pack = build_evidence_pack(
-        rag_question,
+        search_question,
         retrieval_query,
-        question_type,
+        question_type if question_type != "EXAM" else "EXPLANATION",
         raw_hits=primary_hits,
         history=history,
     )
     primary_selected = pack.chunks
 
-    if looks_like_injection(rag_question) and not extract_topics(rag_question):
+    if looks_like_injection(rag_question) and not extract_topics(search_question):
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
     if looks_like_injection(rag_question) and not evidence_matches_topic(
-        rag_question, retrieval_query, primary_selected
+        search_question, retrieval_query, primary_selected
     ):
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
     if not evidence_is_sufficient(primary_selected) or not evidence_matches_topic(
-        rag_question, retrieval_query, primary_selected
+        search_question, retrieval_query, primary_selected
     ):
-        if _looks_limited(rag_question) and evidence_is_sufficient(primary_selected):
+        if _looks_limited(search_question) and evidence_is_sufficient(primary_selected):
             return _limited(language, retrieval_query, primary_hits, primary_selected, intent, mode)
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
 
     selected = list(primary_selected)
-    use_plan = question_type in {"BROAD_TOPIC", "EXPLANATION"} or (
+    if question_type == "EXAM":
+        exam = _exam_from_pack(search_question, selected)
+        if exam:
+            sources = _sources(supporting_evidence(exam, selected, min_overlap=1))
+            answer = _decorate_student_answer(rag_question, exam, off_labels)
+            answer = f"{answer}\n\n{_citation_block(sources)}"
+            return _payload(
+                answer,
+                language,
+                retrieval_query,
+                primary_hits,
+                selected,
+                "exam_from_pack",
+                intent,
+                mode,
+                0,
+                [],
+                pack,
+                fallback=False,
+                sources=sources,
+            )
+    use_plan = question_type in {"BROAD_TOPIC", "EXPLANATION", "EXAM"} or (
         question_type == "FOLLOW_UP" and (pack.facet == "administration" or len(selected) >= 5)
     )
     regenerations = 0
     coverage_info = None
     if use_plan:
         plan_type = "BROAD_TOPIC" if question_type == "BROAD_TOPIC" else "EXPLANATION"
-        covered = generate_from_plan(rag_question, selected, plan_type)
+        covered = generate_from_plan(search_question, selected, plan_type)
         coverage_info = covered
         regenerations = 1 if covered.get("regenerated") else 0
         raw = covered.get("answer") or ""
@@ -130,9 +196,9 @@ def answer_question(
         if not ok:
             from rag.engine.coverage import combine_sections, filter_plan, readable_extract, build_coverage_plan
 
-            plan = filter_plan(rag_question, build_coverage_plan(selected))
+            plan = filter_plan(search_question, build_coverage_plan(selected))
             raw = combine_sections(
-                rag_question,
+                search_question,
                 [(group, readable_extract(group.chunks)) for group in plan],
             )
             reason = f"{reason}+structured_fallback"
@@ -141,6 +207,7 @@ def answer_question(
             coverage_info = covered
         raw = _strip_invented_pages(raw)
         raw = _apply_partial_refusals(rag_question, raw, selected)
+        raw = _decorate_student_answer(rag_question, raw, off_labels)
         cite_pages = set()
         for pages in (covered.get("section_pages") or {}).values():
             cite_pages.update(pages or [])
@@ -174,7 +241,7 @@ def answer_question(
             sources=sources,
         )
 
-    payload = _ask_llm(rag_question, primary_selected, mode, strict=False, question_type=question_type)
+    payload = _ask_llm(search_question, primary_selected, mode, strict=False, question_type=question_type)
     regenerations = 0
     ok, reason = validate_answer(
         payload["raw"],
@@ -187,7 +254,7 @@ def answer_question(
     )
     if not ok:
         regenerations = 1
-        payload = _ask_llm(rag_question, primary_selected, mode, strict=True, question_type=question_type)
+        payload = _ask_llm(search_question, primary_selected, mode, strict=True, question_type=question_type)
         ok, reason = validate_answer(
             payload["raw"],
             "en",
@@ -200,10 +267,10 @@ def answer_question(
     claims = unsupported_named_items(payload.get("raw") or "", selected)
     if not ok or is_refusal(payload["raw"], "en"):
         if evidence_is_sufficient(selected) and not looks_like_injection(rag_question):
-            raw = _safe_from_evidence(selected, rag_question)
+            raw = _safe_from_evidence(selected, search_question)
             reason = f"{reason}+extractive_fallback"
             sources = _sources(supporting_evidence(raw, selected, min_overlap=1))
-            answer = f"{raw}\n\n{_citation_block(sources)}"
+            answer = f"{_decorate_student_answer(rag_question, raw, off_labels)}\n\n{_citation_block(sources)}"
             return _payload(
                 answer,
                 language,
@@ -228,6 +295,7 @@ def answer_question(
 
     raw = _strip_invented_pages(payload["raw"])
     raw = _apply_partial_refusals(rag_question, raw, selected)
+    raw = _decorate_student_answer(rag_question, raw, off_labels)
     sources = _sources(supporting_evidence(raw, selected, min_overlap=1 if mode == "DETAILED" else 2))
     answer = f"{raw}\n\n{_citation_block(sources)}"
     return _payload(
@@ -251,6 +319,94 @@ def _looks_limited(question: str) -> bool:
     return any(term in lowered for term in LIMITED_TERMS)
 
 
+def _off_domain_labels(question: str) -> list[str]:
+    lowered = (question or "").lower()
+    labels = []
+    for pattern, label in OFF_DOMAIN_CLAUSES:
+        if re.search(pattern, lowered) and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def _strip_off_domain(question: str) -> str:
+    text = question or ""
+    replacements = (
+        (r"what wikipedia says about", "tell me about"),
+        (r"information from ncert about", "tell me about"),
+        (r"from ncert about", "about"),
+        (r"search google for", "tell me about"),
+        (r"and what is the capital of karnataka", ""),
+        (r"and world war ii", ""),
+        (r"and also tell me who won the 2026 world cup", ""),
+        (r"who won the 2026 world cup", ""),
+        (r"and his exact date of birth", ""),
+        (r"and tell me his exact birthplace", ""),
+        (r"his exact birthplace", ""),
+        (r"his exact date of birth", ""),
+        (r"capital of karnataka", ""),
+        (r"world war ii", ""),
+        (r"world cup", ""),
+        (r"\bwikipedia\b", ""),
+        (r"\bncert\b", ""),
+        (r"\bgoogle\b", ""),
+    )
+    for pattern, repl in replacements:
+        text = re.sub(pattern, repl, text, flags=re.I)
+    for pattern, _ in OFF_DOMAIN_CLAUSES:
+        text = re.sub(pattern, " ", text, flags=re.I)
+    return re.sub(r"\s+", " ", text).strip(" ,.")
+
+
+def _decorate_student_answer(question: str, answer: str, off_labels: list[str] | None) -> str:
+    parts: list[str] = []
+    lowered = (question or "").lower()
+    outside = looks_like_injection(question) or any(
+        marker in lowered for marker in ("wikipedia", "ncert", "google", "another book", "internet")
+    )
+    if outside:
+        parts.append(OUTSIDE_SOURCE_NOTE)
+    if looks_like_roleplay(question):
+        parts.append(ROLEPLAY_NOTE)
+    parts.append((answer or "").strip())
+    remaining = [label for label in (off_labels or []) if label not in {"Wikipedia", "NCERT", "the internet"}]
+    if remaining:
+        if len(remaining) == 1:
+            parts.append(f"The prescribed textbook does not provide {remaining[0]}.")
+        else:
+            parts.append(
+                "The prescribed textbook does not provide "
+                + ", ".join(remaining[:-1])
+                + f", or {remaining[-1]}."
+            )
+    return "\n\n".join(part for part in parts if part)
+
+
+def _exam_from_pack(question: str, chunks: list[dict]) -> str:
+    from rag.engine.coverage import build_coverage_plan, filter_plan, readable_extract
+
+    plan = filter_plan(question, build_coverage_plan(chunks))
+    if not plan:
+        return ""
+    lines = ["Practice questions from the prescribed Class 9 textbook:"]
+    count = 0
+    for group in plan[:8]:
+        extract = readable_extract(group.chunks)
+        sentence = ""
+        for piece in re.split(r"(?<=[.!?])\s+", extract or ""):
+            piece = piece.strip()
+            if len(piece) >= 40:
+                sentence = piece
+                break
+        if not sentence:
+            continue
+        count += 1
+        lines.append(f"{count}. What does the textbook say about {group.title}?")
+        lines.append(f"Answer: {sentence}")
+        if count >= 5:
+            break
+    return "\n\n".join(lines) if count else ""
+
+
 def _asks_outside_textbook(question: str) -> bool:
     lowered = (question or "").lower()
     return (
@@ -263,6 +419,7 @@ def _asks_outside_textbook(question: str) -> bool:
 def _outside_textbook(language: str, question: str) -> dict:
     return {
         "answer": (
+            "I can only answer from your prescribed Class 9 Karnataka State Board textbook. "
             "Information that is not in the provided textbook cannot be given. "
             "This topic is not available in the provided textbook."
         ),
@@ -273,6 +430,26 @@ def _outside_textbook(language: str, question: str) -> dict:
         "retrieved": [],
         "selected_chunk_ids": [],
         "validation_reason": "outside_textbook_request",
+        "intent": None,
+        "mode": "NORMAL",
+        "question_type": "DIRECT",
+        "used_supplementary": False,
+        "regeneration_count": 0,
+        "unsupported_claims": [],
+        "fallback_used": False,
+    }
+
+
+def _boundary(language: str, question: str) -> dict:
+    return {
+        "answer": BOUNDARY_EN if language != "kn" else refusal_text("kn"),
+        "language": language,
+        "grounded": False,
+        "sources": [],
+        "retrieval_query": question,
+        "retrieved": [],
+        "selected_chunk_ids": [],
+        "validation_reason": "off_domain_or_unsupported",
         "intent": None,
         "mode": "NORMAL",
         "question_type": "DIRECT",
@@ -307,13 +484,16 @@ def _apply_partial_refusals(question: str, answer: str, evidence: list[dict]) ->
     lowered = (question or "").lower()
     blob = " ".join(item.get("text") or "" for item in evidence).lower()
     prefix = []
-    if "exact" in lowered and "date" in lowered:
+    if re.search(r"exact (date of )?birth|exact birth date", lowered):
         has_full_date = bool(
             re.search(r"\b\d{1,2}\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b", blob)
             or re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}", blob)
         )
         if not has_full_date:
             prefix.append("The exact birth date is not available in the provided textbook.")
+    if re.search(r"exact birthplace|exact place of birth", lowered):
+        if not re.search(r"\bborn (at|in)\b.{0,40}", blob):
+            prefix.append("The prescribed textbook does not provide the exact birthplace.")
     if not prefix:
         return answer
     return "\n\n".join(prefix + [answer])
@@ -375,6 +555,12 @@ def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, questi
             "\nSTRICT MODE: Use only names, dates, and events that appear in the evidence. "
             "If a detail is missing from the evidence, omit it. Do not guess."
         )
+    if re.search(r"simply|class 9 student|i don'?t understand|quick revision", question or "", re.I):
+        extra += "\nUse very simple Class 9 English. Do not add extra facts."
+    if looks_like_roleplay(question or ""):
+        extra += "\nDo not write fiction or invented dialogue. State textbook facts only."
+    if question_type == "EXAM":
+        extra += "\nWrite short textbook-grounded practice questions and answers. Do not invent facts."
     if question_type == "BROAD_TOPIC":
         primary_blocks = _blocks(primary, "TEXTBOOK", max_chars=650)
         user = (
@@ -494,7 +680,7 @@ def _unavailable(
     mode: str | None = None,
 ) -> dict:
     return {
-        "answer": refusal_text(language),
+        "answer": refusal_text(language) if language == "kn" else BOUNDARY_EN,
         "language": language,
         "grounded": False,
         "sources": [],
@@ -555,6 +741,11 @@ def _sources(selected: list[dict]) -> list[dict]:
                 "document_name": item.get("document_name"),
             }
         )
+    seen.sort(
+        key=lambda item: int(item["printed_page_number"])
+        if str(item.get("printed_page_number") or "").isdigit()
+        else 99
+    )
     return seen
 
 

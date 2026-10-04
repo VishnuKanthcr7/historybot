@@ -17,6 +17,11 @@ function friendlyMessage(code, fallback) {
       return "HistoryBot is temporarily unavailable. Please try again in a moment.";
     case "RAG_TIMEOUT":
       return "HistoryBot is taking longer than expected. Please try again in a moment.";
+    case "INTERNAL_ERROR":
+    case "DATABASE_ERROR":
+      return "Something went wrong. Please try again in a moment.";
+    case "INVALID_JSON":
+      return "Please enter a valid question.";
     case "VALIDATION_ERROR":
       return "Please enter a valid question.";
     case "SESSION_NOT_FOUND":

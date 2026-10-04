@@ -66,6 +66,15 @@ THANKS_PHRASES = (
     "ಧನ್ಯವಾದ",
     "ಧನ್ಯವಾದಗಳು",
 )
+BYE_PHRASES = (
+    "bye",
+    "goodbye",
+    "good bye",
+    "see you",
+    "see ya",
+    "cya",
+    "take care",
+)
 CLARIFY_PHRASES = (
     "ok",
     "okay",
@@ -103,13 +112,15 @@ def classify_casual(question: str) -> str | None:
         return "CLARIFY"
     if LEADING_GREETING.match(raw) and strip_leading_greeting(raw) != raw:
         remainder = strip_leading_greeting(raw)
-        if remainder and remainder.lower() not in GREETING_PHRASES + THANKS_PHRASES + CLARIFY_PHRASES:
+        if remainder and remainder.lower() not in GREETING_PHRASES + THANKS_PHRASES + CLARIFY_PHRASES + BYE_PHRASES:
             return None
     folded = _folded(raw)
     if folded in GREETING_PHRASES:
         return "GREETING"
     if folded in THANKS_PHRASES:
         return "THANKS"
+    if folded in BYE_PHRASES:
+        return "BYE"
     if folded in CLARIFY_PHRASES:
         return "CLARIFY"
     if len(folded) <= 2 and not re.search(r"[A-Za-z\u0C80-\u0CFF]{3,}", raw):
@@ -127,6 +138,10 @@ def casual_reply(kind: str, language: str) -> str:
         if kn:
             return "ಸ್ವಾಗತ. ಇನ್ನೊಂದು ಪ್ರಶ್ನೆ ಕೇಳಬಹುದು."
         return "You're welcome. Ask another question from your History textbook when you're ready."
+    if kind == "BYE":
+        if kn:
+            return "ವಿದಾಯ. ಪಠ್ಯಪುಸ್ತಕದಿಂದ ಮತ್ತೆ ಕಲಿಯಲು ಬನ್ನಿ."
+        return "Goodbye. Come back whenever you want to study from your History textbook."
     if kn:
         return "ದಯವಿಟ್ಟು ಇತಿಹಾಸ ಪಠ್ಯಪುಸ್ತಕದ ಬಗ್ಗೆ ಪ್ರಶ್ನೆ ಕೇಳಿ."
     return "Please ask a question about the History textbook."
@@ -135,16 +150,18 @@ def casual_reply(kind: str, language: str) -> str:
 def extract_topics(text: str) -> set[str]:
     blob = text or ""
     lowered = blob.lower()
+    collapsed = re.sub(r"(.)\1{2,}", r"\1", lowered)
     found = set()
     for key, aliases in TOPIC_ALIASES.items():
         for alias in aliases:
-            if alias.isascii():
-                if alias in lowered:
+            haystacks = (lowered, collapsed) if alias.isascii() else (blob,)
+            for haystack in haystacks:
+                if alias in haystack:
                     found.add(key)
                     break
-            elif alias in blob:
-                found.add(key)
-                break
+            else:
+                continue
+            break
     return found
 
 
@@ -155,6 +172,18 @@ def last_user_question(history: list[dict] | None) -> str:
     return ""
 
 
+FOLLOW_SHORT_RE = re.compile(
+    r"^(tell me more|explain more|give me more( details)?|what else|continue|"
+    r"go deeper|more|why|how|and then|what happened after that)\??$",
+    re.I,
+)
+OFF_DOMAIN_RE = re.compile(
+    r"\b(python|ronaldo|cristiano|joke|jokes|weather|prime minister|world cup|"
+    r"world war|ncert|wikipedia|chatgpt|openai)\b|capital of karnataka",
+    re.I,
+)
+
+
 def classify_intent(question: str, history: list[dict] | None) -> str:
     """Return FOLLOW_UP, NEW_TOPIC, or STANDALONE."""
     if not history:
@@ -163,19 +192,23 @@ def classify_intent(question: str, history: list[dict] | None) -> str:
     current_topics = extract_topics(question)
     previous_topics = extract_topics(previous)
     has_pronoun = bool(PRONOUN_RE.search(question or ""))
+    folded = _folded(question or "")
+    off_domain = bool(OFF_DOMAIN_RE.search(question or ""))
 
     if current_topics and previous_topics and current_topics.isdisjoint(previous_topics):
         return "NEW_TOPIC"
+    if off_domain and not current_topics:
+        return "STANDALONE"
     if has_pronoun and (not current_topics or current_topics & previous_topics):
         return "FOLLOW_UP"
     if current_topics and previous_topics and current_topics <= previous_topics:
         return "FOLLOW_UP"
     if current_topics and not previous_topics:
         return "STANDALONE"
-    if not current_topics and has_pronoun:
-        return "FOLLOW_UP"
     if not current_topics and previous_topics:
-        if STANDALONE_START.match((question or "").strip()) and not has_pronoun:
+        if FOLLOW_SHORT_RE.match(folded) or has_pronoun:
+            return "FOLLOW_UP"
+        if STANDALONE_START.match((question or "").strip()) and not has_pronoun and len((question or "").split()) > 8:
             return "NEW_TOPIC"
         if len((question or "").split()) <= 10:
             return "FOLLOW_UP"
@@ -186,7 +219,8 @@ DETAILED_RE = re.compile(
     r"\b(tell me more|more detail|more details|in detail|explain fully|"
     r"detailed explanation|everything about|more information|"
     r"i want more|explain this topic in detail|give me more|"
-    r"tell me about)\b",
+    r"tell me about|go deeper|what else|continue|"
+    r"summarize|summary|revision|important points|quick revision)\b",
     re.I,
 )
 EXPLAIN_RE = re.compile(r"\b(explain|describe)\b", re.I)
@@ -197,6 +231,17 @@ ECONTENT_RE = re.compile(
 )
 KANNADA_DETAIL_RE = re.compile(r"ವಿವರ|ಹೆಚ್ಚಿನ ಮಾಹಿತಿ")
 DYNASTY_RE = re.compile(r"\b(mughals?|marathas?|ahoms?)\b", re.I)
+EXAM_RE = re.compile(
+    r"\b(quiz( me)?|test me|mcqs?|multiple choice|short questions|5-mark|"
+    r"ten questions|10 questions|give( me)? (\d+ )?questions|practice questions)\b",
+    re.I,
+)
+SUMMARY_RE = re.compile(
+    r"\b(summarize|summary|revision|important points|one-page|"
+    r"quick revision|what should i remember|main things|"
+    r"explain simply|like i'?m a class 9|i don't understand)\b",
+    re.I,
+)
 
 
 def classify_answer_mode(question: str) -> str:
@@ -204,7 +249,7 @@ def classify_answer_mode(question: str) -> str:
     text = question or ""
     if ECONTENT_RE.search(text):
         return "ECONTENT"
-    if DETAILED_RE.search(text) or KANNADA_DETAIL_RE.search(text):
+    if DETAILED_RE.search(text) or KANNADA_DETAIL_RE.search(text) or SUMMARY_RE.search(text) or EXAM_RE.search(text):
         return "DETAILED"
     if EXPLAIN_RE.search(text) and not (SHORT_FACT_RE.match(text) and len(text.split()) <= 10):
         return "DETAILED"
@@ -212,7 +257,7 @@ def classify_answer_mode(question: str) -> str:
 
 
 def classify_question_type(question: str, intent: str | None = None) -> str:
-    """Return DIRECT, EXPLANATION, BROAD_TOPIC, or FOLLOW_UP."""
+    """Return DIRECT, EXPLANATION, BROAD_TOPIC, FOLLOW_UP, or EXAM."""
     if intent == "FOLLOW_UP":
         return "FOLLOW_UP"
     text = question or ""
@@ -222,10 +267,16 @@ def classify_question_type(question: str, intent: str | None = None) -> str:
     dynasty_only = bool(DYNASTY_RE.search(text)) and not (
         topics & {"babar", "akbar", "shivaji", "shahjahan", "aurangzeb", "bajirao", "humayun"}
     )
+    if EXAM_RE.search(text):
+        return "EXAM"
     if "in detail" in lowered and dynasty_only:
         return "BROAD_TOPIC"
     if re.search(r"\btell me (more )?about the (mughals|marathas|ahoms)\b", lowered):
         return "BROAD_TOPIC"
+    if SUMMARY_RE.search(text) and dynasty_only:
+        return "BROAD_TOPIC"
+    if SUMMARY_RE.search(text):
+        return "EXPLANATION"
     if has_admin or (EXPLAIN_RE.search(text) and ("policy" in lowered or "expansion" in lowered)):
         return "EXPLANATION"
     if EXPLAIN_RE.search(text) and dynasty_only:
