@@ -24,6 +24,7 @@ from rag.engine.normalize import (
     trim_history,
 )
 from rag.engine.pack import build_evidence_pack
+from rag.engine.coverage import generate_from_plan
 from rag.engine.validate import is_refusal, unsupported_named_items, validate_answer
 from rag.llm.client import complete
 from rag.llm.config import RAG_TOP_K
@@ -105,6 +106,74 @@ def answer_question(
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
 
     selected = list(primary_selected)
+    use_plan = question_type in {"BROAD_TOPIC", "EXPLANATION"} or (
+        question_type == "FOLLOW_UP" and (pack.facet == "administration" or len(selected) >= 5)
+    )
+    regenerations = 0
+    coverage_info = None
+    if use_plan:
+        plan_type = "BROAD_TOPIC" if question_type == "BROAD_TOPIC" else "EXPLANATION"
+        covered = generate_from_plan(rag_question, selected, plan_type)
+        coverage_info = covered
+        regenerations = 1 if covered.get("regenerated") else 0
+        raw = covered.get("answer") or ""
+        ok, reason = validate_answer(
+            raw,
+            "en",
+            selected,
+            grounded_expected=True,
+            mode=mode,
+            primary=primary_selected,
+            supplement=[],
+        )
+        claims = unsupported_named_items(raw, selected)
+        if not ok:
+            from rag.engine.coverage import build_coverage_plan, combine_sections, readable_extract
+
+            plan = build_coverage_plan(selected)
+            raw = combine_sections(
+                rag_question,
+                [(group, readable_extract(group.chunks)) for group in plan],
+            )
+            reason = f"{reason}+structured_fallback"
+            claims = unsupported_named_items(raw, selected)
+            covered["fallback_used"] = True
+            coverage_info = covered
+        raw = _strip_invented_pages(raw)
+        raw = _apply_partial_refusals(rag_question, raw, selected)
+        cite_pages = set()
+        for pages in (covered.get("section_pages") or {}).values():
+            cite_pages.update(pages or [])
+        if not cite_pages:
+            sources = _sources(supporting_evidence(raw, selected, min_overlap=1))
+        else:
+            sources = _sources(
+                [
+                    item
+                    for item in selected
+                    if (item.get("printed_page_number") or item.get("textbook_page_number")) in cite_pages
+                ]
+            )
+            if not sources:
+                sources = _sources(supporting_evidence(raw, selected, min_overlap=1))
+        answer = f"{raw}\n\n{_citation_block(sources)}"
+        return _payload(
+            answer,
+            language,
+            retrieval_query,
+            primary_hits,
+            selected,
+            reason,
+            intent,
+            mode,
+            regenerations,
+            claims,
+            pack,
+            fallback=bool(covered.get("fallback_used")),
+            coverage=coverage_info,
+            sources=sources,
+        )
+
     payload = _ask_llm(rag_question, primary_selected, mode, strict=False, question_type=question_type)
     regenerations = 0
     ok, reason = validate_answer(
@@ -263,12 +332,24 @@ def _payload(
     claims: list,
     pack,
     fallback: bool,
+    coverage: dict | None = None,
+    sources: list[dict] | None = None,
 ) -> dict:
+    extra = {}
+    if coverage:
+        extra["coverage"] = {
+            "plan": coverage.get("plan"),
+            "expected": (coverage.get("coverage") or {}).get("expected"),
+            "generated": (coverage.get("coverage") or {}).get("generated"),
+            "missing": (coverage.get("coverage") or {}).get("missing"),
+            "grade": (coverage.get("coverage") or {}).get("grade"),
+            "regenerated": coverage.get("regenerated"),
+        }
     return {
         "answer": answer,
         "language": language,
         "grounded": True,
-        "sources": _sources(supporting_evidence(answer, selected, min_overlap=1)),
+        "sources": sources if sources is not None else _sources(supporting_evidence(answer, selected, min_overlap=1)),
         "retrieval_query": retrieval_query,
         "retrieved": _public_hits(hits),
         "selected_chunk_ids": [item["chunk_id"] for item in selected if item.get("chunk_id")],
@@ -282,6 +363,7 @@ def _payload(
         "regeneration_count": regenerations,
         "unsupported_claims": claims,
         "fallback_used": fallback,
+        **extra,
     }
 
 

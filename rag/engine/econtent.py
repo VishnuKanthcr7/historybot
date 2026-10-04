@@ -11,6 +11,7 @@ from rag.engine.classify import classify_casual
 from rag.engine.evidence import evidence_is_sufficient, evidence_matches_topic
 from rag.engine.normalize import looks_kannada, looks_like_injection, normalize_question
 from rag.engine.pack import build_evidence_pack
+from rag.engine.coverage import build_coverage_plan, generate_from_plan, readable_extract
 from rag.engine.validate import unsupported_named_items
 from rag.llm.client import LlmError, complete
 from rag.prompts.econtent import ECONTENT_SYSTEM, SECTION_SPECS
@@ -60,17 +61,32 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
         return _refused(language, retrieval_query, primary_hits, primary_selected)
 
     content: dict = {}
-    ordered = list(primary_selected)
+    covered = generate_from_plan(topic, primary_selected, "BROAD_TOPIC")
+    if covered.get("answer"):
+        content["detailed_explanation"] = covered["answer"]
+        content["class9_textbook"] = covered["answer"][:1800]
+        content["title"] = topic
+        content["introduction"] = (
+            f"This Class 9 module on {topic} uses only the Karnataka textbook. "
+            "The explanation below follows the textbook evidence group by group."
+        )
+    plan = build_coverage_plan(primary_selected)
+    diverse = _diverse_chunks(plan, 8) or primary_selected[:8]
     for spec in SECTION_SPECS:
         if spec.get("supplement") or spec["keys"] == ("simple_kannada",):
             continue
-        packed = _pack(ordered[: spec.get("max_chunks", 8)], "TEXTBOOK")
-        parsed = _ask_section(topic, spec, packed, primary_selected)
+        keys = [key for key in spec["keys"] if key not in content]
+        if not keys:
+            continue
+        trimmed = dict(spec)
+        trimmed["keys"] = tuple(keys)
+        packed = _pack(diverse[: spec.get("max_chunks", 8)], "TEXTBOOK")
+        parsed = _ask_section(topic, trimmed, packed, primary_selected)
         if not parsed:
-            parsed = _ask_section(topic, spec, packed, primary_selected, strict=True)
+            parsed = _ask_section(topic, trimmed, packed, primary_selected, strict=True)
         if not parsed:
             continue
-        for key in spec["keys"]:
+        for key in keys:
             value = parsed.get(key)
             if _usable(value):
                 content[key] = value
@@ -85,8 +101,23 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
         if not content["class9_textbook"]:
             return _refused(language, retrieval_query, primary_hits, primary_selected)
 
+    if not content.get("detailed_explanation"):
+        content["detailed_explanation"] = content.get("class9_textbook") or readable_extract(primary_selected, 8)
+
     blob = json.dumps(content, ensure_ascii=False)
-    sources = _sources(supporting_evidence(blob, primary_selected, min_overlap=1))
+    used_pages = []
+    for pages in (covered.get("section_pages") or {}).values():
+        used_pages.extend(pages or [])
+    if used_pages:
+        sources = _sources(
+            [
+                item
+                for item in primary_selected
+                if (item.get("printed_page_number") or item.get("textbook_page_number")) in set(used_pages)
+            ]
+        )
+    else:
+        sources = _sources(supporting_evidence(blob, primary_selected, min_overlap=1))
     content["textbook_source_pages"] = sorted(
         {
             int(item["printed_page_number"] or item["textbook_page_number"])
@@ -106,7 +137,26 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
         "selected_chunk_ids": [item["chunk_id"] for item in primary_selected],
         "used_supplementary": False,
         "evidence_pack": pack.as_public(),
+        "coverage": {
+            "plan": covered.get("plan"),
+            "grade": (covered.get("coverage") or {}).get("grade"),
+            "missing": (covered.get("coverage") or {}).get("missing"),
+        },
     }
+
+
+def _diverse_chunks(plan_or_chunks, limit: int) -> list[dict]:
+    if plan_or_chunks and hasattr(plan_or_chunks[0], "chunks"):
+        buckets = [list(group.chunks) for group in plan_or_chunks]
+        out = []
+        while len(out) < limit and any(buckets):
+            for bucket in buckets:
+                if bucket:
+                    out.append(bucket.pop(0))
+                if len(out) >= limit:
+                    break
+        return out
+    return list(plan_or_chunks)[:limit]
 
 
 def _extractive_overview(items: list[dict], topic: str) -> str:
