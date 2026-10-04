@@ -47,6 +47,38 @@ YEAR_RE = re.compile(r"\b(1[2-8]\d{2})(?:\s*[-–]\s*(1[2-8]\d{2}))?\b")
 META_RE = re.compile(
     r"(?i)\b(chroma|evidence pack|vector database|retrieval|chunks?|RAG|Ollama|LLM|nomic-embed|according to the evidence)\b"
 )
+HEADING_JUNK_RE = re.compile(
+    r"(?i)mughals?\s+in\s+india\s*(?:\([^)]*\))?|do you know this\??|"
+    r"babarnama\s*[–-]\s*\([^)]*\)|unesco world heritage|new seven wonders of the word"
+)
+EVENT_HINTS = (
+    "established",
+    "wrote",
+    "built",
+    "construction",
+    "imprisoned",
+    "seized",
+    "appointed",
+    "ascended",
+    "celebrated",
+    "constructed",
+    "defeated",
+    "encouraged",
+    "translated",
+)
+TERM_EXPLAIN_HINTS = (
+    "system",
+    "called",
+    "known as",
+    "means",
+    "meant",
+    "ranking",
+    "was a",
+    "were a",
+    "is a",
+    "consisted",
+    "divided",
+)
 
 TERM_PATTERNS = (
     ("Din-e-Ilahi", ("din-e-ilahi", "din e ilahi", "dine ilahi", "din-i-ilahi")),
@@ -156,8 +188,7 @@ def _assemble_module(topic: str, plan, detailed: str) -> dict:
     people = _people_from_plan(plan)
     terms = _terms_from_plan(plan)
     timeline, events = _timeline_from_plan(plan)
-    key_points = [readable_extract(group.chunks, 1) for group in plan[:6]]
-    key_points = [_clean_student_text(point) for point in key_points if point]
+    key_points = _key_points_from_plan(plan)
     intro = _introduction(topic, titles)
     objectives = [
         f"Identify the main people and topics in this Class 9 lesson on {topic}."
@@ -166,14 +197,14 @@ def _assemble_module(topic: str, plan, detailed: str) -> dict:
         objectives.append(f"Explain what the Class 9 textbook says about {title}.")
     if terms:
         objectives.append("Recall important terms from this lesson.")
-    revision = " ".join(key_points[:4]) if key_points else detailed[:700]
+    revision = _revision_from_points(key_points, people)
     content = {
         "title": f"Class 9 learning module: {topic}",
         "introduction": intro,
         "learning_objectives": objectives[:6],
         "detailed_explanation": detailed,
         "key_points": key_points,
-        "revision": _clean_student_text(revision),
+        "revision": revision,
     }
     if people:
         content["important_people"] = people
@@ -201,6 +232,111 @@ def _introduction(topic: str, titles: list[str]) -> str:
     )
 
 
+def _normalize_ocr_text(text: str) -> str:
+    """Remove heading/OCR wrappers without adding new facts."""
+    text = " ".join((text or "").split())
+    text = re.sub(r"(?i)^.{0,120}new seven wonders of the word\.?\s*[”\"]?\s*", "", text)
+    text = HEADING_JUNK_RE.sub(" ", text)
+    text = re.sub(r"(?i)(?:taj mahal:?\s*)+(?:the mughal king,?\s*)+", " ", text)
+    text = re.sub(r"(?i)\bbabur,?\s*who established mughal\b", " ", text)
+    text = re.sub(r"(?i)\b(?:babur|babar)(?:\s+(?:babur|babar))+\b", "Babur", text)
+    text = re.sub(r"(?i)art and architecture\s*:\s*", "", text)
+    text = re.sub(r"\b([A-Za-z][A-Za-z'’-]{1,24})(?:\s+\1\b)+", r"\1", text)
+    text = re.sub(r"\b(.{8,70}?)\b(?:\s+\1\b)+", r"\1", text)
+    text = re.sub(r"\s+", " ", text).strip(" :,-")
+    return text
+
+
+def _is_student_sentence(text: str) -> bool:
+    sent = (text or "").strip()
+    words = sent.split()
+    if len(words) < 8 or len(words) > 55:
+        return False
+    if not re.search(r"[.!?]$", sent):
+        return False
+    if re.match(r"^[a-z]", sent):
+        return False
+    if re.search(r"(?:\b[A-Za-z]\s){6,}", sent):
+        return False
+    if HEADING_JUNK_RE.search(sent):
+        return False
+    low = sent.lower()
+    if "who established mughal" in low and "empire" not in low and "rule" not in low:
+        return False
+    if sent.lower().startswith(("chapter", "we will learn", "taj mahal:")):
+        return False
+    if re.search(r"\b(chroma|chunk_id|evidence pack)\b", sent, re.I):
+        return False
+    return True
+
+
+def _iter_clean_sentences(chunks: list[dict]):
+    seen = set()
+    for item in chunks or []:
+        page = _page(item)
+        raw = _normalize_ocr_text(item.get("text") or "")
+        for sent in re.split(r"(?<=[.!?])\s+", raw):
+            sent = sent.strip()
+            if not _is_student_sentence(sent):
+                continue
+            key = sent[:70].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            yield sent, page, item
+
+
+def _score_person_sentence(sent: str, aliases: tuple[str, ...]) -> int:
+    low = sent.lower()
+    if not any(alias in low for alias in aliases if alias.isascii()):
+        return 0
+    score = 3
+    if any(hint in low for hint in EVENT_HINTS):
+        score += 2
+    if low.startswith(tuple(alias for alias in aliases if alias.isascii())):
+        score += 2
+    return score
+
+
+def _score_term_sentence(sent: str, needle: str) -> int:
+    low = sent.lower()
+    if needle not in low:
+        return 0
+    if re.search(r",.+,.*\band\b", sent) and not any(hint in low for hint in TERM_EXPLAIN_HINTS):
+        return 0
+    if "duties of the king" in low:
+        return 0
+    score = 1
+    if any(hint in low for hint in TERM_EXPLAIN_HINTS):
+        score += 4
+    if re.search(rf"\bthe {re.escape(needle)}", low):
+        score += 2
+    if low.startswith(needle):
+        score += 2
+    return score
+
+
+def _pick_sentences(chunks: list[dict], aliases: tuple[str, ...], limit: int = 2) -> tuple[str, list[int]]:
+    ranked = []
+    for sent, page, _item in _iter_clean_sentences(chunks):
+        score = _score_person_sentence(sent, aliases)
+        if score <= 0:
+            continue
+        ranked.append((score, -len(sent), sent, page))
+    ranked.sort(reverse=True)
+    picked = []
+    pages = []
+    for _score, _length, sent, page in ranked:
+        if sent in picked:
+            continue
+        picked.append(sent)
+        if page is not None and page not in pages:
+            pages.append(page)
+        if len(picked) >= limit:
+            break
+    return " ".join(picked), _sorted_pages(pages)
+
+
 def _people_from_plan(plan) -> list[dict]:
     people = []
     seen = set()
@@ -209,26 +345,25 @@ def _people_from_plan(plan) -> list[dict]:
             extra = _named_people_in_group(group)
             people.extend(extra)
             continue
-        note = _clean_student_text(readable_extract(group.chunks, 1))
+        aliases = tuple(alias for alias in TOPIC_ALIASES.get(group.key, (group.key,)) if alias.isascii()) + (group.title.lower(),)
+        note, pages = _pick_sentences(group.chunks, aliases, limit=2)
         if not note:
             continue
         name = group.title
         if name.lower() in seen:
             continue
         seen.add(name.lower())
-        people.append({"name": name, "note": note[:280], "pages": list(group.pages)})
+        people.append({"name": name, "note": note[:400], "pages": pages or _sorted_pages(group.pages)})
     return people
 
 
 def _named_people_in_group(group) -> list[dict]:
-    blob = " ".join(item.get("text") or "" for item in group.chunks).lower()
-    found = []
     mapping = (("sukaphaa", "Sukaphaa"), ("lachit", "Lachit Borphukan"), ("gadadhar", "Gadadhar Singha"))
+    found = []
     for needle, label in mapping:
-        if needle in blob:
-            note = _sentence_with(group.chunks, needle)
-            if note:
-                found.append({"name": label, "note": note[:280], "pages": list(group.pages)})
+        note, pages = _pick_sentences(group.chunks, (needle, label.lower()), limit=2)
+        if note:
+            found.append({"name": label, "note": note[:400], "pages": pages or _sorted_pages(group.pages)})
     return found
 
 
@@ -277,11 +412,21 @@ def _terms_from_plan(plan) -> list[dict]:
                 continue
             if families == {"ahom"} and group.key != "ahom":
                 continue
-            meaning = _sentence_with(group.chunks, needles[0])
+            ranked = []
+            for sent, page, _item in _iter_clean_sentences(group.chunks):
+                best = max(_score_term_sentence(sent, needle) for needle in needles)
+                if best <= 0:
+                    continue
+                ranked.append((best, sent, page))
+            ranked.sort(reverse=True)
+            if not ranked:
+                continue
+            meaning, page = ranked[0][1], ranked[0][2]
+            pages = _sorted_pages([page] if page is not None else group.pages)
             if not meaning or label.lower() in seen:
                 continue
             seen.add(label.lower())
-            terms.append({"term": label, "meaning": meaning[:280], "pages": list(group.pages)})
+            terms.append({"term": label, "meaning": meaning[:400], "pages": pages})
             break
     return terms
 
@@ -291,38 +436,62 @@ def _timeline_from_plan(plan) -> tuple[list[dict], list[str]]:
     events = []
     seen = set()
     for group in plan:
-        for item in group.chunks:
-            text = " ".join((item.get("text") or "").split())
-            for sent in re.split(r"(?<=[.!?])\s+", text):
-                match = YEAR_RE.search(sent)
-                if not match:
-                    continue
-                year = match.group(1)
-                if int(year) > 1850:
+        for sent, page, _item in _iter_clean_sentences(group.chunks):
+            match = YEAR_RE.search(sent)
+            is_event = any(hint in sent.lower() for hint in EVENT_HINTS)
+            if match:
+                year = int(match.group(1))
+                if year > 1850:
                     continue
                 key = sent[:80].lower()
-                if key in seen or len(sent.split()) < 6:
+                if key in seen:
                     continue
                 seen.add(key)
                 when = match.group(0).replace("–", "-")
-                page = _page(item)
-                entry = {"when": when, "event": sent.strip()[:220], "pages": [page] if page is not None else list(group.pages)}
-                timeline.append(entry)
-                events.append(sent.strip()[:220])
-                if len(timeline) >= 6:
-                    return timeline, events
-    if len(timeline) < 2:
-        return [], events[:6]
-    return timeline, events
+                timeline.append(
+                    {
+                        "when": when,
+                        "event": sent,
+                        "pages": _sorted_pages([page] if page is not None else group.pages),
+                        "_sort": year,
+                    }
+                )
+            if is_event:
+                key = sent[:80].lower()
+                if key not in seen or match:
+                    if sent not in events:
+                        events.append(sent)
+    timeline.sort(key=lambda row: (row["_sort"], row["when"]))
+    for row in timeline:
+        row.pop("_sort", None)
+    if len(timeline) < 1:
+        timeline = []
+    return timeline, events[:8]
 
 
-def _sentence_with(chunks: list[dict], needle: str) -> str:
-    for item in chunks:
-        text = " ".join((item.get("text") or "").split())
-        for sent in re.split(r"(?<=[.!?])\s+", text):
-            if needle.lower() in sent.lower() and len(sent.split()) >= 6:
-                return _clean_student_text(sent.strip())
-    return readable_extract(chunks, 1)
+def _key_points_from_plan(plan) -> list[str]:
+    points = []
+    for group in plan[:6]:
+        aliases = tuple(alias for alias in TOPIC_ALIASES.get(group.key, (group.key,)) if alias.isascii())
+        note, _pages = _pick_sentences(group.chunks, aliases or (group.title.lower(),), limit=1)
+        if note:
+            points.append(note)
+            continue
+        for sent, _page, _item in _iter_clean_sentences(group.chunks):
+            points.append(sent)
+            break
+    return points[:8]
+
+
+def _revision_from_points(key_points: list[str], people: list[dict]) -> str:
+    lines = list(key_points[:5])
+    if not lines:
+        for person in people[:4]:
+            if person.get("note"):
+                lines.append(person["note"].split(".")[0] + ".")
+    if not lines:
+        return ""
+    return "\n".join(f"• {line}" for line in lines)
 
 
 def _maybe_exam_from_model(topic: str, plan, evidence: list[dict], content: dict) -> None:
@@ -365,14 +534,20 @@ def _fill_exam_fallback(content: dict, plan) -> None:
             )
         if plan:
             group = plan[0] if len(plan) == 1 else plan[min(1, len(plan) - 1)]
-            answer = readable_extract(group.chunks, 3)
+            aliases = tuple(alias for alias in TOPIC_ALIASES.get(group.key, (group.key,)) if alias.isascii())
+            answer, pages = _pick_sentences(group.chunks, aliases or (group.title.lower(),), limit=2)
+            if not answer:
+                picked = list(_iter_clean_sentences(group.chunks))
+                if picked:
+                    answer = picked[0][0]
+                    pages = _sorted_pages([picked[0][1]])
             if answer:
                 questions.append(
                     {
                         "type": "descriptive",
                         "question": f"Explain {group.title} as given in the Class 9 textbook.",
                         "answer": answer,
-                        "pages": list(group.pages),
+                        "pages": pages or _sorted_pages(group.pages),
                     }
                 )
         if questions:
@@ -500,7 +675,7 @@ def _filter_pages(pages, allowed: set[int]) -> list[int]:
             continue
         if value in allowed and value not in out:
             out.append(value)
-    return out
+    return sorted(out)
 
 
 def _sanitize_content(content: dict) -> dict:
@@ -552,7 +727,7 @@ def _pack(items: list[dict], label: str) -> str:
         return f"[{label}] (none)"
     return "\n".join(
         f"[{label}; printed_page={item.get('printed_page_number') or item.get('textbook_page_number')}]\n"
-        f"{(item.get('text') or '')[:1100]}"
+        f"{_normalize_ocr_text(item.get('text') or '')[:1100]}"
         for item in items
     )
 
@@ -638,4 +813,16 @@ def _pages(items: list[dict]) -> list[int]:
         page = _page(item) if isinstance(item, dict) else None
         if page is not None and page not in out:
             out.append(page)
-    return out
+    return sorted(out)
+
+
+def _sorted_pages(pages) -> list[int]:
+    out = []
+    for page in pages or []:
+        try:
+            value = int(page)
+        except (TypeError, ValueError):
+            continue
+        if value not in out:
+            out.append(value)
+    return sorted(out)

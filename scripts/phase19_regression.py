@@ -167,7 +167,13 @@ def save_row(row: dict) -> None:
 
 
 def main() -> None:
-    done = load_done()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--chat-only", action="store_true")
+    parser.add_argument("--fresh", action="store_true")
+    args = parser.parse_args()
+    done = {} if args.fresh else load_done()
     rows = []
     for case in CASES:
         if case["id"] in done:
@@ -222,6 +228,22 @@ def main() -> None:
         follow_rows.append(row)
         save_row(row)
         log(" " + row["verdict"])
+
+    if args.chat_only:
+        report = {
+            "cases": rows,
+            "follow_up": follow_rows,
+            "econtent": [],
+            "pdf": [],
+            "case_pass": sum(1 for row in rows if row.get("pass")),
+            "case_total": len(rows),
+            "follow_pass": sum(1 for row in follow_rows if row.get("pass")),
+            "chat_only": True,
+        }
+        OUT.parent.mkdir(parents=True, exist_ok=True)
+        OUT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        log("wrote " + str(OUT) + " " + str(report["case_pass"]) + "/" + str(report["case_total"]))
+        return
 
     econtent_rows = []
     pdf_rows = []
