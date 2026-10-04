@@ -128,9 +128,9 @@ def answer_question(
         )
         claims = unsupported_named_items(raw, selected)
         if not ok:
-            from rag.engine.coverage import build_coverage_plan, combine_sections, readable_extract
+            from rag.engine.coverage import combine_sections, filter_plan, readable_extract, build_coverage_plan
 
-            plan = build_coverage_plan(selected)
+            plan = filter_plan(rag_question, build_coverage_plan(selected))
             raw = combine_sections(
                 rag_question,
                 [(group, readable_extract(group.chunks)) for group in plan],

@@ -11,7 +11,8 @@ from rag.engine.classify import classify_casual
 from rag.engine.evidence import evidence_is_sufficient, evidence_matches_topic
 from rag.engine.normalize import looks_kannada, looks_like_injection, normalize_question
 from rag.engine.pack import build_evidence_pack
-from rag.engine.coverage import build_coverage_plan, generate_from_plan, readable_extract
+from rag.engine.coverage import build_coverage_plan, filter_plan, generate_from_plan, readable_extract
+from rag.engine.topic_map import RULER_KEYS
 from rag.engine.validate import unsupported_named_items
 from rag.llm.client import LlmError, complete
 from rag.prompts.econtent import ECONTENT_SYSTEM, SECTION_SPECS
@@ -35,6 +36,8 @@ ALLOWED_KEYS = (
     "exam_questions",
     "mcqs",
     "revision",
+    "section_citations",
+    "textbook_source_pages",
 )
 
 ECONTENT_TOP_K = 16
@@ -70,7 +73,7 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
             f"This Class 9 module on {topic} uses only the Karnataka textbook. "
             "The explanation below follows the textbook evidence group by group."
         )
-    plan = build_coverage_plan(primary_selected)
+    plan = filter_plan(topic, build_coverage_plan(primary_selected))
     diverse = _diverse_chunks(plan, 8) or primary_selected[:8]
     for spec in SECTION_SPECS:
         if spec.get("supplement") or spec["keys"] == ("simple_kannada",):
@@ -104,10 +107,23 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
     if not content.get("detailed_explanation"):
         content["detailed_explanation"] = content.get("class9_textbook") or readable_extract(primary_selected, 8)
 
+    _fill_grounded_gaps(content, plan)
+
+    section_citations = {}
+    for group in plan:
+        pages = (covered.get("section_pages") or {}).get(group.key) or group.pages
+        if pages:
+            section_citations[group.title] = pages
+    if section_citations:
+        content["section_citations"] = section_citations
+
     blob = json.dumps(content, ensure_ascii=False)
     used_pages = []
     for pages in (covered.get("section_pages") or {}).values():
         used_pages.extend(pages or [])
+    if not used_pages:
+        for pages in section_citations.values():
+            used_pages.extend(pages or [])
     if used_pages:
         sources = _sources(
             [
@@ -143,6 +159,43 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
             "missing": (covered.get("coverage") or {}).get("missing"),
         },
     }
+
+
+def _fill_grounded_gaps(content: dict, plan) -> None:
+    """Fill omitted JSON fields only from coverage groups already in the textbook pack."""
+    if not plan:
+        return
+    if not content.get("learning_objectives"):
+        content["learning_objectives"] = [
+            f"Recall what the Class 9 textbook says about {group.title}." for group in plan[:6]
+        ]
+    if not content.get("key_points"):
+        points = [readable_extract(group.chunks, 1) for group in plan[:6]]
+        content["key_points"] = [point for point in points if point]
+    if not content.get("important_people"):
+        people = []
+        for group in plan:
+            if group.key not in RULER_KEYS:
+                continue
+            note = readable_extract(group.chunks, 1)
+            if note:
+                people.append({"name": group.title, "note": note[:280]})
+        if people:
+            content["important_people"] = people
+    if not content.get("exam_questions"):
+        content["exam_questions"] = [
+            {
+                "question": f"What does the Class 9 textbook say about {group.title}?",
+                "answer": readable_extract(group.chunks, 2),
+            }
+            for group in plan[:3]
+            if readable_extract(group.chunks, 2)
+        ]
+    if not content.get("revision"):
+        detailed = content.get("detailed_explanation") or ""
+        snippet = detailed.strip()[:700]
+        if snippet:
+            content["revision"] = snippet
 
 
 def _diverse_chunks(plan_or_chunks, limit: int) -> list[dict]:

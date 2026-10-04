@@ -6,8 +6,15 @@ import re
 from dataclasses import dataclass, field
 
 from rag.engine.classify import TOPIC_ALIASES, extract_topics
-from rag.engine.pack import looks_like_toc, ruler_counts
-from rag.engine.topic_map import MARATHA_FAMILY, MUGHAL_FAMILY, RULER_KEYS, dynasty_keys, looks_like_map_chunk
+from rag.engine.pack import ahom_primary_chunk, chunk_group_key, looks_like_toc
+from rag.engine.topic_map import (
+    AHOM_FAMILY,
+    MARATHA_FAMILY,
+    MUGHAL_FAMILY,
+    RULER_KEYS,
+    dynasty_keys,
+    looks_like_map_chunk,
+)
 from rag.engine.validate import unsupported_named_items
 from rag.llm.client import LlmError, complete
 from rag.prompts.tutor import SYSTEM_PROMPT
@@ -32,8 +39,42 @@ GROUP_TITLE = {
     "mansab": "Mansabdari system",
     "maratha": "The Marathas",
     "mughal": "Mughal rule",
+    "ahom": "The Ahom Dynasty",
     "administration": "Administration",
 }
+
+PREFERRED_ORDER = (
+    "mughal",
+    "babar",
+    "humayun",
+    "sher",
+    "akbar",
+    "jahangir",
+    "shahjahan",
+    "aurangzeb",
+    "maratha",
+    "shivaji",
+    "sambhaji",
+    "peshwa",
+    "bajirao",
+    "balaji",
+    "madhav",
+    "ahom",
+    "administration",
+    "general",
+)
+
+LEADIN_RE = re.compile(
+    r"(?is)^(?:here(?:'s| is) (?:a short section(?: on [^.\n]+)?|what (?:the )?(?:class 9 )?textbook says[^\n]*)[.!]?\s*|"
+    r"according to the (?:retrieved )?evidence(?: provided)?[,:]?\s*|"
+    r"based on the retrieved evidence[,:]?\s*|"
+    r"the (?:retrieved )?evidence (?:says|shows|provided)[,:]?\s*|"
+    r"the chunks show[,:]?\s*"
+    r")"
+)
+META_TERMS_RE = re.compile(
+    r"(?i)\b(chroma|evidence pack|vector database|retrieval|chunks?|RAG|Ollama|LLM|nomic-embed)\b"
+)
 
 MERGE_INTO = {
     "taj": "shahjahan",
@@ -77,16 +118,29 @@ def _spaced_ocr(text: str) -> bool:
     return bool(re.search(r"(?:\b[A-Za-z]\s){8,}", text or ""))
 
 
+def _heading_key(text: str) -> str | None:
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    probe = [line.strip(" :-") for line in lines[:5]]
+    probe.append(" ".join(lines[:2])[:110])
+    for fragment in probe:
+        low = fragment.lower()
+        for key in RULER_KEYS:
+            title = (GROUP_TITLE.get(key) or key).lower()
+            aliases = [alias for alias in TOPIC_ALIASES.get(key, (key,)) if alias.isascii()]
+            if low == title or low in aliases:
+                return key
+            if low.startswith(title + " ") or any(low.startswith(alias) for alias in aliases):
+                return key
+    return None
+
+
 def _group_key(item: dict) -> str:
-    text = item.get("text") or ""
-    counts = ruler_counts(text)
-    if counts:
-        return max(counts, key=counts.get)
-    topics = extract_topics(text)
-    for key in RULER_KEYS + ("taj", "din", "guerilla", "mansab", "peshwa", "maratha", "mughal"):
-        if key in topics:
-            return key
-    return "general"
+    heading = _heading_key(item.get("text") or "")
+    if heading == "aurangzeb" and not ahom_primary_chunk(item):
+        return "aurangzeb"
+    if heading and heading not in {"aurangzeb"}:
+        return heading
+    return chunk_group_key(item)
 
 
 def build_coverage_plan(chunks: list[dict]) -> list[CoverageGroup]:
@@ -103,6 +157,10 @@ def build_coverage_plan(chunks: list[dict]) -> list[CoverageGroup]:
         buckets[key].append(item)
     if "general" in buckets and len(buckets) > 1:
         order = [key for key in order if key != "general"]
+    order = sorted(
+        order,
+        key=lambda key: (PREFERRED_ORDER.index(key) if key in PREFERRED_ORDER else 80, key),
+    )
     groups = []
     for key in order:
         items = buckets.get(key) or []
@@ -120,18 +178,49 @@ def build_coverage_plan(chunks: list[dict]) -> list[CoverageGroup]:
                 markers=[alias for alias in aliases if alias.isascii()] or [key],
             )
         )
-    return groups[:8]
+    return groups[:10]
+
+
+def _rebuild_group(group: CoverageGroup, chunks: list[dict]) -> CoverageGroup:
+    pages = sorted({p for item in chunks if (p := _page(item)) is not None})
+    return CoverageGroup(
+        key=group.key,
+        title=group.title,
+        pages=pages,
+        chunks=chunks,
+        markers=group.markers,
+    )
+
+
+def _bound_group(question: str, group: CoverageGroup) -> CoverageGroup:
+    topics = extract_topics(question)
+    family = dynasty_keys(topics)
+    chunks = list(group.chunks)
+    if "ahom" not in topics and family != AHOM_FAMILY:
+        chunks = [item for item in chunks if not ahom_primary_chunk(item)]
+        if group.key == "ahom":
+            chunks = []
+    if family == MUGHAL_FAMILY and "shivaji" not in topics and group.key in MARATHA_FAMILY:
+        chunks = []
+    return _rebuild_group(group, chunks)
 
 
 def filter_plan(question: str, plan: list[CoverageGroup]) -> list[CoverageGroup]:
     topics = extract_topics(question)
     family = dynasty_keys(topics)
+    bounded = [_bound_group(question, group) for group in plan]
+    bounded = [group for group in bounded if group.chunks]
+    if family == AHOM_FAMILY or "ahom" in topics:
+        ahom_groups = [group for group in bounded if group.key == "ahom"]
+        return ahom_groups or bounded
+    if "ahom" not in topics:
+        bounded = [group for group in bounded if group.key != "ahom"]
     if family == MUGHAL_FAMILY and "shivaji" not in topics:
-        return [group for group in plan if group.key not in MARATHA_FAMILY]
+        return [group for group in bounded if group.key not in MARATHA_FAMILY]
     if family == MARATHA_FAMILY and "akbar" not in topics:
-        drop = {"babar", "humayun", "akbar", "jahangir", "shahjahan", "sher", "taj", "din", "mansab"}
-        return [group for group in plan if group.key not in drop]
-    return plan
+        drop = {"babar", "humayun", "akbar", "jahangir", "shahjahan", "sher", "taj", "din", "mansab", "mughal"}
+        return [group for group in bounded if group.key not in drop]
+    return bounded
 
 
 def group_covered(answer: str, group: CoverageGroup) -> bool:
@@ -183,19 +272,32 @@ def readable_extract(chunks: list[dict], limit: int = 3) -> str:
     return " ".join(sentences)
 
 
+def _focus_chunk_text(group: CoverageGroup, item: dict) -> str:
+    text = item.get("text") or ""
+    if group.key == "aurangzeb":
+        match = re.search(r"aurangzeb", text, re.I)
+        if match and match.start() > 30:
+            text = text[match.start() :]
+    return text
+
+
 def generate_section(question: str, group: CoverageGroup, strict: bool = False) -> str:
     blocks = []
     for item in group.chunks[:4]:
         page = _page(item)
-        text = " ".join((item.get("text") or "").split())[:900]
+        text = " ".join(_focus_chunk_text(group, item).split())[:900]
         blocks.append(f"[printed_page={page}]\n{text}")
     extra = " Use only names and dates that appear in the evidence." if strict else ""
     user = (
         f"Student question: {question}\n"
-        f"Write a short Class 9 section titled {group.title}. "
-        f"Use ONLY the evidence below. 4 to 8 short sentences.{extra}\n"
-        "Do not mention people who are not in this evidence. Do not add page numbers.\n\n"
-        f"Evidence:\n{chr(10).join(blocks)}"
+        f"Write a short Class 9 tutor section titled {group.title}. "
+        f"Start with a natural sentence about {group.title}. "
+        "Do not write phrases such as 'according to the evidence', 'based on the retrieved evidence', "
+        "'the evidence says', 'the chunks show', or 'here is a short section'. "
+        "Do not mention RAG, retrieval, Chroma, chunks, models, or page numbers. "
+        f"Use ONLY the textbook passages below. 4 to 8 short sentences.{extra}\n"
+        "Do not mention people who are not in these passages.\n\n"
+        f"Textbook passages:\n{chr(10).join(blocks)}"
     )
     try:
         raw = complete(
@@ -226,17 +328,33 @@ def generate_section(question: str, group: CoverageGroup, strict: bool = False) 
             text = ""
         if not text or unsupported_named_items(text, group.chunks):
             return readable_extract(group.chunks)
-    return text
+    return _clean_student_text(text, group.title)
+
+
+def _clean_student_text(text: str, title: str | None = None) -> str:
+    cleaned = (text or "").strip()
+    for _ in range(3):
+        nxt = LEADIN_RE.sub("", cleaned).strip()
+        if nxt == cleaned:
+            break
+        cleaned = nxt
+    if title:
+        title_re = re.compile(rf"^{re.escape(title)}\s*\n+", re.I)
+        cleaned = title_re.sub("", cleaned)
+    cleaned = META_TERMS_RE.sub("", cleaned)
+    cleaned = re.sub(r" {2,}", " ", cleaned)
+    return cleaned.strip()
 
 
 def combine_sections(question: str, sections: list[tuple[CoverageGroup, str]]) -> str:
-    parts = [f"Here is what the Class 9 textbook says about this topic, in simple English."]
+    del question
+    parts = []
     for group, body in sections:
-        body = (body or "").strip()
+        body = _clean_student_text(body, group.title)
         if not body:
             continue
         parts.append(f"## {group.title}\n\n{body}")
-    if len(parts) == 1:
+    if not parts:
         return "The provided textbook does not give enough information to answer this fully."
     return "\n\n".join(parts)
 

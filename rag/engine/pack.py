@@ -181,26 +181,134 @@ def looks_like_toc(text: str) -> bool:
     return lowered.startswith("chapter") or "we will learn about" in lowered[:400]
 
 
+NAMED_RULERS = {
+    "babar",
+    "humayun",
+    "akbar",
+    "jahangir",
+    "shahjahan",
+    "aurangzeb",
+    "sher",
+    "shivaji",
+    "sambhaji",
+    "bajirao",
+    "balaji",
+    "madhav",
+}
+
+AHOM_HINTS = ("ahom", "charaideo", "sukaphaa", "lachit", "saraighat", "jayadhwaj")
+
+
+def ahom_primary_chunk(item: dict) -> bool:
+    """True when the passage is framed around the Ahoms, even if a Mughal name appears once."""
+    text = item.get("text") or ""
+    lowered = text.lower()
+    topics = set(item.get("topics") or extract_topics(text))
+    ahom_score = sum(lowered.count(hint) for hint in AHOM_HINTS)
+    if ahom_score == 0 and "ahom" not in topics:
+        return False
+    named_total = sum(ruler_counts(text).values())
+    if ahom_score >= 2 and ahom_score >= named_total:
+        return True
+    if "ahom" in topics and named_total == 0 and not (topics & NAMED_RULERS):
+        return True
+    return False
+
+
+def chunk_group_key(item: dict) -> str:
+    """Assign a chunk from its own text, not from neighbouring page material."""
+    if ahom_primary_chunk(item):
+        return "ahom"
+    text = item.get("text") or ""
+    lowered = text.lower()
+    counts = ruler_counts(text)
+    aur = counts.get("aurangzeb", 0)
+    head = " ".join(text.split())[:100].lower()
+    others = max((value for key, value in counts.items() if key != "aurangzeb"), default=0)
+    if head.startswith("aurangzeb") or "\naurangzeb" in lowered[:240]:
+        return "aurangzeb"
+    if aur >= 2 and aur > others:
+        if counts.get("shivaji", 0) > aur:
+            return "shivaji"
+        return "aurangzeb"
+    if "rajaram" in lowered or ("maratha" in lowered and counts.get("sambhaji", 0)):
+        if not head.startswith("aurangzeb") and counts.get("shahjahan", 0) == 0:
+            return "maratha"
+    if counts:
+        return max(counts, key=counts.get)
+    topics = extract_topics(text)
+    for key in (
+        "babar",
+        "humayun",
+        "akbar",
+        "jahangir",
+        "shahjahan",
+        "aurangzeb",
+        "sher",
+        "shivaji",
+        "taj",
+        "din",
+        "guerilla",
+        "mansab",
+        "peshwa",
+        "maratha",
+        "mughal",
+        "ahom",
+    ):
+        if key in topics:
+            return key
+    return "general"
+
+
+def fill_missing_rulers(selected: list[dict], mapped: list[dict], keys: tuple[str, ...], max_keep: int = 12) -> list[dict]:
+    present = {chunk_group_key(item) for item in selected}
+    missing = [key for key in keys if key not in present]
+    extras = []
+    used = {item.get("chunk_id") for item in selected}
+    for item in mapped:
+        if not missing:
+            break
+        if item.get("chunk_id") in used or ahom_primary_chunk(item):
+            continue
+        key = chunk_group_key(item)
+        if key in missing:
+            extras.append(item)
+            used.add(item.get("chunk_id"))
+            missing = [item_key for item_key in missing if item_key != key]
+    if not extras:
+        return selected
+    core = [item for item in selected if chunk_group_key(item) not in {"ahom"}]
+    overflow = len(core) + len(extras) - max_keep
+    if overflow > 0:
+        drop_rank = {"shivaji": 0, "madhav": 0, "sambhaji": 0, "bajirao": 1, "general": 1, "mughal": 2}
+        ranked = sorted(
+            enumerate(core),
+            key=lambda pair: (drop_rank.get(chunk_group_key(pair[1]), 5), pair[0]),
+        )
+        drop_ids = {core[idx].get("chunk_id") for idx, _item in ranked[:overflow]}
+        core = [item for item in core if item.get("chunk_id") not in drop_ids]
+    return _order(core + extras)
+
+
 def primarily_other_dynasty(item: dict, family: set[str]) -> bool:
     tops = set(item.get("topics") or [])
     page = _page(item) or 0
     if family == MUGHAL_FAMILY:
+        if ahom_primary_chunk(item):
+            return True
         mar = len(tops & MARATHA_FAMILY)
         mug = len(tops & (MUGHAL_FAMILY - {"aurangzeb"}))
         if mar > mug and page >= 11:
             return True
-        if page <= 2 and "ahom" in tops and "babar" not in tops and "akbar" not in tops:
-            return True
     if family == MARATHA_FAMILY:
+        if ahom_primary_chunk(item):
+            return True
         if page <= 10 and "shivaji" not in tops and "maratha" not in tops:
             return True
         if page == 9 and "shivaji" in tops and chunk_has_facet(item.get("text") or "", "administration") is False:
-            # Aurangzeb page mentioning Shivaji's death
             if dominant_ruler(item.get("text") or "") in {"aurangzeb", None} and "imprisoned" in (item.get("text") or "").lower():
                 return True
     return False
-    lowered = (text or "").lower()
-    return lowered.startswith("chapter") or "we will learn about" in lowered[:400]
 
 
 def diversify_by_page(chunks: list[dict], max_keep: int) -> list[dict]:
@@ -277,12 +385,6 @@ def build_evidence_pack(
                     for item in mapped
                     if set(item.get("topics") or []) & MUGHAL_FAMILY
                     and not primarily_other_dynasty(item, MUGHAL_FAMILY)
-                    and not (
-                        set(item.get("topics") or []) <= {"ahom", "mughal"}
-                        and "babar" not in (item.get("topics") or [])
-                        and "akbar" not in (item.get("topics") or [])
-                        and (_page(item) or 0) <= 2
-                    )
                 ]
                 pack.reasons.append("broad-mughal-topic-map")
             else:
@@ -298,6 +400,14 @@ def build_evidence_pack(
             and not primarily_other_dynasty(item, family)
         ]
         pack.chunks = diversify_by_page(combined, 12)
+        if family == MUGHAL_FAMILY:
+            pack.chunks = fill_missing_rulers(
+                pack.chunks,
+                mapped,
+                ("babar", "sher", "akbar", "shahjahan", "aurangzeb"),
+                12,
+            )
+            pack.reasons.append("ensure-mughal-rulers")
         pack.pages = _pages(pack.chunks)
         pack.reasons.append(f"kept:{len(pack.chunks)}")
         return pack
