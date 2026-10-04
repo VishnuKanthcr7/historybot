@@ -1,6 +1,46 @@
 # Phase 11 — Source-aware RAG
 
-**Status:** Phase 11 complete; **Phase 11B quality pass complete**. Old collection `historybot_class9_ss` was **not** deleted or rebuilt.
+**Status:** Phase 11 / 11B complete; **Phase 11C reliability pass complete**. Old collection `historybot_class9_ss` was **not** deleted or rebuilt. `historybot_class9_ss_v2` was **not** fully rebuilt.
+
+## Phase 11C (Kannada converter + e-content + citations)
+
+### Nudi converter investigation
+
+Inspected this machine:
+
+- Python 3.10.9 site-packages (no `nudi2unicode`, `baraha`, `aksharamukha`, `indic_transliteration`, or similar)
+- `NUDI_PYTHON_MODULE` / `NUDI_CONVERTER_CMD` unset
+- PATH: no `nudi`, `baraha`, `nudi2unicode`, `tesseract`
+- Kannada PDF `9th Kannada SS  Part-2 2026-27.pdf` is present (136 pages). PDF page 3 extract is Nudi ASCII (`CzsÁåAiÀÄ`), **not** Unicode `ಕನ್ನಡ`.
+
+**No verified converter was found.** No mapping table was invented. Kannada Chapter 17 was **not** ingested. No Kannada Chroma collection was created.
+
+### Kannada answers (English primary evidence only)
+
+All seven Kannada eval questions produced Kannada-script output from English Chapter 17. Grammar/repetition remains weak (e.g. repeated `ಸತ್ಯಸಂಧಿ`). **Not classroom-ready.** No Kannada textbook retrieval.
+
+### E-content generation
+
+One large 300s JSON call was replaced by **sectioned** generation (`rag/prompts/econtent.py` `SECTION_SPECS`). Each section: smaller evidence, `timeout=75`, one retry, omit on failure. Timeout was **not** raised to 600+.
+
+| Topic | Result |
+|---|---|
+| Shivaji | Completed. `class9_textbook` + labelled Maratha extra. No `@KTBS`. |
+| Marathas | Completed. Primary + labelled extra. |
+| Mughals | **Completed** (11B had timed out). Primary page 11 + *The Mughals* p.41. |
+| World War II | Refused: not in the textbook. |
+
+### Citation filtering
+
+Short answers keep the strongest supporting page, with phrase bonus for `taj mahal` etc.
+
+Taj Mahal who/what/where → **page 9 only** (the dedicated textbook box). Panipat → **page 16 only**. Moghul rule → page 3. Shivaji → page 12.
+
+### Commands
+
+```text
+python scripts/phase11c_evaluation.py
+```
 
 ## Phase 11B (quality / stabilization)
 
@@ -223,10 +263,10 @@ E-content: Shivaji and Marathas modules generated with `class9_textbook` + label
 
 ## Known limitations
 
-- Kannada textbook not in Chroma until a verified Nudi converter is installed.
-- Kannada answers are model-generated from English evidence; not classroom-ready. Longer Kannada prompts often hit the safe fallback.
-- 16 of 23 Mughal NCERT chunks are excluded; remaining supplement coverage is thin (no repaired CID text).
-- Taj Mahal still cites extra architecture pages 9 and 11 with page 8.
-- llama3 e-content can time out on long JSON (Mughals module in 11B).
-- Citation overlap is heuristic; it is not a guarantee that every listed page is the unique best page.
+- Kannada textbook not in Chroma: no local Nudi → Unicode converter, and no invented mapping.
+- Kannada answers are still generated from English evidence; not classroom-ready (repetition/awkward grammar remain).
+- 16 of 23 Mughal NCERT chunks stay excluded; remaining supplement coverage is thin.
+- Citation overlap is heuristic; longer DETAILED answers can still list more than one extra-book page.
+- llama3 sectioned e-content is slower than a single call but no longer depends on one 300s JSON dump.
+- Accuracy is not 100%.
 - Old Chapter 5 collection remains for rollback only.

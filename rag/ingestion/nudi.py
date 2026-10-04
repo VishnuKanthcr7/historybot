@@ -21,7 +21,15 @@ def converter_status() -> dict:
     module_name = os.environ.get("NUDI_PYTHON_MODULE", "").strip()
     command = os.environ.get("NUDI_CONVERTER_CMD", "").strip()
     discovered = []
-    for name in ("nudi2unicode", "nudi_unicode", "baraha", "kn_nudi"):
+    for name in (
+        "nudi2unicode",
+        "nudi_unicode",
+        "baraha",
+        "kn_nudi",
+        "aksharamukha",
+        "indic_transliteration",
+        "kannada_converter",
+    ):
         try:
             importlib.import_module(name)
             discovered.append(name)
