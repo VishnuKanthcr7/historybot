@@ -16,6 +16,7 @@ from rag.engine.evidence import (
     evidence_is_sufficient,
     evidence_matches_topic,
     expand_evidence,
+    overlap_count,
     select_evidence,
 )
 from rag.engine.normalize import (
@@ -142,7 +143,7 @@ def answer_question(
     claims = unsupported_named_items(payload.get("raw") or "", selected)
     if not ok or is_refusal(payload["raw"], "en"):
         if evidence_is_sufficient(selected) and not looks_like_injection(rag_question):
-            raw = _safe_from_evidence(selected)
+            raw = _safe_from_evidence(selected, rag_question)
             reason = f"{reason}+extractive_fallback"
             sources = _sources(selected)
             answer = f"{raw}\n\n{_citation_block(sources)}"
@@ -243,11 +244,12 @@ def _blocks(evidence: list[dict], label: str) -> list[str]:
     return blocks or [f"[{label}] (none)"]
 
 
-def _safe_from_evidence(evidence: list[dict]) -> str:
+def _safe_from_evidence(evidence: list[dict], question: str = "") -> str:
     lines = [
         "Here is what the Class 9 Karnataka textbook says on this topic. "
         "No extra facts are added beyond the textbook."
     ]
+    ranked = []
     seen = set()
     for item in evidence:
         text = " ".join((item.get("text") or "").split())
@@ -257,6 +259,12 @@ def _safe_from_evidence(evidence: list[dict]) -> str:
         if key in seen:
             continue
         seen.add(key)
+        ranked.append((overlap_count(question, text), text))
+    ranked.sort(key=lambda row: -row[0])
+    kept = [text for score, text in ranked if not question or score >= 2][:4]
+    if not kept:
+        kept = [text for score, text in ranked if score >= 1][:3]
+    for text in kept:
         snippet = text if len(text) <= 420 else text[:417].rsplit(" ", 1)[0] + "..."
         lines.append(f"• {snippet}")
     if len(lines) == 1:

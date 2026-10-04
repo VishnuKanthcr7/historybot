@@ -43,6 +43,8 @@ def _ollama_chat(messages: list[dict], temperature: float, max_tokens: int, time
             body = json.loads(response.read().decode("utf-8"))
     except TimeoutError as exc:
         raise LlmError(f"Ollama chat timed out: {exc}") from exc
+    except OSError as exc:
+        raise LlmError(f"Ollama chat failed: {exc}") from exc
     except urllib.error.URLError as exc:
         raise LlmError(f"Ollama chat failed: {exc}") from exc
     message = (body.get("message") or {}).get("content")

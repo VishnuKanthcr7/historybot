@@ -25,6 +25,10 @@ INJECTION_PATTERNS = (
     r"visionias",
     r"use vision ias",
     r"ignore your source rules",
+    r"search the internet",
+    r"from another book",
+    r"from another textbook",
+    r"use another book",
 )
 
 
