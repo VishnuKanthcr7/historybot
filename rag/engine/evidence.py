@@ -91,9 +91,13 @@ def evidence_is_sufficient(selected: list[dict]) -> bool:
 def evidence_matches_topic(topic: str, retrieval_query: str, selected: list[dict]) -> bool:
     if not selected:
         return False
+    from rag.engine.classify import extract_topics
+
     blob = " ".join(item.get("text") or "" for item in selected)
     lowered = blob.lower()
     topic_l = f"{topic or ''} {retrieval_query or ''}".lower()
+    query_topics = extract_topics(topic_l)
+    blob_topics = extract_topics(blob)
     blocked = (
         "world war",
         "gdp",
@@ -102,9 +106,13 @@ def evidence_matches_topic(topic: str, retrieval_query: str, selected: list[dict
         "wikipedia",
         "visionias",
     )
-    for term in blocked:
-        if term in topic_l:
-            return term in lowered
+    if not query_topics:
+        for term in blocked:
+            if term in topic_l:
+                return term in lowered
+        return overlap_count(f"{topic} {retrieval_query}", blob) >= 1
+    if query_topics & blob_topics:
+        return True
     return overlap_count(f"{topic} {retrieval_query}", blob) >= 1
 
 

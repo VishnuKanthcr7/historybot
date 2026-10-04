@@ -85,7 +85,7 @@ def supporting_evidence(answer: str, evidence: list[dict], min_overlap: int = 2)
             scored.append({**item, "answer_overlap": score})
     scored.sort(key=lambda item: (-item.get("answer_overlap", 0), item.get("adjusted_distance") or 9))
     if not scored:
-        return _dedupe_pages(evidence[:1]) if evidence else []
+        return []
     best = scored[0]["answer_overlap"]
     kept = [
         item

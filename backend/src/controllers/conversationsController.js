@@ -180,7 +180,7 @@ export async function postMessage(req, res, next) {
     });
 
     const imageRows = rag.grounded
-      ? await findVerifiedImages(`${body.message} ${rag.answer || ""}`)
+      ? await findVerifiedImages(body.message, rag.answer || "")
       : [];
 
     res.status(201).json({

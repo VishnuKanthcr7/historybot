@@ -15,35 +15,53 @@ export function publicImage(row) {
   };
 }
 
-export async function findVerifiedImages(text) {
-  const blob = String(text || "").toLowerCase();
+export async function findVerifiedImages(question, answer) {
+  const q = String(question || "").toLowerCase();
+  const a = String(answer || "").toLowerCase();
+  const blob = `${q} ${a}`;
   const [rows] = await pool.query(
     `SELECT id, topic, person_name, caption, alt_text, textbook_page_number, file_path
      FROM verified_images WHERE verification_status = 'verified'`
   );
   const matched = [];
   for (const row of rows) {
-    if (matchesTopic(blob, row)) {
+    if (matchesTopic(q, a, blob, row)) {
       matched.push(row);
     }
   }
   return matched;
 }
 
-function matchesTopic(blob, row) {
+function namedPerson(text) {
+  if (/\bshivaji\b/.test(text)) return "shivaji";
+  if (/\bbabur\b|\bbabar\b/.test(text)) return "babur";
+  if (/\bakbar\b/.test(text)) return "akbar";
+  if (/\bshah jahan\b|\bshahjahan\b/.test(text)) return "shahjahan";
+  if (/\baurangzeb\b/.test(text)) return "aurangzeb";
+  return "";
+}
+
+function matchesTopic(question, answer, blob, row) {
   const topic = String(row.topic || "").toLowerCase();
   const person = String(row.person_name || "").toLowerCase();
-  if (topic.includes("panch") || topic.includes("mahal")) {
-    return blob.includes("panch") || blob.includes("fatehpur");
+  const asked = namedPerson(question);
+  if (topic.includes("panch") || topic.includes("mahal") || topic.includes("taj")) {
+    return /\btaj\b/.test(answer) || /\btaj\b/.test(question);
   }
   if (topic.includes("kingdom") && person === "akbar") {
-    return blob.includes("akbar") && (blob.includes("kingdom") || blob.includes("empire") || blob.includes("map"));
+    return asked === "akbar" && (blob.includes("kingdom") || blob.includes("empire") || blob.includes("map"));
   }
-  if (topic.includes("akbar") || person === "akbar") {
-    return /\bakbar\b/.test(blob) && !blob.includes("world war");
+  if (person === "akbar" || topic.includes("akbar")) {
+    if (asked && asked !== "akbar") return false;
+    return /\bakbar\b/.test(asked ? question : answer) || (/\bmughals?\b/.test(question) && /\bakbar\b/.test(answer));
   }
   if (person === "shivaji" || topic.includes("maratha")) {
-    return blob.includes("shivaji") || blob.includes("maratha") || blob.includes("guerilla") || blob.includes("guerrilla");
+    if (asked && asked !== "shivaji") return false;
+    return blob.includes("shivaji") || (/\bmaratha/.test(question) && answer.includes("shivaji"));
+  }
+  if (person === "babur" || topic.includes("babur") || topic.includes("babar")) {
+    if (asked && asked !== "babur") return false;
+    return /\bbabur\b|\bbabar\b/.test(asked ? question : blob);
   }
   return topic && blob.includes(topic);
 }

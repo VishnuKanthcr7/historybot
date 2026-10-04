@@ -174,7 +174,9 @@ def last_user_question(history: list[dict] | None) -> str:
 
 FOLLOW_SHORT_RE = re.compile(
     r"^(tell me more|explain more|give me more( details)?|what else|continue|"
-    r"go deeper|more|why|how|and then|what happened after that)\??$",
+    r"go deeper|more|why|how|and then|what happened after that|"
+    r"more questions|more mcqs|go on|next|another one|anything else|"
+    r"another 10|another ten|give me more questions)\??$",
     re.I,
 )
 OFF_DOMAIN_RE = re.compile(
@@ -220,7 +222,8 @@ DETAILED_RE = re.compile(
     r"detailed explanation|everything about|more information|"
     r"i want more|explain this topic in detail|give me more|"
     r"tell me about|go deeper|what else|continue|"
-    r"summarize|summary|revision|important points|quick revision)\b",
+    r"summarize|summary|revision|important points|quick revision|"
+    r"teach me|i want to learn|full explanation|all about)\b",
     re.I,
 )
 EXPLAIN_RE = re.compile(r"\b(explain|describe)\b", re.I)
@@ -271,7 +274,16 @@ def classify_question_type(question: str, intent: str | None = None) -> str:
         return "EXAM"
     if "in detail" in lowered and dynasty_only:
         return "BROAD_TOPIC"
-    if re.search(r"\btell me (more )?about the (mughals|marathas|ahoms)\b", lowered):
+    if re.search(
+        r"\b(tell me (more |everything )?about|teach me|i want to learn about|"
+        r"full explanation of|all about) the (mughals|marathas|ahoms)\b",
+        lowered,
+    ):
+        return "BROAD_TOPIC"
+    if dynasty_only and re.search(
+        r"\b(everything about|full explanation|teach me|i want to learn|all about|in detail)\b",
+        lowered,
+    ):
         return "BROAD_TOPIC"
     if SUMMARY_RE.search(text) and dynasty_only:
         return "BROAD_TOPIC"
@@ -283,6 +295,8 @@ def classify_question_type(question: str, intent: str | None = None) -> str:
         return "BROAD_TOPIC"
     if DETAILED_RE.search(text) and dynasty_only:
         return "BROAD_TOPIC"
+    if re.search(r"\b(tell me about|i want to know about|teach me about)\b", lowered) and topics:
+        return "EXPLANATION"
     if DETAILED_RE.search(text) or (EXPLAIN_RE.search(text) and not SHORT_FACT_RE.match(text)):
         if dynasty_only:
             return "BROAD_TOPIC"

@@ -79,6 +79,9 @@ def normalize_question(question: str) -> str:
     text = re.sub(r"\bshivajii+\b", "shivaji", text, flags=re.I)
     text = re.sub(r"\baurangzebb+\b", "aurangzeb", text, flags=re.I)
     text = re.sub(r"\btaj[\s-]?mahal\b", "taj mahal", text, flags=re.I)
+    from rag.engine.intent import strip_conversational_padding
+
+    text = strip_conversational_padding(text)
     return text[:MAX_MESSAGE_CHARS]
 
 

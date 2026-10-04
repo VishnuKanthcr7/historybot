@@ -6,6 +6,7 @@ import re
 
 from rag.engine.citations import supporting_evidence
 from rag.engine.classify import (
+    TOPIC_ALIASES,
     casual_reply,
     classify_answer_mode,
     classify_casual,
@@ -16,6 +17,16 @@ from rag.engine.classify import (
     strip_leading_greeting,
 )
 from rag.engine.evidence import evidence_is_sufficient, evidence_matches_topic, overlap_count
+from rag.engine.intent import (
+    entity_focus_query,
+    infer_previous_task,
+    is_more_followup,
+    looks_like_mcq_request,
+    previous_assistant,
+    requested_item_count,
+    wants_easy_english,
+)
+from rag.engine.mcq import mcqs_from_pack
 from rag.engine.normalize import (
     looks_kannada,
     looks_like_injection,
@@ -24,7 +35,7 @@ from rag.engine.normalize import (
     rewrite_for_retrieval,
     trim_history,
 )
-from rag.engine.pack import build_evidence_pack
+from rag.engine.pack import build_evidence_pack, detect_entity
 from rag.engine.coverage import generate_from_plan
 from rag.engine.validate import is_refusal, unsupported_named_items, validate_answer
 from rag.llm.client import complete
@@ -114,24 +125,61 @@ def answer_question(
     if _asks_outside_textbook(rag_question):
         return _outside_textbook(language, rag_question)
     search_question = _strip_off_domain(rag_question) or rag_question
-    mode = classify_answer_mode(search_question)
-    intent = classify_intent(search_question, history)
-    question_type = classify_question_type(search_question, intent)
-    previous = last_user_question(history) if intent == "FOLLOW_UP" else ""
-    if intent == "FOLLOW_UP" and not extract_topics(previous) and not extract_topics(search_question):
-        return _clarify(language, rag_question, intent, mode)
-    rewrite_history = []
-    if intent == "FOLLOW_UP" and previous:
-        rewrite_history = [{"role": "user", "content": previous}]
-    retrieval_query = rewrite_for_retrieval(search_question, rewrite_history, force=bool(rewrite_history))
+    previous_task = infer_previous_task(history)
+    more = is_more_followup(search_question) or is_more_followup(rag_question)
+    if more and previous_task == "MCQ":
+        search_question = last_user_question(history) or search_question
+        mode = "DETAILED"
+        intent = "FOLLOW_UP"
+        question_type = "EXAM"
+        previous = last_user_question(history)
+        retrieval_query = entity_focus_query(
+            detect_entity(extract_topics(search_question)),
+            extract_topics(search_question),
+            "BROAD_TOPIC" if "mughal" in extract_topics(search_question) else "EXAM",
+        ) or search_question
+    elif more and previous_task == "EXPLAIN":
+        previous = last_user_question(history)
+        labels = [TOPIC_ALIASES[key][0] for key in extract_topics(previous) if key in TOPIC_ALIASES]
+        search_question = f"tell me more about {' '.join(labels)}" if labels else search_question
+        mode = classify_answer_mode(search_question)
+        intent = "FOLLOW_UP"
+        question_type = classify_question_type(search_question, None)
+        retrieval_query = entity_focus_query(
+            detect_entity(extract_topics(search_question)),
+            extract_topics(search_question),
+            question_type,
+        ) or search_question
+    else:
+        mode = classify_answer_mode(search_question)
+        intent = classify_intent(search_question, history)
+        question_type = classify_question_type(search_question, intent)
+        previous = last_user_question(history) if intent == "FOLLOW_UP" else ""
+        if intent == "FOLLOW_UP" and not extract_topics(previous) and not extract_topics(search_question):
+            return _clarify(language, rag_question, intent, mode)
+        rewrite_history = []
+        if intent == "FOLLOW_UP" and previous:
+            rewrite_history = [{"role": "user", "content": previous}]
+        focus = entity_focus_query(
+            detect_entity(extract_topics(search_question)),
+            extract_topics(search_question),
+            question_type,
+        )
+        retrieval_query = focus or rewrite_for_retrieval(
+            search_question, rewrite_history, force=bool(rewrite_history)
+        )
 
     top_k = 16 if question_type == "BROAD_TOPIC" else (14 if mode == "DETAILED" else 10)
     top_k = max(RAG_TOP_K, top_k)
     primary_hits = retrieve_primary(retrieval_query, top_k=top_k, language="en")
+    if looks_like_mcq_request(search_question) or looks_like_mcq_request(rag_question):
+        question_type = "EXAM"
     pack = build_evidence_pack(
         search_question,
         retrieval_query,
-        question_type if question_type != "EXAM" else "EXPLANATION",
+        "BROAD_TOPIC"
+        if question_type == "EXAM" and "mughal" in extract_topics(search_question)
+        else (question_type if question_type != "EXAM" else "EXPLANATION"),
         raw_hits=primary_hits,
         history=history,
     )
@@ -152,6 +200,39 @@ def answer_question(
 
     selected = list(primary_selected)
     if question_type == "EXAM":
+        mcq_turn = looks_like_mcq_request(search_question) or looks_like_mcq_request(rag_question) or (
+            more and previous_task == "MCQ"
+        )
+        if mcq_turn:
+            count = requested_item_count(search_question if looks_like_mcq_request(search_question) else rag_question)
+            exam = mcqs_from_pack(
+                search_question,
+                selected,
+                count=count,
+                previous_answer=previous_assistant(history) if more else "",
+            )
+            if exam:
+                sources = _sources(supporting_evidence(exam, selected, min_overlap=2))
+                answer = _decorate_student_answer(rag_question, exam, off_labels)
+                answer = f"{answer}\n\n{_citation_block(sources)}"
+                result = _payload(
+                    answer,
+                    language,
+                    retrieval_query,
+                    primary_hits,
+                    selected,
+                    "mcq_from_pack",
+                    intent,
+                    mode,
+                    0,
+                    [],
+                    pack,
+                    fallback=False,
+                    sources=sources,
+                )
+                result["task"] = "MCQ"
+                return result
+            return _unavailable(language, retrieval_query, primary_hits, selected, intent=intent, mode=mode)
         exam = _exam_from_pack(search_question, selected)
         if exam:
             sources = _sources(supporting_evidence(exam, selected, min_overlap=1))
@@ -172,7 +253,7 @@ def answer_question(
                 fallback=False,
                 sources=sources,
             )
-    use_plan = question_type in {"BROAD_TOPIC", "EXPLANATION", "EXAM"} or (
+    use_plan = question_type in {"BROAD_TOPIC", "EXPLANATION"} or (
         question_type == "FOLLOW_UP" and (pack.facet == "administration" or len(selected) >= 5)
     )
     regenerations = 0
@@ -208,21 +289,9 @@ def answer_question(
         raw = _strip_invented_pages(raw)
         raw = _apply_partial_refusals(rag_question, raw, selected)
         raw = _decorate_student_answer(rag_question, raw, off_labels)
-        cite_pages = set()
-        for pages in (covered.get("section_pages") or {}).values():
-            cite_pages.update(pages or [])
-        if not cite_pages:
+        sources = _sources(supporting_evidence(raw, selected, min_overlap=2))
+        if not sources:
             sources = _sources(supporting_evidence(raw, selected, min_overlap=1))
-        else:
-            sources = _sources(
-                [
-                    item
-                    for item in selected
-                    if (item.get("printed_page_number") or item.get("textbook_page_number")) in cite_pages
-                ]
-            )
-            if not sources:
-                sources = _sources(supporting_evidence(raw, selected, min_overlap=1))
         answer = f"{raw}\n\n{_citation_block(sources)}"
         return _payload(
             answer,
@@ -555,8 +624,18 @@ def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, questi
             "\nSTRICT MODE: Use only names, dates, and events that appear in the evidence. "
             "If a detail is missing from the evidence, omit it. Do not guess."
         )
-    if re.search(r"simply|class 9 student|i don'?t understand|quick revision", question or "", re.I):
-        extra += "\nUse very simple Class 9 English. Do not add extra facts."
+    if re.search(r"simply|class 9 student|i don'?t understand|quick revision|easy english|simple english|easy language", question or "", re.I):
+        extra += (
+            "\nWrite in very simple Class 9 English. Use short sentences. "
+            "Use markdown headings and bullet points. Do not add extra facts. "
+            "Do not copy long textbook sentences unchanged; paraphrase the evidence simply."
+        )
+    if wants_easy_english(question or "") or re.search(r"\btell me about\b", question or "", re.I):
+        extra += (
+            "\nIf this is a tell-me-about request, use short sections such as "
+            "## Who was this person? ## What did they do? ## Important points. "
+            "Only include a heading when the evidence supports it."
+        )
     if looks_like_roleplay(question or ""):
         extra += "\nDo not write fiction or invented dialogue. State textbook facts only."
     if question_type == "EXAM":

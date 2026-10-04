@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 
 from rag.engine.classify import TOPIC_ALIASES, extract_topics
 from rag.engine.evidence import looks_like_exercise_chunk, overlap_count, select_evidence
 from rag.engine.topic_map import (
+    AHOM_FAMILY,
     MARATHA_FAMILY,
     MUGHAL_FAMILY,
     RULER_KEYS,
@@ -56,7 +59,11 @@ def _page(item: dict) -> int | None:
 
 def detect_facet(question: str) -> str | None:
     lowered = (question or "").lower()
-    if any(word in lowered for word in ("administration", "administrative", "minister")):
+    if "prime minister" in lowered:
+        lowered = re.sub(r"\bcurrent prime minister\b|\bprime minister\b", " ", lowered)
+    if any(word in lowered for word in ("administration", "administrative")):
+        return "administration"
+    if re.search(r"\bministers?\b", lowered) and "prime minister" not in (question or "").lower():
         return "administration"
     if any(word in lowered for word in ("religious", "religion", "din-e", "din e ilahi", "jizya")):
         return "religious"
@@ -398,8 +405,11 @@ def build_evidence_pack(
             if not looks_like_toc(item.get("text") or "")
             and not looks_like_map_chunk(item.get("text") or "")
             and not primarily_other_dynasty(item, family)
+            and not ahom_primary_chunk(item)
+            and ((_page(item) or 99) > 1 or family == AHOM_FAMILY)
         ]
         pack.chunks = diversify_by_page(combined, 12)
+        pack.chunks = [item for item in pack.chunks if not ahom_primary_chunk(item)]
         if family == MUGHAL_FAMILY:
             pack.chunks = fill_missing_rulers(
                 pack.chunks,
@@ -446,9 +456,15 @@ def build_evidence_pack(
                     and "sher shah" not in (item.get("text") or "").lower()[:120]
                 ]
         if entity:
-            combined = _merge(_merge(seed, same), mapped)
-            combined = add_same_page_continuations(combined, entity, facet)
+            combined = _merge(seed, mapped)
+            if facet == "administration":
+                combined = add_same_page_continuations(combined, entity, facet)
             combined = filter_entity_chunks(combined, entity, facet)
+            combined = [
+                item
+                for item in combined
+                if chunk_group_key(item) == entity or dominant_ruler(item.get("text") or "") == entity
+            ]
         else:
             combined = mapped or seed
             combined = [item for item in combined if not primarily_other_dynasty(item, dynasty_keys(topics or {"mughal"}))]
@@ -457,6 +473,8 @@ def build_evidence_pack(
             for item in combined
             if not looks_like_map_chunk(item.get("text") or "")
             and not looks_like_toc(item.get("text") or "")
+            and not ahom_primary_chunk(item)
+            and ((_page(item) or 99) > 1 or "ahom" in (item.get("topics") or []))
         ]
         pack.chunks = diversify_by_page(combined, 10)
         pack.pages = _pages(pack.chunks)
@@ -468,25 +486,28 @@ def build_evidence_pack(
     seed = select_evidence(question, retrieval_query, hits, max_keep=seed_keep)
     same = retrieve_same_pages(retrieval_query, [_page(item) for item in seed if _page(item) is not None])
     same = [item for item in same if item.get("source_type") == "primary_textbook"]
-    combined = add_same_page_continuations(_merge(seed, same), entity, facet)
+    mapped = []
     if entity:
-        extra = chunks_for_topics({entity})
-        if question_type == "FOLLOW_UP":
-            combined = _merge(combined, extra)
-        else:
-            # same-page / next-page continuation only
-            seed_pages = {_page(item) for item in seed if _page(item) is not None}
-            extra = [
-                item
-                for item in extra
-                if _page(item) in seed_pages or any(abs((_page(item) or 99) - p) == 1 for p in seed_pages)
-            ]
-            extra = filter_entity_chunks(extra, entity, None)
-            combined = _merge(combined, extra)
+        mapped = [
+            item
+            for item in chunks_for_topics({entity})
+            if not ahom_primary_chunk(item) and not looks_like_exercise_chunk(item)
+        ]
+        mapped = filter_entity_chunks(mapped, entity, facet)
+        if not seed:
+            seed = mapped[:4]
+            pack.reasons.append("entity-topic-map-seed")
+    if entity:
+        combined = _merge(_merge(seed, mapped), same if question_type == "FOLLOW_UP" else [])
         combined = filter_entity_chunks(combined, entity, facet)
+    else:
+        combined = add_same_page_continuations(_merge(seed, same), entity, facet)
     combined = [item for item in combined if not looks_like_exercise_chunk(item)]
     if question_type != "FOLLOW_UP":
         combined = [item for item in combined if not looks_like_map_chunk(item.get("text") or "")]
+        combined = [item for item in combined if not ahom_primary_chunk(item)]
+        if entity:
+            combined = [item for item in combined if (_page(item) or 99) > 1]
     cap = 8 if question_type == "FOLLOW_UP" else 6
     pack.chunks = _order(combined)[:cap]
     pack.pages = _pages(pack.chunks)
