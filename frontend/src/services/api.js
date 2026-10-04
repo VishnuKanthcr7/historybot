@@ -14,8 +14,9 @@ export class ApiError extends Error {
 function friendlyMessage(code, fallback) {
   switch (code) {
     case "RAG_UNAVAILABLE":
-    case "RAG_TIMEOUT":
       return "HistoryBot is temporarily unavailable. Please try again in a moment.";
+    case "RAG_TIMEOUT":
+      return "HistoryBot is taking longer than expected. Please try again in a moment.";
     case "VALIDATION_ERROR":
       return "Please enter a valid question.";
     case "SESSION_NOT_FOUND":

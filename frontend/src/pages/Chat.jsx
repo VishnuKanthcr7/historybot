@@ -125,6 +125,11 @@ export default function Chat() {
               {error}
             </p>
           ) : null}
+          {econtentLoading ? (
+            <p className="mx-4 mt-3 border border-brass/40 bg-cream px-3 py-2 text-sm text-navy" role="status">
+              {t.econtentWait}
+            </p>
+          ) : null}
           <MessageList messages={messages} loading={loading} language={language} />
           <EcontentPanel
             data={econtent}

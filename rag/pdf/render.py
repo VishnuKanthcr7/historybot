@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from io import BytesIO
 from pathlib import Path
 
@@ -147,29 +148,33 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
     section_order = [
         ("introduction", "Introduction"),
         ("learning_objectives", "Learning objectives"),
-        ("class9_textbook", "What the Class 9 textbook says"),
-        ("easy_english", "Easy English explanation"),
-        ("simple_kannada", "Simple Kannada explanation"),
-        ("historical_context", "Historical context"),
         ("detailed_explanation", "Detailed explanation"),
         ("important_people", "Important people"),
         ("important_terms", "Important terms"),
-        ("timeline", "Timeline / events"),
+        ("timeline", "Timeline"),
         ("main_events", "Main events"),
-        ("additional_school_book_detail", "Additional school-book detail"),
-        ("important_places", "Important places"),
         ("key_points", "Key points"),
         ("exam_questions", "Exam-oriented questions"),
-        ("revision", "Revision"),
         ("mcqs", "Multiple-choice questions"),
+        ("revision", "Revision"),
     ]
+    citations = content.get("section_citations") or {}
     for key, heading in section_order:
         value = content.get(key)
         if not value:
             continue
-        style = styles["HBKn"] if key == "simple_kannada" else styles["HBBody"]
+        if key == "detailed_explanation":
+            story.append(Paragraph(_esc(heading), styles["HBH"]))
+            story.extend(_flow_markdown(value, styles))
+            cite = _cite_line(citations.get("Detailed explanation") or citations.get(heading))
+            if cite:
+                story.append(Paragraph(_esc(cite), styles["HBMeta"]))
+            continue
         block = [Paragraph(_esc(heading), styles["HBH"])]
-        block.extend(_flow_value(value, style, styles["HBBody"]))
+        block.extend(_flow_value(value, styles["HBBody"], styles["HBBody"]))
+        cite_pages = citations.get(heading)
+        if cite_pages:
+            block.append(Paragraph(_esc(_cite_line(cite_pages)), styles["HBMeta"]))
         story.append(KeepTogether(block))
 
     if images:
@@ -187,24 +192,26 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
             story.append(Paragraph(_esc(caption), styles["HBMeta"]))
 
     source_lines = []
+    textbook_label = "Class 9 Karnataka State Board 2026–27 textbook"
     for item in sources or []:
-        label = item.get("citation_label") or (
-            "Additional school-book source"
-            if item.get("authority") == "approved_supplementary"
-            else "Class 9 Karnataka State Board 2026–27 textbook"
-        )
+        if (item.get("authority") or "") == "approved_supplementary":
+            continue
+        if "additional" in str(item.get("citation_label") or "").lower():
+            continue
         page = item.get("printed_page_number") or item.get("textbook_page_number")
         if page is None:
             continue
-        if "Additional" in str(label):
-            source_lines.append(f"{label}, page {page}")
-        else:
-            source_lines.append(f"Source: {label}, page {page}")
+        source_lines.append(f"Source: {item.get('citation_label') or textbook_label}, page {page}")
+    if citations:
+        story.append(Paragraph("Section page citations", styles["HBH"]))
+        for title, pages in citations.items():
+            line = _cite_line(pages)
+            if line:
+                story.append(Paragraph(_esc(f"{title} — {line}"), styles["HBBody"]))
     extra_pages = [int(p) for p in (content.get("textbook_source_pages") or []) if str(p).isdigit()]
     if extra_pages and not source_lines:
         source_lines.append(
-            "Source: Class 9 Karnataka State Board 2026–27 textbook, pages "
-            + ", ".join(str(p) for p in sorted(set(extra_pages)))
+            "Source: " + textbook_label + ", pages " + ", ".join(str(p) for p in sorted(set(extra_pages)))
         )
     if source_lines:
         story.append(Paragraph("Sources", styles["HBH"]))
@@ -247,21 +254,57 @@ def _flow_value(value, style, fallback):
     return flows
 
 
+def _flow_markdown(text: str, styles) -> list:
+    flows = []
+    for block in re.split(r"\n(?=## )", str(text or "").strip()):
+        block = block.strip()
+        if not block:
+            continue
+        if block.startswith("## "):
+            heading, _, rest = block.partition("\n")
+            flows.append(Paragraph(_esc(heading[3:].strip()), styles["HBH"]))
+            if rest.strip():
+                flows.append(Paragraph(_esc(rest).replace("\n", "<br/>"), styles["HBBody"]))
+        else:
+            flows.append(Paragraph(_esc(block).replace("\n", "<br/>"), styles["HBBody"]))
+    return flows
+
+
+def _cite_line(pages) -> str:
+    values = []
+    for page in pages or []:
+        try:
+            value = int(page)
+        except (TypeError, ValueError):
+            continue
+        if value not in values:
+            values.append(value)
+    if not values:
+        return ""
+    if len(values) == 1:
+        return f"Textbook page {values[0]}"
+    return "Textbook pages " + ", ".join(str(page) for page in values)
+
+
 def _dict_line(entry: dict) -> str:
+    cite = _cite_line(entry.get("pages"))
+    suffix = f" ({cite})" if cite else ""
     if "question" in entry and "answer" in entry:
         opts = entry.get("options")
         extra = ""
         if isinstance(opts, list) and opts:
             extra = " Options: " + "; ".join(str(o) for o in opts)
-        return f"Q: {entry.get('question')} {extra} A: {entry.get('answer')}"
+        qtype = entry.get("type")
+        prefix = f"[{qtype}] " if qtype else ""
+        return f"{prefix}Q: {entry.get('question')} {extra} A: {entry.get('answer')}{suffix}"
     if "name" in entry:
-        return f"{entry.get('name')}: {entry.get('note') or ''}".strip(": ")
+        return f"{entry.get('name')}: {entry.get('note') or ''}{suffix}".strip(": ")
     if "term" in entry:
-        return f"{entry.get('term')}: {entry.get('meaning') or ''}".strip(": ")
+        return f"{entry.get('term')}: {entry.get('meaning') or ''}{suffix}".strip(": ")
     if "event" in entry:
         when = entry.get("when") or ""
-        return f"{when} — {entry.get('event')}".strip(" —")
-    return " ".join(str(v) for v in entry.values() if v)
+        return f"{when} — {entry.get('event')}{suffix}".strip(" —")
+    return " ".join(str(v) for key, v in entry.items() if v and key != "pages")
 
 
 def _esc(text: str) -> str:

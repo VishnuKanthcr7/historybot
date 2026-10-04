@@ -48,6 +48,9 @@ export const LABELS = {
     additionalDetail: "Additional school-book detail",
     mainEvents: "Main events",
     places: "Important places",
+    answer: "Answer",
+    sectionPages: "Textbook pages by section",
+    econtentWait: "Preparing a textbook learning module. This can take a few minutes.",
   },
   kn: {
     brand: "HistoryBot",
@@ -99,6 +102,9 @@ export const LABELS = {
     additionalDetail: "ಹೆಚ್ಚುವರಿ ಶಾಲಾ-ಪುಸ್ತಕ ವಿವರ",
     mainEvents: "ಮುಖ್ಯ ಘಟನೆಗಳು",
     places: "ಮುಖ್ಯ ಸ್ಥಳಗಳು",
+    answer: "ಉತ್ತರ",
+    sectionPages: "ವಿಭಾಗದ ಪುಟಗಳು",
+    econtentWait: "ಪಠ್ಯಪುಸ್ತಕ ಕಲಿಕಾ ಘಟಕ ತಯಾರಾಗುತ್ತಿದೆ. ಇದಕ್ಕೆ ಕೆಲವು ನಿಮಿಷಗಳು ಬೇಕಾಗಬಹುದು.",
   },
 };
 
