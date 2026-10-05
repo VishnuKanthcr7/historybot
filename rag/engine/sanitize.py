@@ -83,6 +83,19 @@ def _fix_broken_joins(text: str) -> str:
         r"\1 \2",
         text,
     )
+    # ", With an intention..." is usually an OCR smash after a dangling clause.
+    text = re.sub(
+        r",\s+(With\s+(?:an\s+intention|the\s+intention|a\s+view)\b)",
+        r". \1",
+        text,
+    )
+    # Drop dangling "When Name protested against this," clauses with no object.
+    text = re.sub(
+        r"\bWhen\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2}\s+protested against this,?\s*",
+        "",
+        text,
+        flags=re.I,
+    )
     return text
 
 
@@ -192,6 +205,25 @@ def _collapse_internal_overlap(text: str) -> str:
     return " ".join(words)
 
 
+
+def _drop_corrupt_student_sentences(text: str) -> str:
+    """Drop unresolved-referent / OCR-smash sentences after join repair."""
+    parts = re.split(r"(?<=[.!?])\s+", text or "")
+    kept: list[str] = []
+    for part in parts:
+        sent = part.strip()
+        if not sent:
+            continue
+        if re.search(r"\bprotested against this\b", sent, re.I):
+            continue
+        if re.search(r",\s+With\s+(?:an\s+intention|the\s+intention|a\s+view)\b", sent):
+            continue
+        if re.search(r"\brelationship between\b.{0,40}\band\s+[A-Z].{0,30}\bfought\b", sent, re.I):
+            continue
+        kept.append(sent)
+    return " ".join(kept)
+
+
 def sanitize_student_text(text: str) -> str:
     """Clean splices, OCR spacing, and duplicated overlaps for student display."""
     if not text or not text.strip():
@@ -225,6 +257,7 @@ def sanitize_student_text(text: str) -> str:
             body = _DUP_WORD.sub(r"\1", body)
             body = _DUP_PHRASE.sub(r"\1", body)
             body = _fix_broken_joins(body)
+            body = _drop_corrupt_student_sentences(body)
             body = _dedupe_overlapping_sentences(body)
             body = _collapse_internal_overlap(body)
             body = _MULTI_SPACE.sub(" ", body).strip()

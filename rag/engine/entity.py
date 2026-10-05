@@ -159,6 +159,17 @@ def _is_posthumous_bleed(text: str, entity: str) -> bool:
         return True
     if re.search(rf"^(?:{pat})\s*:\s*after\s+", low):
         return True
+    # Successor-as-Who bleed: "After Akbar, his elder son Jahangir ruled..."
+    if re.search(
+        rf"\bafter\s+(?:{pat})\s*,?\s+(?:his|her)\s+(?:elder\s+|younger\s+)?(?:son|daughter|brother|successor)\b",
+        low,
+    ):
+        return True
+    if re.search(
+        rf"\bafter\s+(?:{pat})\s*,\s+[a-z][a-z.\s]{{0,40}}?\b(?:ruled|became|was\s+appointed|took\s+over|succeeded)\b",
+        low,
+    ):
+        return True
     return False
 
 
@@ -215,6 +226,13 @@ def _looks_corrupt_sentence(text: str) -> bool:
     if re.search(r"\bafter\s+[A-Z][A-Za-z][A-Za-z.\s]{0,24}died,\s+he\b", clean, re.I):
         return True
     if re.match(r"^[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s*:\s*", clean) and "after the death" in clean.lower():
+        return True
+    # Dangling unresolved referent / OCR smash mid-clause.
+    if re.search(r"\bprotested against this\b", clean, re.I):
+        return True
+    if re.search(r",\s+With\s+(?:an\s+intention|the\s+intention|a\s+view)\b", clean):
+        return True
+    if re.search(r"\bWhen\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2}\s+protested against this,\s*With\b", clean):
         return True
     return False
 

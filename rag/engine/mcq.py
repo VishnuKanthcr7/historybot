@@ -64,7 +64,46 @@ def _usable(text: str) -> bool:
 
 
 def _group_text(group) -> str:
-    return _clean(" ".join(item.get("text") or "" for item in group.chunks))
+    raw = _clean(" ".join(item.get("text") or "" for item in group.chunks))
+    key = (getattr(group, "key", None) or "").split(":", 1)[0]
+    person_keys = {
+        "babar",
+        "akbar",
+        "shivaji",
+        "shahjahan",
+        "aurangzeb",
+        "bajirao",
+        "humayun",
+        "sambhaji",
+        "sher",
+        "jahangir",
+        "madhav",
+        "balaji",
+    }
+    if key not in person_keys:
+        return raw
+    try:
+        from rag.engine.entity import _is_posthumous_bleed, _looks_corrupt_sentence, _mentions, split_entity_segments
+        from rag.engine.pack import dominant_ruler
+    except Exception:
+        return raw
+    kept: list[str] = []
+    for segment in split_entity_segments(raw):
+        for sent in re.split(r"(?<=[.!?])\s+", segment):
+            clean = _clean(sent)
+            if len(clean.split()) < 5:
+                continue
+            if _looks_corrupt_sentence(clean):
+                continue
+            if _is_posthumous_bleed(clean, key):
+                continue
+            # Keep entity-mentioning sentences; drop other-ruler-dominated asides.
+            if _mentions(clean, key) <= 0:
+                other = dominant_ruler(clean)
+                if other and other != key:
+                    continue
+            kept.append(clean)
+    return _clean(" ".join(kept)) if kept else raw
 
 
 def _short(value: str, limit: int = 42) -> str:
@@ -101,6 +140,14 @@ def _stem_signature(question: str) -> str:
         return "taj-builder-or-memory"
     if "rohtas" in low or ("forts" in low and "construct" in low):
         return "forts-construct"
+    if "how old" in low or "years old" in low:
+        return "age-years"
+    if "which place is linked with" in low:
+        return "place-linked"
+    if "father" in low and "who was" in low:
+        return "who-father"
+    if "mother" in low and "who was" in low:
+        return "who-mother"
     return low[:72]
 
 
@@ -175,9 +222,7 @@ def _facts_from_group(group) -> list[McqFact]:
     match = re.search(r"appointed as (?:the )?([A-Za-z][A-Za-z ]{1,28}?)(?: when| at| in|\.|\,)", text, re.I)
     if match:
         add(f"What office was {title} appointed to?", match.group(1).strip(), "title")
-    match = re.search(r"(\d{1,2}) years old", text, re.I)
-    if match:
-        add(f"How old was {title} when this appointment is described?", f"{match.group(1)} years old", "age")
+    # Prefer a concrete assumed-power age question (added later) over a vague one.
     match = re.search(r"in memory of (?:his wife )?([A-Z][A-Za-z ]{2,36}?)(?: on|\.|\,)", text)
     if match:
         add("In whose memory was the Taj Mahal built?", match.group(1).strip(), "person")
@@ -253,6 +298,97 @@ def _facts_from_group(group) -> list[McqFact]:
         foe = match.group(1).strip()
         if foe.lower() != title.lower() and len(foe) <= 42:
             add(f"Whom did {title} defeat, according to the textbook?", foe, "person")
+    # Generic person-biography extractors (topic-bound, evidence-local).
+    age_power = re.search(
+        r"(?:When\s+)?" + re.escape(title) + r"\s+assumed power,?\s+he was only (\d{1,2}) years old",
+        text,
+        re.I,
+    )
+    if age_power:
+        add(
+            f"How old was {title} when he assumed power, according to the textbook?",
+            f"{age_power.group(1)} years old",
+            "age",
+        )
+    match = re.search(r"tutor and guardian ([A-Z][A-Za-z ]{2,32}?)(?: administered| came|\.|\,)", text)
+    if match:
+        add(f"Who was the tutor and guardian of {title}?", match.group(1).strip(), "person")
+    match = re.search(r"guru (?:named |was )?([A-Z][A-Za-z ]{2,40}?)(?: who| and|,|\.)", text)
+    if match:
+        guru = match.group(1).strip()
+        if guru.lower() != title.lower():
+            add(f"Who was {title}'s guru, according to the textbook?", guru, "person")
+    match = re.search(r"mother,? ([A-Z][A-Za-z]{2,24})", text)
+    if match and match.group(1).lower() not in {"the", "his", "her"}:
+        add(f"Who was {title}'s mother, according to the textbook?", match.group(1).strip(), "person")
+    match = re.search(r"father,? ([A-Z][A-Za-z]{2,24}(?:\s+[A-Z][A-Za-z]{2,24})?)", text)
+    if match:
+        father = match.group(1).strip()
+        if father.lower() != title.lower():
+            add(f"Who was {title}'s father, according to the textbook?", father, "person")
+    match = re.search(r"Second Battle of Panipat(?: in |.*?in )?(\d{4})?", text, re.I)
+    if match:
+        if match.group(1):
+            add("In which year was the Second Battle of Panipat fought?", match.group(1), "year")
+        add(f"Which battle in 1556 is {title} associated with in the textbook?", "Second Battle of Panipat", "term")
+    match = re.search(r"Battle of ([A-Z][A-Za-z]+)", text)
+    if match and match.group(1).lower() not in {"the", "this", "panipat"}:
+        battle = f"Battle of {match.group(1).strip()}"
+        add(f"Which battle is mentioned in connection with {title}?", battle, "term")
+    match = re.search(r"coronation(?: took place)?(?: in the year | in | at )[^. ]{0,40}?(\d{4})", text, re.I)
+    if match:
+        add(f"In which year did {title}'s coronation take place?", match.group(1), "year")
+    match = re.search(r"renamed ([A-Z][A-Za-z]+)[^. ]{0,40}?as ([A-Z][A-Za-z]+)", text)
+    if match:
+        add(f"What did {title} rename {match.group(1)} as?", match.group(2).strip(), "place")
+    match = re.search(r"built a new fort called ([A-Z][A-Za-z]+)", text, re.I)
+    if match:
+        add(f"Which new fort did {title} build, according to the textbook?", match.group(1).strip(), "place")
+    if re.search(r"abolished the\s*['\"‘’]?\s*Jizya", text, re.I):
+        add(f"Which tax on Hindus did {title} abolish?", "Jizya tax", "term")
+    if re.search(r"Mansabdari system", text, re.I):
+        add(f"Which administrative system is described as unique to {title}?", "Mansabdari system", "term")
+    if re.search(r"\bZabti system\b", text, re.I):
+        add(f"Which revenue system did {title} bring into practice?", "Zabti system", "term")
+    if re.search(r"Ryotwari system", text, re.I):
+        add(f"Which revenue system is mentioned with {title}?", "Ryotwari system", "term")
+    if re.search(r"policy of tolerance towards Hindus", text, re.I):
+        add(f"What policy did {title} adopt towards Hindus?", "policy of tolerance", "term")
+    if re.search(r"\bPanch Mahal\b", text, re.I):
+        add(f"Which monument in Fatehpur Sikri is mentioned with {title}?", "Panch Mahal", "work")
+    if re.search(r"Fatehpur Sikri", text, re.I):
+        add(f"Which city of monuments is linked with {title} in the textbook?", "Fatehpur Sikri", "place")
+    if re.search(r"\bMansabdars\b", text, re.I):
+        add(f"What were supervisors of Mansabs called in {title}'s army?", "Mansabdars", "term")
+    if re.search(r"dagh-mahali|dagh mahali", text, re.I):
+        add(f"Which department stamped horses in {title}'s administration?", "dagh-mahali", "term")
+    match = re.search(
+        r"four ministers called ([A-Za-z, ]{8,80}?)(?: to assist|\.|$)",
+        text,
+        re.I,
+    )
+    if match:
+        ministers = match.group(1).strip().rstrip(",")
+        # Prefer a short distinctive minister name as the answer key.
+        first = re.split(r",| and ", ministers)[0].strip()
+        if first:
+            add(f"Which minister title is listed among {title}'s four ministers?", first, "title")
+    match = re.search(r"born in ([A-Z][A-Za-z]+)", text)
+    if match:
+        add(f"Where was {title} born, according to the textbook?", match.group(1).strip(), "place")
+    match = re.search(r"assembled an army of the local ([A-Z][A-Za-z]+) youths", text, re.I)
+    if match:
+        add(f"Which local youths did {title} train as an army?", match.group(1).strip(), "term")
+    places = re.findall(
+        r"\b(Torna|Purandar|Sinhagad|Raigad|Pratapgad|Shivneri|Amarkot|Fatehpur|Chittor|Ranthambore|Kalinjar|Malwa|Gujarat|Bengal|Agra|Delhi|Panipat|Haldighat)\b",
+        text,
+    )
+    for place in places[:3]:
+        add(f"Which place is linked with {title} in the textbook?", place, "place")
+    if re.search(r"Humayun was his father", text, re.I):
+        add(f"Who was {title}'s father, according to the textbook?", "Humayun", "person")
+    if re.search(r"Chatrapati|Chhatrapati", text, re.I):
+        add(f"Which title is mentioned for {title} in the textbook?", "Chatrapati", "title")
     return facts
 
 
@@ -363,14 +499,14 @@ def _grounded_distractors(fact: McqFact, facts: list[McqFact], scanned: dict[str
     # Cross-kind fallback only from scanned textbook pool of related kinds.
     if len(out) < 3:
         related = {
-            "person": ("title", "place"),
-            "place": ("person", "title"),
-            "title": ("person", "term"),
-            "term": ("title", "work"),
-            "work": ("term", "title"),
-            "year": (),
-            "language": (),
-            "age": (),
+            "person": ("title", "place", "term"),
+            "place": ("person", "title", "term"),
+            "title": ("person", "term", "place"),
+            "term": ("title", "work", "place", "person"),
+            "work": ("term", "title", "place"),
+            "year": ("place", "person", "title"),
+            "language": ("place", "person", "title"),
+            "age": ("place", "person", "title", "term"),
         }
         for kind in related.get(fact.kind, ()):
             for item in scanned.get(kind, []):
@@ -428,7 +564,8 @@ def mcqs_from_pack(
     from rag.engine.classify import extract_topics
 
     topics = extract_topics(question or "")
-    plan = filter_plan(question, build_coverage_plan(chunks)) or build_coverage_plan(chunks)
+    plan_full = build_coverage_plan(chunks)
+    plan = filter_plan(question, plan_full) or plan_full
     plan = [group for group in plan if _topic_allowed_group(group, topics)]
     facts: list[McqFact] = []
     titles = []
@@ -437,7 +574,13 @@ def mcqs_from_pack(
         facts.extend(_facts_from_group(group))
         titles.append(group.title)
         blob += " " + _group_text(group)
-    scanned = _scan_pool(blob)
+    # Broader distractor pool from family-allowed groups (still no Sher into Mughals).
+    scan_blob = blob
+    for group in plan_full:
+        if not _topic_allowed_group(group, topics):
+            continue
+        scan_blob += " " + _group_text(group)
+    scanned = _scan_pool(scan_blob or blob)
     if topics & {"mughal"} and "sher" not in topics:
         titles = [t for t in titles if "sher" not in t.lower()]
         scanned["person"] = [p for p in scanned.get("person", []) if "sher" not in p.lower()]
