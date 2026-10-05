@@ -96,8 +96,25 @@ TERM_EXPLAIN_HINTS = (
     "was a",
     "were a",
     "is a",
+    "are a",
     "consisted",
     "divided",
+    "types of",
+    "type of",
+    "land tax",
+    "taxation",
+    "prime minister",
+)
+
+# Cues that only record collection/use events — not definitions of what the term IS.
+TERM_EVENT_ONLY_CUES = (
+    "authority to collect",
+    "gained the authority",
+    "permitted him to collect",
+    "permitted to collect",
+    "collect chauth",
+    "collect sardeshmukhi",
+    "to collect",
 )
 
 TERM_PATTERNS = (
@@ -126,8 +143,15 @@ EXAM_SPEC = {
     "instruction": (
         "Write 3 exam_questions as objects {type,question,answer} with types "
         "very_short, short, and descriptive, and 2 mcqs as {question,options,answer}. "
-        "Use only textbook facts in the passages. Distractor options must also be names or terms from the passages. "
-        "Dates only if they appear in the passages."
+        "very_short answers must be ONE concise identification sentence (e.g. Who was X?). "
+        "short answers: 1-2 brief textbook sentences. "
+        "descriptive answers: 2-4 relevant textbook-supported detail sentences. "
+        "Do not make every answer long. Use only textbook facts in the passages. "
+        "Distractor options must also be names or terms from the passages. "
+        "Dates only if they appear in the passages. "
+        "For term questions (What was Chauth?), prefer definitional wording; "
+        "if the passages only show how a term was used and never define it, say so plainly—"
+        "do not invent rates or meanings."
     ),
     "max_tokens": 420,
 }
@@ -173,7 +197,26 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
     content = _assemble_module(topic, plan, detailed, entity=pack.entity or entity_key)
     _maybe_exam_from_model(topic, plan, primary_selected, content)
     _fill_exam_fallback(content, plan)
+    _repair_exam_questions(content, plan)
+    # Re-apply pronoun clarity to exam answers added after assemble.
+    content = _clarify_content(
+        content,
+        plan,
+        pack.entity or entity_key,
+        content.get("title") or topic,
+    )
     content = _sanitize_content(content)
+    # Drop any exam rows whose answers were scrubbed empty, then repair gaps.
+    if content.get("exam_questions") is not None:
+        content["exam_questions"] = [
+            row
+            for row in (content.get("exam_questions") or [])
+            if isinstance(row, dict) and str(row.get("answer") or "").strip()
+        ]
+        if not content["exam_questions"]:
+            content.pop("exam_questions", None)
+            _fill_exam_fallback(content, plan)
+        _repair_exam_questions(content, plan)
     content = _validate_section_citations(content, plan, primary_selected, allowed_pages, covered)
 
     if not _usable(content.get("detailed_explanation")):
@@ -210,6 +253,346 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
             ],
         },
     }
+
+
+
+_PRONOUN_LEAD_RE = re.compile(
+    r"^(But\s+|However,\s+|Then\s+|Thus\s+|Therefore,\s+|So\s+)?"
+    r"(he|she|they|this|that|it)\b",
+    re.I,
+)
+_GROUP_WORDS = {
+    "marathas", "mughals", "portuguese", "siddhis", "ahoms", "british",
+    "dutch", "french", "english", "people", "members",
+}
+_PRONOUN_STOP = {
+    "The", "When", "After", "Before", "During", "While", "Although", "However",
+    "Then", "Thus", "Therefore", "Due", "With", "In", "On", "At", "By", "From",
+    "And", "But", "This", "That", "These", "Those", "His", "Her", "Their", "Its",
+    "Hence", "Later", "Also", "Since", "Because", "Although", "India", "North",
+    "South", "East", "West", "Class", "History", "Chapter",
+}
+
+
+def _known_person_names(plan=None, entity: str | None = None, display: str | None = None) -> list[str]:
+    """Collect textbook person/ruler names for pronoun resolution (generic)."""
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def add(name: str) -> None:
+        name = (name or "").strip(" ,.;:")
+        if not name or len(name) < 3:
+            return
+        key = name.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        names.append(name)
+
+    if display:
+        add(display)
+    if entity:
+        from rag.engine.coverage import GROUP_TITLE
+
+        add(GROUP_TITLE.get(entity) or entity.replace("_", " ").title())
+        for alias in TOPIC_ALIASES.get(entity, ()):
+            if alias.isascii() and " " in alias or alias[:1].isupper():
+                add(alias.title() if alias.islower() else alias)
+    for aliases in TOPIC_ALIASES.values():
+        for alias in aliases:
+            if not alias.isascii():
+                continue
+            if " " in alias or "-" in alias:
+                add(alias.title() if alias.islower() else alias)
+    # Frequent Class 9 actors that appear as pronoun antecedents.
+    for extra in (
+        "Nizam-ul-Mulk",
+        "Nizam",
+        "Bahadur Shah I",
+        "Aurangzeb",
+        "Shahu",
+        "Tarabai",
+        "Sambhaji",
+        "Balaji Vishwanath",
+        "Sadashivrao Bhau",
+        "Ahmed Shah Abdali",
+        "Hyder Ali",
+        "Safdarjung",
+    ):
+        add(extra)
+    for group in plan or []:
+        title = getattr(group, "title", None)
+        if title:
+            add(str(title))
+    # Longest first so "Baji Rao I" wins over "Baji".
+    names.sort(key=lambda n: len(n), reverse=True)
+    return names
+
+
+def _names_in_sentence(sent: str, known: list[str]) -> list[str]:
+    low = (sent or "").lower()
+    found = []
+    covered = []
+    for name in known:
+        needle = name.lower()
+        # Word-boundary-ish match so "Nizam" does not hit inside "Nizam-ul-Mulk".
+        pattern = r"(?<![a-z])" + re.escape(needle) + r"(?![a-z])"
+        if not re.search(pattern, low):
+            continue
+        # Skip shorter names already spanned by a longer match.
+        span = re.search(pattern, low)
+        if span and any(span.start() >= a and span.end() <= b for a, b in covered):
+            continue
+        found.append(name)
+        if span:
+            covered.append((span.start(), span.end()))
+    return found
+
+
+def _last_singular_actor(sent: str, known: list[str]) -> str | None:
+    """Best-effort singular person antecedent from a prior sentence.
+
+    Prefer the rightmost person name by character position (usually the
+    subject of the final clause), skipping group labels.
+    """
+    low = (sent or "").lower()
+    if not low:
+        return None
+    positioned: list[tuple[int, str]] = []
+    for name in known:
+        needle = name.lower()
+        if needle in _GROUP_WORDS:
+            continue
+        pattern = r"(?<![a-z])" + re.escape(needle) + r"(?![a-z])"
+        for match in re.finditer(pattern, low):
+            positioned.append((match.start(), name))
+    if not positioned:
+        return None
+    # Rightmost match wins; if ties, longer name wins.
+    positioned.sort(key=lambda row: (row[0], len(row[1])))
+    return positioned[-1][1]
+
+
+def _clarify_pronoun_sentence(
+    sent: str,
+    prior: str | None,
+    known: list[str],
+    default_subject: str | None = None,
+) -> str | None:
+    """Resolve leading/ambiguous he/she/they/this/that/it using adjacent evidence.
+
+    Returns None when the sentence should be dropped (unresolvable dangling pronoun).
+    Does not invent names outside known/default subjects from textbook evidence.
+    """
+    sent = (sent or "").strip()
+    if not sent:
+        return sent
+    m = _PRONOUN_LEAD_RE.match(sent)
+    if not m:
+        # Mid-sentence "this" without a noun: light touch only for "Due to this," / "In addition to this,"
+        if re.match(r"^(Due to this|In addition to this|Because of this)\b", sent, re.I):
+            antecedent_event = None
+            if prior and re.search(r"\bbattle\b", prior, re.I):
+                antecedent_event = "the battle"
+            elif prior and re.search(r"\bwar\b", prior, re.I):
+                antecedent_event = "the war"
+            if antecedent_event:
+                sent = re.sub(
+                    r"^(Due to this|In addition to this|Because of this)\b",
+                    lambda mm: mm.group(1).replace(" this", f" {antecedent_event}"),
+                    sent,
+                    count=1,
+                    flags=re.I,
+                )
+        # Resolve mid-sentence he/she when no person is named in the sentence and
+        # the referent is clear from prior sentence or the module subject.
+        # Skip hostile "lost to the X" cases when default_subject is from that side.
+        if re.search(r"\b(he|she)\b", sent, re.I) and not _names_in_sentence(sent, known):
+            actor = _last_singular_actor(prior or "", known) if prior else None
+            if not actor:
+                actor = default_subject
+            if actor:
+                hostile = re.search(
+                    r"\b(he|she)\s+lost\s+to\s+the\s+(marathas|mughals)\b",
+                    sent,
+                    re.I,
+                )
+                if hostile and actor.lower() in hostile.group(0).lower():
+                    return None if _PRONOUN_LEAD_RE.match(sent) else sent
+                sent = re.sub(r"\bhe\b", actor, sent, count=1, flags=re.I)
+                # Only replace she if we used she match first; keep simple one-pass for he/she:
+                if re.search(r"\bshe\b", sent, re.I) and not re.search(re.escape(actor), sent):
+                    sent = re.sub(r"\bshe\b", actor, sent, count=1, flags=re.I)
+        return sent
+
+    pronoun = m.group(2).lower()
+    prefix = m.group(1) or ""
+    rest = sent[m.end() :].lstrip()
+    actor = _last_singular_actor(prior or "", known) if prior else None
+    if pronoun in {"he", "she"}:
+        # Without an adjacent antecedent, do NOT guess the module subject —
+        # that invents the wrong person (e.g. Nizam's "he lost" vs Baji Rao).
+        if not actor:
+            return None
+        rebuilt = f"{prefix}{actor} {rest}".strip()
+        if rebuilt and rebuilt[0].islower():
+            rebuilt = rebuilt[0].upper() + rebuilt[1:]
+        # Avoid "But But" style; normalize space.
+        rebuilt = re.sub(r"\s+", " ", rebuilt)
+        return rebuilt
+    if pronoun == "they":
+        # Prefer a group name from the prior sentence.
+        groups = [
+            n for n in _names_in_sentence(prior or "", known)
+            if n.lower() in _GROUP_WORDS or n.lower().endswith("s")
+        ]
+        if groups:
+            rebuilt = f"{prefix}{groups[-1]} {rest}".strip()
+            return rebuilt[0].upper() + rebuilt[1:] if rebuilt else None
+        # Unclear plural — drop rather than guess.
+        return None
+    if pronoun in {"this", "that", "it"}:
+        # Dangling demonstrative subject: drop unless we can name a prior battle/war/event noun.
+        if prior and re.search(r"\b(battle|war|treaty|agreement|campaign)\b", prior, re.I):
+            noun = re.search(r"\b(battle|war|treaty|agreement|campaign)\b", prior, re.I)
+            label = f"the {noun.group(1).lower()}"
+            rebuilt = f"{prefix}{label} {rest}".strip()
+            return rebuilt[0].upper() + rebuilt[1:] if rebuilt else None
+        return None
+    return sent
+
+
+def _clarify_text(
+    text: str,
+    known: list[str],
+    default_subject: str | None = None,
+) -> str:
+    """Clarify ambiguous pronouns across a multi-sentence student text block."""
+    if not (text or "").strip():
+        return text or ""
+    # Preserve bullet / newline structure for revision lists.
+    lines = text.split("\n")
+    out_lines: list[str] = []
+    for line in lines:
+        raw = line
+        prefix = ""
+        body = raw
+        bullet = re.match(r"^(\s*(?:[-*\u2022]\s+|\d+\.\s+))", raw)
+        if bullet:
+            prefix = bullet.group(1)
+            body = raw[len(prefix) :]
+        parts = re.split(r"(?<=[.!?])\s+", body.strip()) if body.strip() else []
+        clarified: list[str] = []
+        prev = None
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            fixed = _clarify_pronoun_sentence(part, prev, known, default_subject)
+            if not fixed:
+                continue
+            clarified.append(fixed if fixed.endswith((".", "!", "?")) or len(parts) == 1 else fixed)
+            prev = fixed
+        if not clarified and body.strip():
+            # Single fragment without terminal punct.
+            fixed = _clarify_pronoun_sentence(body.strip(), None, known, default_subject)
+            if fixed:
+                out_lines.append(prefix + fixed)
+            continue
+        joined = " ".join(clarified).strip()
+        out_lines.append(prefix + joined if joined else raw.rstrip())
+    return "\n".join(out_lines).strip()
+
+def _clarify_content(content: dict, plan, entity: str | None, display: str) -> dict:
+    known = _known_person_names(plan, entity=entity, display=display)
+    default = display
+    for key in (
+        "introduction",
+        "detailed_explanation",
+        "revision",
+    ):
+        if content.get(key):
+            content[key] = _clarify_text(content[key], known, default)
+    for key in ("key_points", "main_events", "learning_objectives"):
+        rows = content.get(key)
+        if isinstance(rows, list):
+            content[key] = [
+                _clarify_text(item, known, default) if isinstance(item, str) else item
+                for item in rows
+                if not isinstance(item, str) or _clarify_text(item, known, default)
+            ]
+            content[key] = [item for item in content[key] if item]
+    for person in content.get("important_people") or []:
+        if person.get("note"):
+            person["note"] = _clarify_text(person["note"], known, person.get("name") or default)
+    for term in content.get("important_terms") or []:
+        if term.get("meaning"):
+            term["meaning"] = _clarify_text(term["meaning"], known, default)
+    for row in content.get("timeline") or []:
+        if row.get("event"):
+            row["event"] = _clarify_text(row["event"], known, default)
+    for row in content.get("exam_questions") or []:
+        if row.get("answer"):
+            row["answer"] = _clarify_text(row["answer"], known, default)
+    return content
+
+
+def _first_sentence(text: str) -> str:
+    text = _strip_sentence_prefix((text or "").strip())
+    if not text:
+        return ""
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    sent = (parts[0] if parts else text).strip()
+    if sent and not sent.endswith((".", "!", "?")):
+        sent += "."
+    return sent
+
+
+def _limit_sentences(text: str, max_sentences: int) -> str:
+    text = _strip_sentence_prefix((text or "").strip())
+    if not text:
+        return ""
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text) if p.strip()]
+    kept = parts[: max(1, max_sentences)]
+    out = " ".join(kept).strip()
+    if out and not out.endswith((".", "!", "?")):
+        out += "."
+    return out
+
+
+def _shape_exam_answer(answer: str, qtype: str, question: str = "") -> str:
+    """Enforce very_short / short / descriptive length styles without new facts."""
+    answer = _strip_sentence_prefix(sanitize_student_text(answer or ""))
+    if not answer:
+        return ""
+    qtype = (qtype or "short").lower().strip()
+    qlow = (question or "").lower()
+    if qtype in {"very_short", "very short", "vsa"} or qlow.startswith("who was") or qlow.startswith("who is"):
+        # Prefer a direct identification / role sentence over a long multi-event opener.
+        parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", answer) if p.strip()]
+        role_cues = (
+            "appointed as", "peshwa", "emperor", "king", "sultan", "chatrapati",
+            "coronation", "was the", "were the", "known as", "called",
+        )
+        best = None
+        for part in parts:
+            low = part.lower()
+            if any(cue in low for cue in role_cues) and len(part.split()) <= 30:
+                best = part
+                break
+        if best is None and parts:
+            # Shortest reasonably informative sentence.
+            ranked = sorted(parts, key=lambda s: len(s.split()))
+            best = next((s for s in ranked if len(s.split()) >= 4), parts[0])
+        chosen = best or answer
+        if chosen and not chosen.endswith((".", "!", "?")):
+            chosen += "."
+        return chosen
+    if qtype in {"short", "sa"}:
+        return _limit_sentences(answer, 2)
+    if qtype in {"descriptive", "long", "la"}:
+        return _limit_sentences(answer, 4)
+    return _limit_sentences(answer, 2)
 
 
 def _assemble_module(topic: str, plan, detailed: str, entity: str | None = None) -> dict:
@@ -253,6 +636,7 @@ def _assemble_module(topic: str, plan, detailed: str, entity: str | None = None)
         content["timeline"] = timeline
     if events:
         content["main_events"] = events
+    content = _clarify_content(content, plan, entity, display)
     return content
 
 
@@ -336,15 +720,35 @@ def _is_student_sentence(text: str) -> bool:
     return True
 
 
-def _iter_clean_sentences(chunks: list[dict]):
+def _iter_clean_sentences(chunks: list[dict], known_names: list[str] | None = None):
     seen = set()
+    known = known_names or _known_person_names()
     for item in chunks or []:
         page = _page(item)
         raw = _normalize_ocr_text(item.get("text") or "")
+        raw_parts = []
         for sent in re.split(r"(?<=[.!?])\s+", raw):
             sent = re.sub(r"(?i)^[A-Z][A-Za-z0-9 .\'-]{0,40}?\s*:\s+", "", sent.strip()).strip()
-            if not _is_student_sentence(sent):
+            if not sent:
                 continue
+            raw_parts.append(sent)
+        clarified_parts: list[str] = []
+        prev = None
+        for sent in raw_parts:
+            fixed = _clarify_pronoun_sentence(sent, prev, known, default_subject=None)
+            if fixed is None:
+                # Drop unresolvable dangling pronoun continuations.
+                # Still advance prev from original if it named someone.
+                if _names_in_sentence(sent, known):
+                    prev = sent
+                continue
+            clarified_parts.append(fixed)
+            prev = fixed
+        for sent in clarified_parts:
+            if not _is_student_sentence(sent if sent.endswith((".", "!", "?")) else sent + "."):
+                # Keep already-valid sentences; probe with period if needed.
+                if not _is_student_sentence(sent):
+                    continue
             key = sent[:70].lower()
             if key in seen:
                 continue
@@ -364,37 +768,67 @@ def _score_person_sentence(sent: str, aliases: tuple[str, ...]) -> int:
     return score
 
 
+def _is_definitional_term_sentence(sent: str, needle: str) -> bool:
+    """True when the sentence explains what the term IS (not only an event-use)."""
+    low = (sent or "").lower()
+    if needle not in low:
+        return False
+    if any(cue in low for cue in TERM_EVENT_ONLY_CUES) and not any(
+        hint in low for hint in TERM_EXPLAIN_HINTS
+    ):
+        # Pure collection/authority event with no definitional wording.
+        if not re.search(rf"{re.escape(needle)}\s*\(", low):
+            return False
+    if any(hint in low for hint in TERM_EXPLAIN_HINTS):
+        return True
+    if re.search(rf"{re.escape(needle)}\s*\([^)]{{0,40}}\)", low):
+        return True
+    if re.search(rf"\b(?:called|known as)\s+{re.escape(needle)}\b", low):
+        return True
+    if re.search(rf"\b{re.escape(needle)}\b(?:\s+\w+){{0,3}}\s+(?:was|were|is|are)\s+a\b", low):
+        return True
+    return False
+
+
+def _is_event_only_term_sentence(sent: str, needle: str) -> bool:
+    low = (sent or "").lower()
+    if needle not in low:
+        return False
+    if _is_definitional_term_sentence(sent, needle):
+        return False
+    return any(cue in low for cue in TERM_EVENT_ONLY_CUES) or (
+        "collect" in low and "tax" in low
+    )
+
+
 def _score_term_sentence(sent: str, needle: str) -> int:
     low = sent.lower()
     if needle not in low:
         return 0
-    # Long name-lists without an explanatory cue are weak definitions,
-    # but keep sentences that clearly describe collection/taxes/authority/roles.
-    explanatory = any(hint in low for hint in TERM_EXPLAIN_HINTS) or any(
-        cue in low
-        for cue in (
-            "collect",
-            "tax",
-            "authority",
-            "appointed as",
-            "minister",
-            "system",
-            "warfare",
-            "supervisors",
-            "assist",
-        )
-    )
-    if re.search(r",.+,.*\band\b", sent) and not explanatory:
-        return 0
     if "duties of the king" in low:
         return 0
+    definitional = _is_definitional_term_sentence(sent, needle)
+    event_only = _is_event_only_term_sentence(sent, needle)
+    # Long name-lists without an explanatory cue are weak.
+    if re.search(r",.+,.*\band\b", sent) and not definitional and not event_only:
+        return 0
+    if event_only and not definitional:
+        # Keep a weak positive so callers can emit an honest non-definition note.
+        return 1
     score = 1
-    if explanatory:
-        score += 4
+    if definitional:
+        score += 8
+    elif any(
+        cue in low
+        for cue in ("appointed as", "minister", "warfare", "supervisors", "assist", "tax")
+    ):
+        score += 3
     if re.search(rf"\bthe {re.escape(needle)}", low):
         score += 2
     if low.startswith(needle):
         score += 2
+    if re.search(rf"{re.escape(needle)}\s*\(", low):
+        score += 3
     return score
 
 
@@ -552,9 +986,21 @@ def _enrich_detailed(detailed: str, plan, entity: str | None) -> str:
     return sanitize_student_text(f"{core} {add}")
 
 
-def _format_term_meaning(term: str, sentences: list[str]) -> str:
-    """Build a concise textbook-grounded meaning; avoid raw chunk prefixes."""
+def _format_term_meaning(term: str, sentences: list[str], definitional: bool = True) -> str:
+    """Build a concise textbook-grounded meaning; avoid raw chunk prefixes.
+
+    When only event-use evidence exists (no definitional wording), return an
+    honest non-definition note instead of pasting the collection-event sentence
+    as if it were a definition. Never invent rates or outside meanings.
+    """
     cleaned = []
+    needles = []
+    for label, opts in TERM_PATTERNS:
+        if label.lower() == term.lower():
+            needles = list(opts)
+            break
+    if not needles:
+        needles = [term.lower()]
     for sent in sentences:
         sent = _strip_sentence_prefix(sanitize_student_text(sent or ""))
         if not sent:
@@ -564,11 +1010,52 @@ def _format_term_meaning(term: str, sentences: list[str]) -> str:
         cleaned.append(sent)
     if not cleaned:
         return ""
+    if not definitional:
+        use = ""
+        for sent in cleaned:
+            low = sent.lower()
+            if not any(n in low for n in needles):
+                continue
+            # Prefer the shortest clause that still names the term.
+            parts = re.split(r",\s+", sent.rstrip("."))
+            hit = [p.strip() for p in parts if any(n in p.lower() for n in needles)]
+            clause = hit[-1] if hit else sent.rstrip(".")
+            clause = clause.strip(" ,;")
+            # Reject awkward mid-phrase fragments ("Malwa and gained the authority...").
+            bad_start = clause.lower().startswith(
+                ("and ", "or ", "but ", "malwa ", "gujarat ", "with the intention")
+            )
+            if (
+                bad_start
+                or len(clause.split()) > 22
+                or not re.search(r"\b(collect|tax|authority)\b", clause, re.I)
+            ):
+                return (
+                    f"The Class 9 textbook does not give an explicit definition of {term}; "
+                    f"it only records that {term} was collected as a tax in the events described for this topic."
+                )
+            if not clause.endswith((".", "!", "?")):
+                clause += "."
+            if clause and clause[0].islower():
+                clause = clause[0].upper() + clause[1:]
+            use = clause
+            break
+        if not use:
+            return (
+                f"The Class 9 textbook does not give an explicit definition of {term}; "
+                f"it only records how it was used in this topic."
+            )
+        return (
+            f"The Class 9 textbook does not give an explicit definition of {term}; "
+            f"it only records how it was used. {use}"
+        )
     primary = cleaned[0]
     low = primary.lower()
     term_l = term.lower()
     if len(cleaned) > 1 and _sentence_key(cleaned[1]) != _sentence_key(primary):
-        primary = f"{primary} {cleaned[1]}"
+        # Prefer a second sentence only if it stays definitional.
+        if any(_is_definitional_term_sentence(cleaned[1], n) for n in needles):
+            primary = f"{primary} {cleaned[1]}"
     if term_l not in low and not any(term_l in c.lower() for c in cleaned):
         return f"{term}: {primary}"
     return primary
@@ -794,28 +1281,54 @@ def _terms_from_plan(plan, used: set[str] | None = None) -> list[dict]:
             ranked.sort(reverse=True)
             if not ranked:
                 continue
+            # Prefer definitional sentences; fall back to event-only with honest note.
+            def_rows = []
+            event_rows = []
+            for best, sent, page in ranked:
+                if any(_is_definitional_term_sentence(sent, n) for n in needles):
+                    def_rows.append((best, sent, page))
+                elif best > 0 or any(_is_event_only_term_sentence(sent, n) for n in needles):
+                    # Event-only may score <=0 after used-penalty; still usable for honest notes.
+                    event_rows.append((max(best, 1), sent, page))
+            pool = def_rows if def_rows else event_rows
+            definitional = bool(def_rows)
             chosen: list[tuple[str, int | None]] = []
             local = set(used)
-            for best, sent, page in ranked:
-                if chosen and best <= 0:
+            for best, sent, page in pool:
+                if chosen and best <= 0 and definitional:
                     continue
-                if not _reserve_sentence(sent, local) and chosen:
-                    continue
-                if _sentence_key(sent) not in local:
-                    local.add(_sentence_key(sent))
+                if definitional:
+                    if not _reserve_sentence(sent, local) and chosen:
+                        continue
+                    if _sentence_key(sent) not in local:
+                        local.add(_sentence_key(sent))
+                # Event-only honest notes may share a sentence across related terms.
                 chosen.append((sent, page))
-                if len(chosen) >= 2:
+                # One sentence is enough for an honest non-definition note.
+                limit = 2 if definitional else 1
+                if len(chosen) >= limit:
                     break
             if not chosen:
                 continue
-            meaning = _format_term_meaning(label, [s for s, _p in chosen])
+            # Prefer fewer high-quality items: skip weak event-only terms that
+            # are barely about the label (score 1 noise), unless the term is
+            # clearly named in a collect/tax use sentence.
+            if not definitional:
+                top = chosen[0][0]
+                if not any(_is_event_only_term_sentence(top, n) for n in needles):
+                    continue
+            meaning = _format_term_meaning(
+                label, [s for s, _p in chosen], definitional=definitional
+            )
             pages = _sorted_pages([p for _s, p in chosen if p is not None] or group.pages)
             if not meaning or label.lower() in seen:
                 continue
             seen.add(label.lower())
             for s, _p in chosen:
                 _reserve_sentence(s, used)
-            terms.append({"term": label, "meaning": meaning[:420], "pages": pages})
+            # Honest notes can be a bit longer; keep room for the caveat.
+            cap = 480 if not definitional else 420
+            terms.append({"term": label, "meaning": meaning[:cap], "pages": pages})
             break
     return terms
 
@@ -1002,6 +1515,90 @@ def _maybe_exam_from_model(topic: str, plan, evidence: list[dict], content: dict
         content["mcqs"] = mcqs
 
 
+def _repair_exam_questions(content: dict, plan) -> None:
+    """Ensure exam answers are non-empty and typed lengths differ."""
+    rows = list(content.get("exam_questions") or [])
+    people = content.get("important_people") or []
+    terms = content.get("important_terms") or []
+    events = content.get("main_events") or []
+    key_points = content.get("key_points") or []
+    fixed = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        q = str(row.get("question") or "").strip()
+        ans = str(row.get("answer") or "").strip()
+        qtype = str(row.get("type") or "short").lower()
+        if not q:
+            continue
+        if not ans:
+            if qtype in {"very_short", "very short"} and people:
+                ans = _shape_exam_answer(people[0].get("note") or people[0].get("name") or "", "very_short", q)
+                row["pages"] = row.get("pages") or people[0].get("pages") or []
+            elif qtype == "short" and terms:
+                raw = terms[0].get("meaning") or terms[0].get("term") or ""
+                if "does not give an explicit definition" in raw.lower():
+                    ans = _limit_sentences(raw, 2)
+                else:
+                    ans = _shape_exam_answer(raw, "short", q)
+                row["pages"] = row.get("pages") or terms[0].get("pages") or []
+            elif qtype in {"descriptive", "long"}:
+                parts = []
+                for sent in list(events) + list(key_points):
+                    sent = _strip_sentence_prefix(sent)
+                    if sent:
+                        parts.append(sent)
+                    if len(parts) >= 3:
+                        break
+                ans = _shape_exam_answer(" ".join(parts), "descriptive", q)
+            if not ans:
+                continue
+        else:
+            ans = _shape_exam_answer(ans, qtype, q)
+            if not ans:
+                continue
+        row["answer"] = ans
+        if qtype in {"very_short", "short", "descriptive"}:
+            row["type"] = qtype
+        fixed.append(row)
+    have = {(r.get("type") or "").lower() for r in fixed}
+    if "very_short" not in have and people:
+        q = f"Who was {people[0]['name']}?"
+        fixed.insert(
+            0,
+            {
+                "type": "very_short",
+                "question": q,
+                "answer": _shape_exam_answer(people[0].get("note") or people[0]["name"], "very_short", q),
+                "pages": people[0].get("pages") or [],
+            },
+        )
+    if "short" not in have and terms:
+        q = f"What was {terms[0]['term']} according to the Class 9 textbook?"
+        raw = terms[0].get("meaning") or terms[0]["term"]
+        ans = (
+            _limit_sentences(raw, 2)
+            if "does not give an explicit definition" in raw.lower()
+            else _shape_exam_answer(raw, "short", q)
+        )
+        fixed.append(
+            {"type": "short", "question": q, "answer": ans, "pages": terms[0].get("pages") or []}
+        )
+    if "descriptive" not in have and (events or key_points or people):
+        title = people[0]["name"] if people else (plan[0].title if plan else "this topic")
+        q = f"Explain the main events connected with {title} as given in the Class 9 textbook."
+        parts = list(events)[:3] or list(key_points)[:3]
+        fixed.append(
+            {
+                "type": "descriptive",
+                "question": q,
+                "answer": _shape_exam_answer(" ".join(parts), "descriptive", q),
+                "pages": (people[0].get("pages") if people else []) or [],
+            }
+        )
+    content["exam_questions"] = [r for r in fixed if str(r.get("answer") or "").strip()][:5]
+
+
 def _fill_exam_fallback(content: dict, plan) -> None:
     people = content.get("important_people") or []
     terms = content.get("important_terms") or []
@@ -1011,30 +1608,35 @@ def _fill_exam_fallback(content: dict, plan) -> None:
         questions = []
         used_ans: set[str] = set()
         if people:
-            ans = _strip_sentence_prefix(people[0].get("note") or people[0]["name"])
+            raw_ans = _strip_sentence_prefix(people[0].get("note") or people[0]["name"])
+            q = f"Who was {people[0]['name']}?"
+            ans = _shape_exam_answer(raw_ans, "very_short", q)
             questions.append(
                 {
                     "type": "very_short",
-                    "question": f"Who was {people[0]['name']}?",
+                    "question": q,
                     "answer": ans,
                     "pages": people[0].get("pages") or [],
                 }
             )
             _reserve_sentence(ans, used_ans)
         if terms:
-            ans = _strip_sentence_prefix(terms[0].get("meaning") or terms[0]["term"])
-            short_ans = ans.split(".")[0].strip()
-            if short_ans and not short_ans.endswith("."):
-                short_ans += "."
+            raw_ans = _strip_sentence_prefix(terms[0].get("meaning") or terms[0]["term"])
+            q = f"What was {terms[0]['term']} according to the Class 9 textbook?"
+            # Keep honest non-definition notes intact (may be 2 sentences).
+            if "does not give an explicit definition" in raw_ans.lower():
+                short_ans = _limit_sentences(raw_ans, 2)
+            else:
+                short_ans = _shape_exam_answer(raw_ans, "short", q)
             questions.append(
                 {
                     "type": "short",
-                    "question": f"What was {terms[0]['term']} according to the Class 9 textbook?",
-                    "answer": short_ans or ans,
+                    "question": q,
+                    "answer": short_ans or raw_ans,
                     "pages": terms[0].get("pages") or [],
                 }
             )
-            _reserve_sentence(short_ans or ans, used_ans)
+            _reserve_sentence(short_ans or raw_ans, used_ans)
         desc_parts = []
         for sent in list(events) + list(key_points):
             sent = _strip_sentence_prefix(sent)
@@ -1072,14 +1674,15 @@ def _fill_exam_fallback(content: dict, plan) -> None:
                 pages = pages or _sorted_pages(plan[0].pages)
         if desc_parts:
             title = people[0]["name"] if people else (plan[0].title if plan else "this topic")
+            desc_q = (
+                f"Explain the main events connected with {title} "
+                f"as given in the Class 9 textbook."
+            )
             questions.append(
                 {
                     "type": "descriptive",
-                    "question": (
-                        f"Explain the main events connected with {title} "
-                        f"as given in the Class 9 textbook."
-                    ),
-                    "answer": " ".join(desc_parts),
+                    "question": desc_q,
+                    "answer": _shape_exam_answer(" ".join(desc_parts), "descriptive", desc_q),
                     "pages": pages,
                 }
             )
@@ -1124,7 +1727,11 @@ def _clean_exam(raw, evidence: list[dict]) -> list[dict]:
         if unsupported_named_items(blob, evidence):
             continue
         pages = _pages(supporting_evidence(blob, evidence, min_overlap=1))
-        out.append({"type": item.get("type") or "short", "question": question, "answer": answer, "pages": pages})
+        qtype = item.get("type") or "short"
+        answer = _shape_exam_answer(answer, str(qtype), question)
+        if not answer:
+            continue
+        out.append({"type": qtype, "question": question, "answer": answer, "pages": pages})
         if len(out) >= 3:
             break
     return out
