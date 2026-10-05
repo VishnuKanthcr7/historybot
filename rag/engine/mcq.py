@@ -119,7 +119,24 @@ VACUOUS_STEMS = (
     "which place is mentioned in the textbook section",
     "which year is mentioned in the textbook section",
     "which language is mentioned with",
+    "which language is associated with",
+    "city of monuments",
+    "which place is linked with",
+    "which place is mentioned in connection with",
+    "of this kind",
 )
+
+AWKWARD_ANSWER = {
+    "fame of the marathas",
+    "glory of the maratha empire",
+    "this",
+    "that",
+    "these",
+    "those",
+    "king",
+    "emperor",
+    "ruler",
+}
 
 
 def _is_vacuous_question(question: str) -> bool:
@@ -132,18 +149,28 @@ def _stem_signature(question: str) -> str:
     low = re.sub(r"[^a-z0-9]+", " ", (question or "").lower())
     low = re.sub(r"\b(according to the textbook|in the textbook|of this kind)\b", " ", low)
     low = re.sub(r"\s+", " ", low).strip()
-    if "language" in low and ("autobiography" in low or "wrote" in low or "write" in low):
-        return "lang-auto"
-    if "turkish" in low and "autobiography" in low:
-        return "lang-auto"
+    if "language" in low or ("turkish" in low and "autobiography" in low):
+        if "babur" in low or "babar" in low or "autobiography" in low:
+            return "lang-babur-auto"
+        if "akbar" in low or "translated" in low or "hindu religious" in low:
+            return "lang-akbar"
+        if "shivaji" in low or "administration" in low or "marathi" in low:
+            return "lang-admin"
+        return "language-stem"
     if "taj mahal" in low and ("memory" in low or ("built" in low and "who" in low)):
         return "taj-builder-or-memory"
     if "rohtas" in low or ("forts" in low and "construct" in low):
         return "forts-construct"
     if "how old" in low or "years old" in low:
         return "age-years"
-    if "which place is linked with" in low:
+    if "which place is linked with" in low or "city of monuments" in low:
         return "place-linked"
+    if "capital" in low and ("city" in low or "mentioned" in low):
+        return "capital-city"
+    if "coronation" in low and "where" in low:
+        return "coronation-place"
+    if "centre of operations" in low or "center of operations" in low:
+        return "ops-centre"
     if "father" in low and "who was" in low:
         return "who-father"
     if "mother" in low and "who was" in low:
@@ -195,7 +222,7 @@ def _facts_from_group(group) -> list[McqFact]:
         if kind == "person" and answer.lower() == title.lower():
             if "son of" in question.lower() or "daughter of" in question.lower():
                 return
-        if answer.lower() in {"this", "that", "these", "those", "king", "emperor", "ruler"}:
+        if answer.lower() in AWKWARD_ANSWER:
             return
         if any(item.question.lower() == question.lower() for item in facts):
             return
@@ -214,14 +241,17 @@ def _facts_from_group(group) -> list[McqFact]:
     if match:
         add(f"In which language did {title} write an autobiography?", match.group(1).title(), "language")
     match = LANG_RE.search(text)
-    if match and re.search(r"autobiography|wrote|written|translated|language", text, re.I):
-        add(f"Which language is mentioned with {title} in the textbook?", match.group(1).title(), "language")
+    # Prefer concrete stems only (autobiography / administration); skip vague associated-with.
+    if match and re.search(r"translated.*?into the ([A-Za-z]+) language|translated.*?into ([A-Za-z]+)", text, re.I):
+        m2 = re.search(r"translated.*?into (?:the )?([A-Za-z]+)(?: language)?", text, re.I)
+        if m2:
+            add("Into which language were Hindu religious books translated under Akbar?", m2.group(1).title(), "language")
     match = BORN_RE.search(text)
     if match:
         add(f"Where was {title} born, according to the textbook?", match.group(1).strip(), "place")
     match = re.search(r"appointed as (?:the )?([A-Za-z][A-Za-z ]{1,28}?)(?: when| at| in|\.|\,)", text, re.I)
     if match:
-        add(f"What office was {title} appointed to?", match.group(1).strip(), "title")
+        add(f"What office was {title} appointed to?", match.group(1).strip(), "official")
     # Prefer a concrete assumed-power age question (added later) over a vague one.
     match = re.search(r"in memory of (?:his wife )?([A-Z][A-Za-z ]{2,36}?)(?: on|\.|\,)", text)
     if match:
@@ -230,7 +260,7 @@ def _facts_from_group(group) -> list[McqFact]:
     if match:
         work = match.group(1).strip()
         if any(token in work.lower() for token in ("fort", "mahal", "road", "mosque", "temple", "city")):
-            add(f"What did {title} build, according to the textbook?", work, "work")
+            add(f"What did {title} build, according to the textbook?", work, "monument" if any(t in work.lower() for t in ("mahal", "fort", "mosque", "temple")) else "work")
     match = re.search(r"constructed new forts at ([A-Z][A-Za-z, ]{8,48}?)(?:\.|$)", text)
     if match:
         add(f"Where did {title} construct new forts?", match.group(1).split(",")[0].strip(), "place")
@@ -242,9 +272,9 @@ def _facts_from_group(group) -> list[McqFact]:
     if re.search(r"imprisoned his father", text, re.I):
         add("Who imprisoned his father and seized power, according to the textbook?", title, "person")
     if re.search(r"white marble", text, re.I):
-        add("The Taj Mahal is built using which material, according to the textbook?", "white marble", "term")
+        add("The Taj Mahal is built using which material, according to the textbook?", "white marble", "material")
     if re.search(r"muhtasibs", text, re.I):
-        add(f"Which officials did {title} appoint in important cities?", "muhtasibs", "term")
+        add(f"Which officials did {title} appoint in important cities?", "muhtasibs", "official")
     if re.search(r"\bAlamgir\b", text):
         add(f"Which title did {title} earn, according to the textbook?", "Alamgir", "title")
     match = re.search(r"established the ([A-Za-z][A-Za-z ]{2,36}?)(?: in|\.|\,)", text, re.I)
@@ -269,7 +299,7 @@ def _facts_from_group(group) -> list[McqFact]:
         elif re.search(r"taj mahal", window, re.I) and re.search(r"began|started|construction", window, re.I):
             add("Around which year did construction of the Taj Mahal begin?", year_match.group(1), "year")
     if re.search(r"(guerrilla|guerilla) warfare", text, re.I):
-        add(f"What kind of warfare is {title} associated with in the textbook?", "guerrilla warfare", "term")
+        add(f"What kind of warfare is {title} associated with in the textbook?", "guerrilla warfare", "warfare")
     if re.search(r"Din-e-Ilahi|Din e Ilahi|Din-i-Ilahi", text, re.I):
         add("Which ruler is associated with Din-e-Ilahi in the textbook?", title, "person")
     match = re.search(r"After ([A-Z][A-Za-z. ]{2,32}?)[, ]+([A-Z][A-Za-z. ]{2,32}?) was appointed", text)
@@ -284,7 +314,7 @@ def _facts_from_group(group) -> list[McqFact]:
         add(f"Which capital is mentioned in connection with {title}?", match.group(1).strip(), "place")
     match = re.search(r"banks of the river ([A-Z][A-Za-z]+)", text)
     if match:
-        add("On the banks of which river was the Taj Mahal built?", match.group(1).strip(), "place")
+        add("On the banks of which river was the Taj Mahal built?", match.group(1).strip(), "river")
     match = re.search(r"title ([A-Z][A-Za-z]{3,20})", text)
     if match and match.group(1).lower() not in {"the", "this", "that"}:
         add(f"Which title is mentioned for {title} in the textbook?", match.group(1).strip(), "title")
@@ -318,6 +348,20 @@ def _facts_from_group(group) -> list[McqFact]:
         guru = match.group(1).strip()
         if guru.lower() != title.lower():
             add(f"Who was {title}'s guru, according to the textbook?", guru, "person")
+    match = re.search(r"([A-Z][A-Za-z. ]{2,40}?) was (?:Shivaji|Baji Rao I|Akbar|Babur|[A-Z][a-z]+)['\u2019]s guru", text)
+    if match:
+        guru = match.group(1).strip()
+        if guru.lower() != title.lower() and len(guru.split()) <= 5:
+            add(f"Who was {title}'s guru, according to the textbook?", guru, "person")
+    match = re.search(
+        r"After the death of ([A-Z][A-Za-z. ]{2,40}?), (?:his|her) (?:eldest )?son,?\s+(?:Baji Rao I|Baji Rao|Shivaji|Akbar|Sambhaji)",
+        text,
+        re.I,
+    )
+    if match and re.search(re.escape(title.split()[0]), match.group(0), re.I):
+        parent = match.group(1).strip()
+        if parent.lower() != title.lower():
+            add(f"Who was {title}'s father, according to the textbook?", parent, "person")
     match = re.search(r"mother,? ([A-Z][A-Za-z]{2,24})", text)
     if match and match.group(1).lower() not in {"the", "his", "her"}:
         add(f"Who was {title}'s mother, according to the textbook?", match.group(1).strip(), "person")
@@ -330,11 +374,11 @@ def _facts_from_group(group) -> list[McqFact]:
     if match:
         if match.group(1):
             add("In which year was the Second Battle of Panipat fought?", match.group(1), "year")
-        add(f"Which battle in 1556 is {title} associated with in the textbook?", "Second Battle of Panipat", "term")
+        add(f"Which battle in 1556 is {title} associated with in the textbook?", "Second Battle of Panipat", "battle")
     match = re.search(r"Battle of ([A-Z][A-Za-z]+)", text)
     if match and match.group(1).lower() not in {"the", "this", "panipat"}:
         battle = f"Battle of {match.group(1).strip()}"
-        add(f"Which battle is mentioned in connection with {title}?", battle, "term")
+        add(f"Which battle is mentioned in connection with {title}?", battle, "battle")
     match = re.search(r"coronation(?: took place)?(?: in the year | in | at )[^. ]{0,40}?(\d{4})", text, re.I)
     if match:
         add(f"In which year did {title}'s coronation take place?", match.group(1), "year")
@@ -345,23 +389,32 @@ def _facts_from_group(group) -> list[McqFact]:
     if match:
         add(f"Which new fort did {title} build, according to the textbook?", match.group(1).strip(), "place")
     if re.search(r"abolished the\s*['\"‘’]?\s*Jizya", text, re.I):
-        add(f"Which tax on Hindus did {title} abolish?", "Jizya tax", "term")
+        add(f"Which tax on Hindus did {title} abolish?", "Jizya tax", "tax")
     if re.search(r"Mansabdari system", text, re.I):
-        add(f"Which administrative system is described as unique to {title}?", "Mansabdari system", "term")
+        add(f"Which administrative system is described as unique to {title}?", "Mansabdari system", "system")
     if re.search(r"\bZabti system\b", text, re.I):
-        add(f"Which revenue system did {title} bring into practice?", "Zabti system", "term")
+        add(f"Which revenue system did {title} bring into practice?", "Zabti system", "system")
     if re.search(r"Ryotwari system", text, re.I):
-        add(f"Which revenue system is mentioned with {title}?", "Ryotwari system", "term")
+        add(f"Which revenue system is mentioned with {title}?", "Ryotwari system", "system")
     if re.search(r"policy of tolerance towards Hindus", text, re.I):
-        add(f"What policy did {title} adopt towards Hindus?", "policy of tolerance", "term")
+        add(f"What policy did {title} adopt towards Hindus?", "policy of tolerance", "policy")
     if re.search(r"\bPanch Mahal\b", text, re.I):
-        add(f"Which monument in Fatehpur Sikri is mentioned with {title}?", "Panch Mahal", "work")
+        add(f"Which monument in Fatehpur Sikri is mentioned with {title}?", "Panch Mahal", "monument")
     if re.search(r"Fatehpur Sikri", text, re.I):
-        add(f"Which city of monuments is linked with {title} in the textbook?", "Fatehpur Sikri", "place")
+        add(f"Which Mughal capital city is associated with {title}'s monuments?", "Fatehpur Sikri", "place")
     if re.search(r"\bMansabdars\b", text, re.I):
-        add(f"What were supervisors of Mansabs called in {title}'s army?", "Mansabdars", "term")
+        add(f"What were supervisors of Mansabs called in {title}'s army?", "Mansabdars", "official")
+    if re.search(r"\binfantry\b", text, re.I):
+        add(f"Which of these army units is mentioned with {title}?", "infantry", "army_unit")
+    if re.search(r"\bcavalry\b", text, re.I):
+        add(f"Which of these army units is mentioned with {title}?", "cavalry", "army_unit")
+    if re.search(r"elephant units", text, re.I):
+        add(f"Which of these army units is mentioned with {title}?", "elephant units", "army_unit")
+    if re.search(r"cannon units", text, re.I):
+        add(f"Which of these army units is mentioned with {title}?", "cannon units", "army_unit")
+
     if re.search(r"dagh-mahali|dagh mahali", text, re.I):
-        add(f"Which department stamped horses in {title}'s administration?", "dagh-mahali", "term")
+        add(f"Which department stamped horses in {title}'s administration?", "dagh-mahali", "department")
     match = re.search(
         r"four ministers called ([A-Za-z, ]{8,80}?)(?: to assist|\.|$)",
         text,
@@ -372,106 +425,358 @@ def _facts_from_group(group) -> list[McqFact]:
         # Prefer a short distinctive minister name as the answer key.
         first = re.split(r",| and ", ministers)[0].strip()
         if first:
-            add(f"Which minister title is listed among {title}'s four ministers?", first, "title")
+            add(f"Which minister title is listed among {title}'s four ministers?", first, "minister")
     match = re.search(r"born in ([A-Z][A-Za-z]+)", text)
     if match:
         add(f"Where was {title} born, according to the textbook?", match.group(1).strip(), "place")
     match = re.search(r"assembled an army of the local ([A-Z][A-Za-z]+) youths", text, re.I)
     if match:
-        add(f"Which local youths did {title} train as an army?", match.group(1).strip(), "term")
+        add(f"Which local youths did {title} train as an army?", match.group(1).strip(), "people_group")
     places = re.findall(
-        r"\b(Torna|Purandar|Sinhagad|Raigad|Pratapgad|Shivneri|Amarkot|Fatehpur|Chittor|Ranthambore|Kalinjar|Malwa|Gujarat|Bengal|Agra|Delhi|Panipat|Haldighat)\b",
+        r"\b(Torna|Purandar|Sinhagad|Raigad|Pratapgad|Shivneri|Amarkot|Fatehpur Sikri|Fatehpur|Chittor|Ranthambore|Kalinjar|Malwa|Gujarat|Bengal|Agra|Delhi|Panipat|Haldighat|Pune|Bhopal|Gwalior|Indore|Nagpur|Baroda|Chitradurga)\b",
         text,
     )
-    for place in places[:3]:
-        add(f"Which place is linked with {title} in the textbook?", place, "place")
+    # Prefer concrete place stems over vacuous "linked with" wording.
+    if re.search(r"coronation.*?at ([A-Z][A-Za-z]+)", text, re.I):
+        m = re.search(r"coronation.*?at ([A-Z][A-Za-z]+)", text, re.I)
+        if m:
+            add(f"Where did {title}'s coronation take place?", m.group(1).strip(), "place")
+    if re.search(r"made ([A-Z][A-Za-z]+) as his centre of operations", text, re.I):
+        m = re.search(r"made ([A-Z][A-Za-z]+) as his centre of operations", text, re.I)
+        if m:
+            add(f"Which place did {title} make his centre of operations?", m.group(1).strip(), "place")
+    if re.search(r"Pune became his administrative centre", text, re.I):
+        add(f"Which place became {title}'s administrative centre?", "Pune", "place")
+    # Capitals mentioned with monuments / Mughal capitals
+    if re.search(r"Fatehpur Sikri", text) and re.search(r"monument|architecture|capital", text, re.I):
+        add(f"Which Mughal capital city is associated with {title}'s monuments?", "Fatehpur Sikri", "place")
+    for place in places[:2]:
+        if place.lower() in {title.lower(), "fatehpur"}:
+            continue
+        add(f"Which place is mentioned in connection with {title}?", place, "place")
     if re.search(r"Humayun was his father", text, re.I):
         add(f"Who was {title}'s father, according to the textbook?", "Humayun", "person")
+    if re.search(r"Pharghana", text):
+        add(f"Which kingdom was ruled by {title}'s father, according to the textbook?", "Pharghana", "place")
+    if re.search(r"Raja Todarmal|Todar Mal", text, re.I):
+        add(f"Who was a famous minister of finance under {title}?", "Raja Todarmal", "person")
+    if re.search(r"Abdul Rahim Khan", text):
+        add("Who translated Babur's autobiography into Persian?", "Abdul Rahim Khan", "person")
+
+    if re.search(r"conquered Gujarat, Malwa", text, re.I):
+        add(f"Which region did {title} conquer, according to the textbook?", "Gujarat", "place")
+        add(f"Which region did {title} conquer, according to the textbook?", "Malwa", "place")
+    if re.search(r"battle near Bhopal", text, re.I):
+        add(f"Near which place did {title} defeat the Nizam?", "Bhopal", "place")
+    if re.search(r"escaped from the prison", text, re.I) and re.search(r"\bAgra\b", text):
+        add(f"From which city did {title} escape prison?", "Agra", "place")
+
+
     if re.search(r"Chatrapati|Chhatrapati", text, re.I):
         add(f"Which title is mentioned for {title} in the textbook?", "Chatrapati", "title")
+    # Extra age / tax / monument / minister seeds from primary text.
+    age_only = re.search(r"(?:Although he was|he was) only (\d{1,2}) years old", text, re.I)
+    if age_only:
+        add(
+            f"How old was {title} when he became prominent, according to the textbook?",
+            f"{age_only.group(1)} years old",
+            "age",
+        )
+    if re.search(r"Chauth", text):
+        add(f"Which tax or levy is mentioned with {title}?", "Chauth", "tax")
+    if re.search(r"Sardeshmukhi", text):
+        add(f"Which tax or levy is mentioned with {title}?", "Sardeshmukhi", "tax")
+    if re.search(r"jahagir revenue system", text, re.I):
+        add(f"Which revenue system did {title} abolish?", "jahagir revenue system", "system")
+    for mon in re.findall(
+        r"\b(Panch Mahal|Jodhabai palace|Birbal House|Kabutar Khana|Daulat Khana|Taj Mahal|Daftara Khana)\b",
+        text,
+    ):
+        add(f"Which monument is mentioned in connection with {title}?", mon, "monument")
+    for river in re.findall(r"banks of the river ([A-Z][A-Za-z]+)", text):
+        add("On the banks of which river was the Taj Mahal built?", river.strip(), "river")
+    if re.search(r"Marathi was the language of administration", text, re.I):
+        add(f"Which language was used in {title}'s administration?", "Marathi", "language")
+    if re.search(r"Hawaldar was the supervisor of the fort", text, re.I):
+        add(f"Who was the supervisor of the fort in {title}'s administration?", "Hawaldar", "official")
     return facts
 
 
 def _places_in(text: str) -> list[str]:
+    """Return place-like tokens from a curriculum whitelist only."""
     found: list[str] = []
-    skip = {
-        "india",
-        "hindu",
-        "muslim",
-        "quran",
-        "this",
-        "that",
-        "these",
-        "their",
-        "mughal",
-        "maratha",
-        "persian",
-        "turkish",
-        "english",
-        "class",
-        "board",
-        "state",
-        "king",
-        "emperor",
-        "after",
-        "before",
-        "north",
-        "south",
-        "east",
-        "west",
-    }
-    for match in re.finditer(
-        r"\b(?:at|in|from|near|of)\s+([A-Z][A-Za-z]{3,}(?:\s+[A-Z][A-Za-z]{3,})?)",
-        text,
-    ):
+    for match in PLACE_RE.finditer(text or ""):
         value = match.group(1).strip()
-        if value.lower() in skip or value in found:
-            continue
-        if len(value) > 32:
-            continue
-        found.append(value)
+        if value not in found:
+            found.append(value)
     return found
 
 
+PLACE_RE = re.compile(
+    r"\b("
+    r"Torna|Purandar|Sinhagad|Raigad|Pratapgad|Shivneri|Amarkot|Fatehpur Sikri|"
+    r"Chittor|Ranthambore|Kalinjar|Malwa|Gujarat|Bengal|Agra|Delhi|Panipat|"
+    r"Haldighat|Pune|Bhopal|Gwalior|Indore|Nagpur|Baroda|Chitradurga|"
+    r"Srirangapatna|Karnataka|Maharashtra|North India|Afghanistan|Yamuna|"
+    r"Narmada|Chambal|Salcet|Basin|Janjira|Rohtas|Pharghana|Jaipur|Gondwana|Uttar Pradesh"
+    r")\b"
+)
+
+# Known textbook lexicon: only added to pools when present in evidence text.
+LEXICON: dict[str, tuple[str, ...]] = {
+    "language": ("Persian", "Turkish", "Arabic", "Sanskrit", "Hindi", "Marathi", "Kannada", "Urdu"),
+    "system": (
+        "Mansabdari system",
+        "Zabti system",
+        "Ryotwari system",
+        "jahagir revenue system",
+    ),
+    "tax": ("Jizya tax", "Jizya", "Chauth", "Sardeshmukhi"),
+    "monument": (
+        "Taj Mahal",
+        "Panch Mahal",
+        "Jodhabai palace",
+        "Birbal House",
+        "Kabutar Khana",
+        "Daulat Khana",
+        "Daftara Khana",
+        "Red Fort",
+        "Jama Masjid",
+    ),
+    "material": ("white marble", "red sandstone"),
+    "title": ("Alamgir", "Chatrapati", "Chhatrapati", "Peshwa"),
+    "minister": ("Vakil", "Diwan", "Mir Bakshi", "Mir Bhakshi", "Main Sardar", "Sadr"),
+    "official": ("muhtasibs", "Mansabdars", "Hawaldar", "Ashapradhans"),
+    "department": ("dagh-mahali",),
+    "warfare": ("guerrilla warfare", "armed warfare"),
+    "policy": ("policy of tolerance",),
+    "battle": (
+        "First Battle of Panipat",
+        "Second Battle of Panipat",
+        "Battle of Haldighat",
+        "Battle of Khanwa",
+    ),
+    "people_group": ("Mavalas",),
+    "river": ("Yamuna", "Narmada", "Chambal"),
+    "army_unit": ("infantry", "cavalry", "elephant units", "cannon units"),
+    "place": (),  # places come from PLACE_RE only
+}
+
+# Distractor buckets: kinds in the same bucket may distract each other; never across buckets.
+SEMANTIC_BUCKET = {
+    "person": "person",
+    "place": "place",
+    "river": "river",
+    "language": "language",
+    "year": "year",
+    "age": "age",
+    "title": "title",
+    "minister": "role",
+    "official": "role",
+    "tax": "tax",
+    "system": "system",
+    "monument": "monument",
+    "material": "material",
+    "warfare": "warfare",
+    "policy": "policy",
+    "battle": "battle",
+    "department": "department",
+    "people_group": "people_group",
+    "army_unit": "army_unit",
+    "work": "work",
+    "term": "term",
+}
+
+
+def _bucket(kind: str) -> str:
+    return SEMANTIC_BUCKET.get(kind or "", kind or "")
+
+CURRICULUM_PERSON = {
+    "mughal": ("Babur", "Humayun", "Akbar", "Jahangir", "Shah Jahan", "Aurangzeb", "Bairam Khan", "Mumtaz Mahal"),
+    "maratha": ("Shivaji", "Sambhaji", "Balaji Vishwanath", "Baji Rao I", "Madhav Rao I", "Dadoji Kondadeo", "Nizam-ul-Mulk"),
+}
+CURRICULUM_TITLE = {
+    "mughal": ("Alamgir",),
+    "maratha": ("Chatrapati", "Peshwa"),
+}
+CURRICULUM_ROLE = {
+    "mughal": ("Vakil", "Diwan", "Mir Bakshi", "Mansabdars", "muhtasibs"),
+    "maratha": ("Hawaldar", "Ashapradhans", "Peshwa"),
+}
+CURRICULUM_OFFICE = CURRICULUM_ROLE  # backward alias
+CURRICULUM_SYSTEM = {
+    "mughal": ("Mansabdari system", "Zabti system"),
+    "maratha": ("Ryotwari system", "jahagir revenue system"),
+}
+CURRICULUM_TAX = {
+    "mughal": ("Jizya tax",),
+    "maratha": ("Chauth", "Sardeshmukhi"),
+}
+CURRICULUM_PLACE = {
+    "mughal": ("Agra", "Delhi", "Fatehpur Sikri", "Panipat", "Malwa", "Gujarat", "Bengal", "Afghanistan", "Pharghana"),
+    "maratha": ("Pune", "Raigad", "Agra", "Maharashtra", "Gujarat", "Malwa", "Bhopal", "Gwalior", "Indore", "Nagpur", "Baroda"),
+}
+CURRICULUM_YEAR = {
+    "mughal": ("1526", "1556", "1632", "1653"),
+    "maratha": ("1674", "1720"),
+}
+CURRICULUM_LANGUAGE = {
+    "mughal": ("Turkish", "Persian", "Arabic", "Hindi"),
+    "maratha": ("Marathi", "Persian", "Sanskrit", "Hindi"),
+}
+CURRICULUM_WARFARE = {
+    "maratha": ("guerrilla warfare", "armed warfare"),
+}
+CURRICULUM_BATTLE = {
+    "mughal": ("First Battle of Panipat", "Second Battle of Panipat", "Battle of Haldighat"),
+}
+CURRICULUM_AGE = {
+    "mughal": ("14 years old", "13 years old", "16 years old", "18 years old"),
+    "maratha": ("19 years old", "16 years old", "18 years old", "21 years old"),
+}
+
+
+def _topic_family(topics: set[str]) -> str | None:
+    if topics & {"maratha", "shivaji", "sambhaji", "bajirao", "peshwa", "madhav", "balaji"}:
+        return "maratha"
+    if topics & {"mughal", "babar", "humayun", "akbar", "jahangir", "shahjahan", "aurangzeb", "taj"}:
+        return "mughal"
+    return None
+
+
+def _curriculum_distractors(kind: str, topics: set[str]) -> list[str]:
+    """Same-category Class-9 curriculum terms for the topic family."""
+    family = _topic_family(topics or set())
+    if not family:
+        return []
+    bucket = _bucket(kind)
+    mapping = {
+        "person": CURRICULUM_PERSON,
+        "title": CURRICULUM_TITLE,
+        "role": CURRICULUM_ROLE,
+        "office": CURRICULUM_ROLE,
+        "system": CURRICULUM_SYSTEM,
+        "tax": CURRICULUM_TAX,
+        "place": CURRICULUM_PLACE,
+        "year": CURRICULUM_YEAR,
+        "language": CURRICULUM_LANGUAGE,
+        "warfare": CURRICULUM_WARFARE,
+        "battle": CURRICULUM_BATTLE,
+        "age": CURRICULUM_AGE,
+    }
+    # Titles are scarce; allow same-category titles from both families.
+    if bucket == "title":
+        out: list[str] = []
+        for fam_table in CURRICULUM_TITLE.values():
+            for item in fam_table:
+                if item not in out:
+                    out.append(item)
+        return out
+    table = mapping.get(bucket, {}).get(family, ())
+    return list(table)
+
+
+
+
+def _classify_answer_kind(answer: str, hinted: str = "") -> str:
+    """Map an answer string to a semantic MCQ category."""
+    if hinted and hinted not in {"term", "work"}:
+        return hinted
+    low = (answer or "").lower().strip()
+    if re.fullmatch(r"1[2-9]\d{2}", low):
+        return "year"
+    if re.search(r"\d+\s+years?\s+old", low):
+        return "age"
+    for kind, values in LEXICON.items():
+        for value in values:
+            if low == value.lower() or low == value.lower().replace(" tax", ""):
+                return kind
+    if "mumtaz" in low:
+        return "person"
+    if any(tok in low for tok in ("mahal", "fort", "mosque", "palace", "khana", "house")):
+        return "monument"
+    if any(tok in low for tok in ("system",)):
+        return "system"
+    if "warfare" in low:
+        return "warfare"
+    if "battle" in low:
+        return "battle"
+    if "tax" in low or low in {"chauth", "sardeshmukhi", "jizya"}:
+        return "tax"
+    if hinted:
+        return hinted
+    return "term"
+
+
 def _scan_pool(text: str) -> dict[str, list[str]]:
+    """Build same-category distractor pools from primary textbook evidence only."""
     pool: dict[str, list[str]] = defaultdict(list)
 
     def push(kind: str, value: str) -> None:
         value = _short(value)
-        if value and value not in pool[kind]:
+        if not value:
+            return
+        kind = _classify_answer_kind(value, kind)
+        if value not in pool[kind]:
             pool[kind].append(value)
 
-    for match in LANG_RE.finditer(text):
+    blob = text or ""
+    for kind, values in LEXICON.items():
+        for value in values:
+            if re.search(rf"\b{re.escape(value)}\b", blob, re.I):
+                # Normalize a few aliases
+                if value.lower() == "jizya":
+                    push("tax", "Jizya tax")
+                elif value.lower() == "mir bhakshi":
+                    push("minister", "Mir Bakshi")
+                elif value.lower() == "chhatrapati":
+                    push("title", "Chatrapati")
+                else:
+                    push(kind, value)
+
+    for match in LANG_RE.finditer(blob):
         push("language", match.group(1).title())
-    for match in YEAR_RE.finditer(text):
+    for match in YEAR_RE.finditer(blob):
         push("year", match.group(1))
-    for match in BORN_RE.finditer(text):
-        push("place", match.group(1))
-    for match in re.finditer(r"capital (?:city )?at ([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)", text, re.I):
-        push("place", match.group(1))
-    for match in re.finditer(r"banks of the river ([A-Z][A-Za-z]+)", text):
-        push("place", match.group(1))
-    for place in _places_in(text):
+    for match in re.finditer(r"(\d{1,2})\s+years?\s+old", blob, re.I):
+        push("age", f"{match.group(1)} years old")
+    for place in _places_in(blob):
+        if place.lower() in {"yamuna", "narmada", "chambal"}:
+            push("river", place)
+            continue
         push("place", place)
     for title in GROUP_TITLE.values():
-        if re.search(rf"\b{re.escape(title)}\b", text, re.I):
+        if title.lower() in {
+            "taj mahal",
+            "din-e-ilahi",
+            "guerrilla warfare",
+            "mansabdari system",
+            "mughal rule",
+            "the marathas",
+            "the ahom dynasty",
+            "administration",
+            "the peshwas",
+        }:
+            continue
+        if re.search(rf"\b{re.escape(title)}\b", blob, re.I):
             push("person", title)
-    if re.search(r"white marble", text, re.I):
-        push("term", "white marble")
-    if re.search(r"muhtasibs", text, re.I):
-        push("term", "muhtasibs")
-    if re.search(r"guerrilla|guerilla", text, re.I):
-        push("term", "guerrilla warfare")
-    if re.search(r"\bAlamgir\b", text):
-        push("title", "Alamgir")
+    # Extra people often used as answers
+    for person in re.findall(
+        r"\b(Umar Sheikh|Bairam Khan|Mumtaz Mahal|Dadoji Kondadeo|Nizam-ul-Mulk|"
+        r"Balaji Vishwanath|Sambhaji|Tulsidas|Surdas)\b",
+        blob,
+    ):
+        push("person", person)
     return pool
 
 
-
-def _grounded_distractors(fact: McqFact, facts: list[McqFact], scanned: dict[str, list[str]], titles: list[str]) -> list[str]:
-    """Prefer same-kind textbook answers; never invent filler options."""
+def _grounded_distractors(
+    fact: McqFact, facts: list[McqFact], scanned: dict[str, list[str]], titles: list[str], topics: set[str] | None = None,
+) -> list[str]:
+    """Same-category distractors only; never cross-fill from other semantic types."""
     out: list[str] = []
     seen = {fact.answer.lower()}
+    kind = _classify_answer_kind(fact.answer, fact.kind)
 
     def push(value: str) -> None:
         value = _short(value)
@@ -480,39 +785,52 @@ def _grounded_distractors(fact: McqFact, facts: list[McqFact], scanned: dict[str
         key = value.lower()
         if key in seen:
             return
-        # Reject options that merely echo the stem.
-        if key in fact.question.lower() and fact.kind != "person":
+        # Reject options that merely echo the stem (except person names).
+        if key in fact.question.lower() and kind != "person":
+            return
+        # Enforce same semantic bucket only.
+        cand_kind = _classify_answer_kind(value, kind)
+        if _bucket(cand_kind) != _bucket(kind):
             return
         seen.add(key)
         out.append(value)
 
+    # 1) Other textbook facts in the same semantic bucket
     for other in facts:
-        if other.kind == fact.kind and other.answer.lower() != fact.answer.lower():
+        other_kind = _classify_answer_kind(other.answer, other.kind)
+        if _bucket(other_kind) == _bucket(kind) and other.answer.lower() != fact.answer.lower():
             push(other.answer)
-    for item in scanned.get(fact.kind, []):
-        push(item)
-    if fact.kind == "person":
+
+    # 2) Scanned pools that share this semantic bucket
+    for skim_kind, items in scanned.items():
+        if _bucket(skim_kind) != _bucket(kind):
+            continue
+        for item in items:
+            push(item)
+
+    # 3) Person questions may use other ruler names from the allowed topic titles
+    if kind == "person":
         for title in titles:
+            if title.lower() in {
+                "taj mahal",
+                "administration",
+                "mughal rule",
+                "the marathas",
+                "the peshwas",
+                "guerrilla warfare",
+                "mansabdari system",
+                "din-e-ilahi",
+            }:
+                continue
             push(title)
         for item in scanned.get("person", []):
             push(item)
-    # Cross-kind fallback only from scanned textbook pool of related kinds.
-    if len(out) < 3:
-        related = {
-            "person": ("title", "place", "term"),
-            "place": ("person", "title", "term"),
-            "title": ("person", "term", "place"),
-            "term": ("title", "work", "place", "person"),
-            "work": ("term", "title", "place"),
-            "year": ("place", "person", "title"),
-            "language": ("place", "person", "title"),
-            "age": ("place", "person", "title", "term"),
-        }
-        for kind in related.get(fact.kind, ()):
-            for item in scanned.get(kind, []):
-                push(item)
-                if len(out) >= 6:
-                    break
+
+    # 4) Class-9 curriculum same-bucket terms for the topic family.
+    for item in _curriculum_distractors(kind, topics or set()):
+        push(item)
+
+    # No cross-category fallback. Prefer fewer high-quality questions.
     return out
 
 
@@ -599,7 +917,7 @@ def mcqs_from_pack(
         sig = _stem_signature(fact.question)
         if fp in skip or fact.question.lower() in used_q or stem_key in used_q or sig in used_sig:
             continue
-        distractors = _grounded_distractors(fact, facts, scanned, titles)
+        distractors = _grounded_distractors(fact, facts, scanned, titles, topics)
         options = _pad_options(fact.answer, distractors)
         if not options:
             continue
