@@ -66,6 +66,25 @@ EVENT_HINTS = (
     "defeated",
     "encouraged",
     "translated",
+    "conquered",
+    "launched",
+    "campaign",
+    "authority to collect",
+    "war compensation",
+    "administrative centre",
+    "administrative center",
+    "declared war",
+    "re-established",
+    "restored",
+    "gained the authority",
+    "escaped",
+    "coronation",
+    "assembled",
+    "trained",
+    "prison",
+    "felicitated",
+    "strengthened",
+    "independent kingdom",
 )
 TERM_EXPLAIN_HINTS = (
     "system",
@@ -196,22 +215,30 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
 def _assemble_module(topic: str, plan, detailed: str, entity: str | None = None) -> dict:
     if entity:
         plan = [group for group in plan if _group_matches_entity(group, entity)] or plan
+    display = _display_topic_name(topic, entity, plan)
     titles = [group.title for group in plan]
-    people = _people_from_plan(plan, entity=entity)
-    terms = _terms_from_plan(plan)
-    timeline, events = _timeline_from_plan(plan, entity=entity)
-    key_points = _key_points_from_plan(plan, entity=entity)
-    intro = _introduction(topic, titles)
+    used: set[str] = set()
+    # Terms first so role definitions (e.g. Peshwa) keep their defining sentences.
+    terms = _terms_from_plan(plan, used=used)
+    people = _people_from_plan(plan, entity=entity, used=used)
+    timeline, events = _timeline_from_plan(plan, entity=entity, used=used)
+    key_points = _key_points_from_plan(plan, entity=entity, used=used)
+    detailed = _enrich_detailed(detailed, plan, entity)
+    intro = _introduction(display, titles)
     objectives = [
-        f"Identify the main people and topics in this Class 9 lesson on {topic}."
+        f"Identify the main people connected with {display} in the Class 9 textbook.",
+        f"Explain the major events and facts the Class 9 textbook records about {display}.",
     ]
-    for title in titles[:5]:
-        objectives.append(f"Explain what the Class 9 textbook says about {title}.")
     if terms:
-        objectives.append("Recall important terms from this lesson.")
-    revision = _revision_from_points(key_points, people)
+        objectives.append(f"Define important terms linked to {display} using textbook meanings.")
+    if timeline or events:
+        objectives.append(f"Recall the chronological main events related to {display}.")
+    objectives.append(f"Revise the key points about {display} for class and exams.")
+    revision = _revision_from_points(
+        key_points, people, events=events, terms=terms, display=display
+    )
     content = {
-        "title": f"Class 9 learning module: {topic}",
+        "title": f"Class 9 History: {display}",
         "introduction": intro,
         "learning_objectives": objectives[:6],
         "detailed_explanation": detailed,
@@ -230,30 +257,42 @@ def _assemble_module(topic: str, plan, detailed: str, entity: str | None = None)
 
 
 def _introduction(topic: str, titles: list[str]) -> str:
-    if not titles:
-        named = topic
-    elif len(titles) == 1:
-        named = titles[0]
-    elif len(titles) == 2:
-        named = f"{titles[0]} and {titles[1]}"
-    else:
-        named = ", ".join(titles[:-1]) + f", and {titles[-1]}"
+    focus = topic
+    if titles:
+        extra = [t for t in titles if t.lower() not in focus.lower()]
+        if extra:
+            if len(extra) == 1:
+                named = extra[0]
+            elif len(extra) == 2:
+                named = f"{extra[0]} and {extra[1]}"
+            else:
+                named = ", ".join(extra[:-1]) + f", and {extra[-1]}"
+            return (
+                f"This Class 9 History module on {focus} is based only on the Karnataka textbook. "
+                f"It covers {named} in clear English for classwork and exam revision."
+            )
     return (
-        f"This Class 9 learning module on {topic} is based only on the Karnataka textbook. "
-        f"It explains {named} in simple English so you can revise for class and exams."
+        f"This Class 9 History module on {focus} is based only on the Karnataka textbook. "
+        f"It explains the main supported facts in clear English for classwork and exam revision."
     )
 
 
 def _normalize_ocr_text(text: str) -> str:
     """Remove heading/OCR wrappers without adding new facts."""
     text = " ".join((text or "").split())
-    text = re.sub(r"(?i)^.{0,120}new seven wonders of the word\.?\s*[”\"]?\s*", "", text)
+    text = re.sub(r"(?i)^.{0,120}new seven wonders of the word\.?\s*[\u201d\u201c\"]?\s*", "", text)
     text = HEADING_JUNK_RE.sub(" ", text)
     text = re.sub(r"(?i)(?:taj mahal:?\s*)+(?:the mughal king,?\s*)+", " ", text)
     text = re.sub(r"(?i)\bbabur,?\s*who established mughal\b", " ", text)
     text = re.sub(r"(?i)\b(?:babur|babar)(?:\s+(?:babur|babar))+\b", "Babur", text)
     text = re.sub(r"(?i)art and architecture\s*:\s*", "", text)
-    text = re.sub(r"\b([A-Za-z][A-Za-z'’-]{1,24})(?:\s+\1\b)+", r"\1", text)
+    # Strip raw chunk heading prefixes like "Baji rao I : " repeated mid-text
+    text = re.sub(
+        r"(?i)(?:(?<=^)|(?<=[.!?]\s))([A-Z][A-Za-z0-9 .\'-]{0,40}?)\s*:\s+",
+        "",
+        text,
+    )
+    text = re.sub(r"\b([A-Za-z][A-Za-z'\u2019-]{1,24})(?:\s+\1\b)+", r"\1", text)
     text = re.sub(r"\b(.{8,70}?)\b(?:\s+\1\b)+", r"\1", text)
     text = re.sub(r"\s+", " ", text).strip(" :,-")
     return text
@@ -261,8 +300,9 @@ def _normalize_ocr_text(text: str) -> str:
 
 def _is_student_sentence(text: str) -> bool:
     sent = (text or "").strip()
+    sent = re.sub(r"(?i)^[A-Z][A-Za-z0-9 .\'-]{0,40}?\s*:\s+", "", sent).strip()
     words = sent.split()
-    if len(words) < 8 or len(words) > 55:
+    if len(words) < 7 or len(words) > 60:
         return False
     if not re.search(r"[.!?]$", sent):
         return False
@@ -279,6 +319,20 @@ def _is_student_sentence(text: str) -> bool:
         return False
     if re.search(r"\b(chroma|chunk_id|evidence pack)\b", sent, re.I):
         return False
+    # Drop obvious OCR/splice debris from textbook extraction
+    if re.search(r"\bthe thus\b", low):
+        return False
+    if re.search(r"\bexpanding the thus\b", low):
+        return False
+    if re.search(r"\bintention of expanding the\s+(?:thus|he)\b", low):
+        return False
+    if "glory of the baji rao" in low:
+        return False
+    # Reject near-duplicate glued OCR ("X not only ... X not only")
+    if re.search(r"\b(.{12,40}?)\b(?:\s+\1\b)", low):
+        # allow mild repeats; reject if a long phrase repeats
+        if re.search(r"(\b\w+(?:\s+\w+){4,}\b).*\1", low):
+            return False
     return True
 
 
@@ -288,7 +342,7 @@ def _iter_clean_sentences(chunks: list[dict]):
         page = _page(item)
         raw = _normalize_ocr_text(item.get("text") or "")
         for sent in re.split(r"(?<=[.!?])\s+", raw):
-            sent = sent.strip()
+            sent = re.sub(r"(?i)^[A-Z][A-Za-z0-9 .\'-]{0,40}?\s*:\s+", "", sent.strip()).strip()
             if not _is_student_sentence(sent):
                 continue
             key = sent[:70].lower()
@@ -314,12 +368,28 @@ def _score_term_sentence(sent: str, needle: str) -> int:
     low = sent.lower()
     if needle not in low:
         return 0
-    if re.search(r",.+,.*\band\b", sent) and not any(hint in low for hint in TERM_EXPLAIN_HINTS):
+    # Long name-lists without an explanatory cue are weak definitions,
+    # but keep sentences that clearly describe collection/taxes/authority/roles.
+    explanatory = any(hint in low for hint in TERM_EXPLAIN_HINTS) or any(
+        cue in low
+        for cue in (
+            "collect",
+            "tax",
+            "authority",
+            "appointed as",
+            "minister",
+            "system",
+            "warfare",
+            "supervisors",
+            "assist",
+        )
+    )
+    if re.search(r",.+,.*\band\b", sent) and not explanatory:
         return 0
     if "duties of the king" in low:
         return 0
     score = 1
-    if any(hint in low for hint in TERM_EXPLAIN_HINTS):
+    if explanatory:
         score += 4
     if re.search(rf"\bthe {re.escape(needle)}", low):
         score += 2
@@ -328,25 +398,180 @@ def _score_term_sentence(sent: str, needle: str) -> int:
     return score
 
 
-def _pick_sentences(chunks: list[dict], aliases: tuple[str, ...], limit: int = 2) -> tuple[str, list[int]]:
+def _pick_sentences(
+    chunks: list[dict],
+    aliases: tuple[str, ...],
+    limit: int = 2,
+    used: set[str] | None = None,
+) -> tuple[str, list[int]]:
     ranked = []
     for sent, page, _item in _iter_clean_sentences(chunks):
+        sent = _strip_sentence_prefix(sent)
+        if not sent:
+            continue
         score = _score_person_sentence(sent, aliases)
         if score <= 0:
             continue
-        ranked.append((score, -len(sent), sent, page))
-    ranked.sort(reverse=True)
+        key = _sentence_key(sent)
+        if used and key in used:
+            score -= 5
+        ranked.append((score, len(sent), sent, page))
+    ranked.sort(key=lambda row: (row[0], row[1]), reverse=True)
     picked = []
     pages = []
+    local: set[str] = set()
     for _score, _length, sent, page in ranked:
-        if sent in picked:
+        key = _sentence_key(sent)
+        if key in local:
             continue
+        if used and key in used and picked:
+            continue
+        local.add(key)
         picked.append(sent)
         if page is not None and page not in pages:
             pages.append(page)
         if len(picked) >= limit:
             break
     return " ".join(picked), _sorted_pages(pages)
+
+
+def _display_topic_name(topic: str, entity: str | None, plan) -> str:
+    """Professional module title from entity/plan — never the raw user question."""
+    from rag.engine.coverage import GROUP_TITLE
+
+    if entity and GROUP_TITLE.get(entity):
+        return GROUP_TITLE[entity]
+    if plan:
+        title = getattr(plan[0], "title", None)
+        if title and len(str(title).split()) <= 8:
+            return str(title)
+    cleaned = re.sub(
+        r"(?i)^(tell me about|explain|what is|who is|describe|write about)\s+",
+        "",
+        (topic or "").strip(),
+    )
+    cleaned = cleaned.strip(" ?.!,:")
+    if cleaned and len(cleaned) <= 60 and not cleaned.endswith("?"):
+        return cleaned.title() if cleaned.islower() else cleaned
+    if entity:
+        return entity.replace("_", " ").title()
+    return "Class 9 History topic"
+
+
+def _sentence_key(sent: str) -> str:
+    return re.sub(r"\s+", " ", (sent or "").strip().lower())[:90]
+
+
+def _strip_sentence_prefix(sent: str) -> str:
+    sent = (sent or "").strip()
+    sent = re.sub(r"(?i)^[A-Z][A-Za-z0-9 .\'-]{0,40}?\s*:\s+", "", sent)
+    return sent.strip()
+
+
+def _reserve_sentence(sent: str, used: set[str]) -> bool:
+    key = _sentence_key(sent)
+    if not key or key in used:
+        return False
+    used.add(key)
+    return True
+
+
+def _fact_pool(plan, entity: str | None = None) -> list[tuple[str, int | None]]:
+    """Distinct clean textbook sentences for packing e-content sections."""
+    pool: list[tuple[str, int | None]] = []
+    seen: set[str] = set()
+    for group in plan or []:
+        for sent, page, _item in _iter_clean_sentences(group.chunks):
+            sent = _strip_sentence_prefix(sent)
+            if not sent:
+                continue
+            if entity and not _packing_sentence_ok(sent, entity):
+                continue
+            key = _sentence_key(sent)
+            if key in seen:
+                continue
+            seen.add(key)
+            pool.append((sent, page))
+    return pool
+
+
+def _enrich_detailed(detailed: str, plan, entity: str | None) -> str:
+    """Add unused major textbook facts to the explanation without inventing."""
+    base = sanitize_student_text((detailed or "").strip())
+    # Drop trailing incomplete fragment before a page label
+    base = re.sub(
+        r"(?i)\b(but also|and also|with the intention of(?: expanding)?(?: the)?)\s*(\[Pages? [^\]]+\])\s*$",
+        r"\2",
+        base,
+    )
+    base = re.sub(r"\s{2,}", " ", base).strip()
+    used = {_sentence_key(s) for s in re.split(r"(?<=[.!?])\s+", base) if s.strip()}
+    # Also mark shorter stems already covered in the prose
+    base_low = base.lower()
+    extras: list[str] = []
+    for sent, _page in _fact_pool(plan, entity=entity):
+        if not _reserve_sentence(sent, used):
+            continue
+        # Skip if most content words already appear in the explanation
+        words = [w for w in re.findall(r"[a-z0-9]{4,}", sent.lower()) if w not in {"with", "from", "that", "this", "were", "have", "been"}]
+        if words:
+            hit = sum(1 for w in words if w in base_low)
+            if hit / max(len(words), 1) >= 0.6:
+                continue
+        low = sent.lower()
+        major = (
+            any(h in low for h in EVENT_HINTS)
+            or bool(YEAR_RE.search(sent))
+            or any(h in low for h in TERM_EXPLAIN_HINTS)
+            or "conquered" in low
+            or "peshwa" in low
+        )
+        if not major:
+            continue
+        if len(sent.split()) < 8:
+            continue
+        extras.append(sent if sent.endswith((".", "!", "?")) else sent + ".")
+        total_words = len(base.split()) + sum(len(x.split()) for x in extras)
+        if total_words > 260 or len(extras) >= 5:
+            break
+    if not extras:
+        return base
+    add = " ".join(extras)
+    if not base:
+        return sanitize_student_text(add)
+    m = re.search(r"(\s*\[Pages? [^\]]+\])\s*$", base)
+    if m:
+        core = base[: m.start()].rstrip()
+        core = re.sub(r"(?i)\b(but also|and also)\s*$", "", core).rstrip(" ,;")
+        if core and not core.endswith((".", "!", "?", "]")):
+            core += "."
+        return sanitize_student_text(f"{core} {add}{m.group(1)}")
+    core = re.sub(r"(?i)\b(but also|and also)\s*$", "", base).rstrip(" ,;")
+    if core and not core.endswith((".", "!", "?", "]")):
+        core += "."
+    return sanitize_student_text(f"{core} {add}")
+
+
+def _format_term_meaning(term: str, sentences: list[str]) -> str:
+    """Build a concise textbook-grounded meaning; avoid raw chunk prefixes."""
+    cleaned = []
+    for sent in sentences:
+        sent = _strip_sentence_prefix(sanitize_student_text(sent or ""))
+        if not sent:
+            continue
+        if not sent.endswith((".", "!", "?")):
+            sent = sent + "."
+        cleaned.append(sent)
+    if not cleaned:
+        return ""
+    primary = cleaned[0]
+    low = primary.lower()
+    term_l = term.lower()
+    if len(cleaned) > 1 and _sentence_key(cleaned[1]) != _sentence_key(primary):
+        primary = f"{primary} {cleaned[1]}"
+    if term_l not in low and not any(term_l in c.lower() for c in cleaned):
+        return f"{term}: {primary}"
+    return primary
 
 
 
@@ -379,9 +604,43 @@ def _sentence_about_entity(sent: str, entity: str | None) -> bool:
     dominant = dominant_ruler(sent)
     return dominant in {None, entity}
 
-def _people_from_plan(plan, entity: str | None = None) -> list[dict]:
+
+def _packing_sentence_ok(sent: str, entity: str | None) -> bool:
+    """E-content packing filter for an already entity-scoped plan.
+
+    Keeps pronoun continuations ("he conquered...") from the same ruler section
+    without inventing facts, while still rejecting other-ruler dominance.
+    Does not change chat entity-boundary behavior.
+    """
+    if not entity:
+        return True
+    if _sentence_about_entity(sent, entity):
+        return True
+    from rag.engine.pack import dominant_ruler
+
+    dominant = dominant_ruler(sent)
+    if dominant and dominant != entity:
+        return False
+    # If another ruler alias is explicitly named, skip.
+    from rag.engine.classify import TOPIC_ALIASES
+
+    low = (sent or "").lower()
+    for other, aliases in TOPIC_ALIASES.items():
+        if other == entity:
+            continue
+        for alias in aliases:
+            if alias.isascii() and len(alias) >= 4 and alias.lower() in low:
+                # Allow shared context mentions of family terms; block other people names
+                if other in {"maratha", "mughal", "ahom", "administration", "peshwa"}:
+                    continue
+                return False
+    return True
+
+
+def _people_from_plan(plan, entity: str | None = None, used: set[str] | None = None) -> list[dict]:
     people = []
     seen = set()
+    used = used if used is not None else set()
     for group in plan:
         group_entity = group.key.split(":", 1)[0] if ":" in group.key else group.key
         is_rulerish = group_entity in RULER_KEYS or group_entity == "peshwa" or group.key in RULER_KEYS
@@ -391,8 +650,11 @@ def _people_from_plan(plan, entity: str | None = None) -> list[dict]:
             extra = [
                 row
                 for row in _named_people_in_group(group)
-                if _sentence_about_entity(row.get("note") or "", entity)
+                if _packing_sentence_ok(row.get("note") or "", entity)
             ]
+            for row in extra:
+                for part in re.split(r"(?<=[.!?])\s+", row.get("note") or ""):
+                    _reserve_sentence(part, used)
             people.extend(extra)
             continue
         if not entity and not is_rulerish:
@@ -404,9 +666,40 @@ def _people_from_plan(plan, entity: str | None = None) -> list[dict]:
         aliases = tuple(
             alias for alias in TOPIC_ALIASES.get(alias_key, (alias_key,)) if alias.isascii()
         ) + (group.title.lower(),)
-        note, pages = _pick_sentences(group.chunks, aliases, limit=2)
-        if not note or (entity and not _sentence_about_entity(note, entity)):
+        note, pages = _pick_sentences(group.chunks, aliases, limit=3, used=used)
+        note = _strip_sentence_prefix(note)
+        # Ensure a role/office cue remains in the people note when the textbook has one
+        role_cues = ("appointed as", "peshwa", "emperor", "king", "sultan", "chatrapati", "coronation")
+        if note and not any(cue in note.lower() for cue in role_cues):
+            for sent, page, _item in _iter_clean_sentences(group.chunks):
+                sent = _strip_sentence_prefix(sent)
+                if not any(cue in sent.lower() for cue in role_cues):
+                    continue
+                if entity and not _packing_sentence_ok(sent, entity):
+                    continue
+                note = f"{sent} {note}".strip()
+                if page is not None and page not in pages:
+                    pages = _sorted_pages(list(pages) + [page])
+                break
+        if not note or (entity and not _packing_sentence_ok(note, entity)):
+            parts = []
+            for sent, page, _item in _iter_clean_sentences(group.chunks):
+                sent = _strip_sentence_prefix(sent)
+                if entity and not _packing_sentence_ok(sent, entity):
+                    continue
+                if not _reserve_sentence(sent, used) and parts:
+                    continue
+                _reserve_sentence(sent, used)
+                parts.append(sent)
+                if page is not None and page not in pages:
+                    pages.append(page)
+                if len(parts) >= 3:
+                    break
+            note = " ".join(parts)
+        if not note:
             continue
+        for part in re.split(r"(?<=[.!?])\s+", note):
+            _reserve_sentence(part, used)
         if entity:
             from rag.engine.coverage import GROUP_TITLE
 
@@ -416,10 +709,16 @@ def _people_from_plan(plan, entity: str | None = None) -> list[dict]:
         if name.lower() in seen:
             continue
         seen.add(name.lower())
+        note = sanitize_student_text(note)
+        if len(note) > 480:
+            cut = note[:480]
+            if "." in cut:
+                cut = cut.rsplit(".", 1)[0] + "."
+            note = cut
         people.append(
             {
                 "name": name,
-                "note": sanitize_student_text(note[:400]),
+                "note": note,
                 "pages": pages or _sorted_pages(group.pages),
             }
         )
@@ -463,7 +762,7 @@ def _plan_families(plan) -> set[str]:
     return families
 
 
-def _terms_from_plan(plan) -> list[dict]:
+def _terms_from_plan(plan, used: set[str] | None = None) -> list[dict]:
     families = _plan_families(plan)
     allowed = set()
     for family in families:
@@ -472,6 +771,7 @@ def _terms_from_plan(plan) -> list[dict]:
         allowed = FAMILY_TERMS["ahom"]
     terms = []
     seen = set()
+    used = used if used is not None else set()
     for label, needles in TERM_PATTERNS:
         if allowed and label not in allowed:
             continue
@@ -483,30 +783,56 @@ def _terms_from_plan(plan) -> list[dict]:
                 continue
             ranked = []
             for sent, page, _item in _iter_clean_sentences(group.chunks):
+                sent = _strip_sentence_prefix(sent)
                 best = max(_score_term_sentence(sent, needle) for needle in needles)
                 if best <= 0:
                     continue
+                key = _sentence_key(sent)
+                if key in used:
+                    best -= 3
                 ranked.append((best, sent, page))
             ranked.sort(reverse=True)
             if not ranked:
                 continue
-            meaning, page = ranked[0][1], ranked[0][2]
-            pages = _sorted_pages([page] if page is not None else group.pages)
+            chosen: list[tuple[str, int | None]] = []
+            local = set(used)
+            for best, sent, page in ranked:
+                if chosen and best <= 0:
+                    continue
+                if not _reserve_sentence(sent, local) and chosen:
+                    continue
+                if _sentence_key(sent) not in local:
+                    local.add(_sentence_key(sent))
+                chosen.append((sent, page))
+                if len(chosen) >= 2:
+                    break
+            if not chosen:
+                continue
+            meaning = _format_term_meaning(label, [s for s, _p in chosen])
+            pages = _sorted_pages([p for _s, p in chosen if p is not None] or group.pages)
             if not meaning or label.lower() in seen:
                 continue
             seen.add(label.lower())
-            terms.append({"term": label, "meaning": meaning[:400], "pages": pages})
+            for s, _p in chosen:
+                _reserve_sentence(s, used)
+            terms.append({"term": label, "meaning": meaning[:420], "pages": pages})
             break
     return terms
 
 
-def _timeline_from_plan(plan, entity: str | None = None) -> tuple[list[dict], list[str]]:
+def _timeline_from_plan(
+    plan, entity: str | None = None, used: set[str] | None = None
+) -> tuple[list[dict], list[str]]:
     timeline = []
     events = []
     seen = set()
+    used = used if used is not None else set()
     for group in plan:
         for sent, page, _item in _iter_clean_sentences(group.chunks):
-            if entity and not _sentence_about_entity(sent, entity):
+            sent = _strip_sentence_prefix(sent)
+            if not _is_student_sentence(sent if sent.endswith((".", "!", "?")) else sent + "."):
+                continue
+            if entity and not _packing_sentence_ok(sent, entity):
                 continue
             match = YEAR_RE.search(sent)
             is_event = any(hint in sent.lower() for hint in EVENT_HINTS)
@@ -514,7 +840,7 @@ def _timeline_from_plan(plan, entity: str | None = None) -> tuple[list[dict], li
                 year = int(match.group(1))
                 if year > 1850:
                     continue
-                key = sent[:80].lower()
+                key = _sentence_key(sent)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -527,11 +853,21 @@ def _timeline_from_plan(plan, entity: str | None = None) -> tuple[list[dict], li
                         "_sort": year,
                     }
                 )
+                _reserve_sentence(sent, used)
             if is_event:
-                key = sent[:80].lower()
-                if key not in seen or match:
-                    if sent not in events:
-                        events.append(sent)
+                key = _sentence_key(sent)
+                if key in {_sentence_key(e) for e in events}:
+                    continue
+                if key in seen and not match:
+                    continue
+                if key in used and len(events) >= 3:
+                    continue
+                # Skip near-duplicates of already chosen events
+                if any(key[:40] == _sentence_key(e)[:40] or key in _sentence_key(e) or _sentence_key(e) in key for e in events):
+                    continue
+                events.append(sent)
+                seen.add(key)
+                _reserve_sentence(sent, used)
     timeline.sort(key=lambda row: (row["_sort"], row["when"]))
     for row in timeline:
         row.pop("_sort", None)
@@ -540,31 +876,115 @@ def _timeline_from_plan(plan, entity: str | None = None) -> tuple[list[dict], li
     return timeline, events[:8]
 
 
-def _key_points_from_plan(plan, entity: str | None = None) -> list[str]:
+def _key_points_from_plan(
+    plan, entity: str | None = None, used: set[str] | None = None
+) -> list[str]:
     points = []
-    for group in plan[:6]:
-        aliases = tuple(alias for alias in TOPIC_ALIASES.get(group.key, (group.key,)) if alias.isascii())
-        note, _pages = _pick_sentences(group.chunks, aliases or (group.title.lower(),), limit=1)
-        if note and (not entity or _sentence_about_entity(note, entity)):
-            points.append(sanitize_student_text(note))
-            continue
-        for sent, _page, _item in _iter_clean_sentences(group.chunks):
-            if entity and not _sentence_about_entity(sent, entity):
+    used = used if used is not None else set()
+
+    def _too_similar(candidate: str) -> bool:
+        cand = re.sub(r"\s+", " ", (candidate or "").strip().lower())
+        for existing in points:
+            ex = re.sub(r"\s+", " ", (existing or "").strip().lower())
+            if not cand or not ex:
                 continue
-            points.append(sanitize_student_text(sent))
+            if cand == ex or cand in ex or ex in cand:
+                return True
+            if cand[:40] and cand[:40] == ex[:40]:
+                return True
+        return False
+
+    ranked_pool = []
+    for sent, _page in _fact_pool(plan, entity=entity):
+        probe = sent if sent.endswith((".", "!", "?")) else sent + "."
+        if not _is_student_sentence(probe):
+            continue
+        low = sent.lower()
+        weight = 0
+        if any(h in low for h in EVENT_HINTS):
+            weight += 2
+        if YEAR_RE.search(sent):
+            weight += 2
+        if any(h in low for h in TERM_EXPLAIN_HINTS):
+            weight += 1
+        if "conquered" in low or "appointed" in low or "coronation" in low:
+            weight += 2
+        if _sentence_key(sent) not in used:
+            weight += 3
+        ranked_pool.append((weight, len(sent), sent))
+    ranked_pool.sort(reverse=True)
+    for weight, _ln, sent in ranked_pool:
+        if _too_similar(sent):
+            continue
+        key = _sentence_key(sent)
+        if key in used and len(points) >= 4:
+            continue
+        used.add(key)
+        points.append(sanitize_student_text(sent))
+        if len(points) >= 8:
+            return points
+    if len(points) >= 3:
+        return points[:8]
+    for group in plan[:6]:
+        if len(points) >= 8:
             break
+        for sent, _page, _item in _iter_clean_sentences(group.chunks):
+            sent = _strip_sentence_prefix(sent)
+            if entity and not _packing_sentence_ok(sent, entity):
+                continue
+            if _too_similar(sent):
+                continue
+            key = _sentence_key(sent)
+            used.add(key)
+            points.append(sanitize_student_text(sent))
+            if len(points) >= 6:
+                break
     return points[:8]
 
 
-def _revision_from_points(key_points: list[str], people: list[dict]) -> str:
-    lines = list(key_points[:5])
-    if not lines:
-        for person in people[:4]:
-            if person.get("note"):
-                lines.append(person["note"].split(".")[0] + ".")
+def _revision_from_points(
+    key_points: list[str],
+    people: list[dict],
+    events: list[str] | None = None,
+    terms: list[dict] | None = None,
+    display: str | None = None,
+) -> str:
+    lines: list[str] = []
+    seen: set[str] = set()
+
+    def _add(text: str) -> None:
+        text = _strip_sentence_prefix(sanitize_student_text(text or ""))
+        if not text:
+            return
+        if not text.endswith((".", "!", "?")):
+            text = text + "."
+        if not _reserve_sentence(text, seen):
+            return
+        lines.append(text)
+
+    for point in key_points or []:
+        _add(point)
+        if len(lines) >= 4:
+            break
+    for ev in events or []:
+        if len(lines) >= 6:
+            break
+        _add(ev)
+    for person in people or []:
+        if len(lines) >= 6:
+            break
+        note = (person.get("note") or "").split(".")[0].strip()
+        if person.get("name") and note:
+            _add(f"{person['name']}: {note}.")
+    for term in terms or []:
+        if len(lines) >= 7:
+            break
+        meaning = (term.get("meaning") or "").split(".")[0].strip()
+        if term.get("term") and meaning:
+            _add(f"{term['term']}: {meaning}.")
     if not lines:
         return ""
-    return "\n".join(f"• {line}" for line in lines)
+    return "\n".join(f"• {line}" for line in lines[:7])
 
 
 def _maybe_exam_from_model(topic: str, plan, evidence: list[dict], content: dict) -> None:
@@ -585,44 +1005,84 @@ def _maybe_exam_from_model(topic: str, plan, evidence: list[dict], content: dict
 def _fill_exam_fallback(content: dict, plan) -> None:
     people = content.get("important_people") or []
     terms = content.get("important_terms") or []
+    events = content.get("main_events") or []
+    key_points = content.get("key_points") or []
     if not content.get("exam_questions"):
         questions = []
+        used_ans: set[str] = set()
         if people:
+            ans = _strip_sentence_prefix(people[0].get("note") or people[0]["name"])
             questions.append(
                 {
                     "type": "very_short",
                     "question": f"Who was {people[0]['name']}?",
-                    "answer": people[0].get("note") or people[0]["name"],
+                    "answer": ans,
                     "pages": people[0].get("pages") or [],
                 }
             )
+            _reserve_sentence(ans, used_ans)
         if terms:
+            ans = _strip_sentence_prefix(terms[0].get("meaning") or terms[0]["term"])
+            short_ans = ans.split(".")[0].strip()
+            if short_ans and not short_ans.endswith("."):
+                short_ans += "."
             questions.append(
                 {
                     "type": "short",
                     "question": f"What was {terms[0]['term']} according to the Class 9 textbook?",
-                    "answer": terms[0].get("meaning") or terms[0]["term"],
+                    "answer": short_ans or ans,
                     "pages": terms[0].get("pages") or [],
                 }
             )
-        if plan:
+            _reserve_sentence(short_ans or ans, used_ans)
+        desc_parts = []
+        for sent in list(events) + list(key_points):
+            sent = _strip_sentence_prefix(sent)
+            if not sent:
+                continue
+            if not _reserve_sentence(sent, used_ans):
+                continue
+            desc_parts.append(sent)
+            if len(desc_parts) >= 3:
+                break
+        pages: list[int] = []
+        if not desc_parts and plan:
             group = plan[0] if len(plan) == 1 else plan[min(1, len(plan) - 1)]
-            aliases = tuple(alias for alias in TOPIC_ALIASES.get(group.key, (group.key,)) if alias.isascii())
-            answer, pages = _pick_sentences(group.chunks, aliases or (group.title.lower(),), limit=2)
+            aliases = tuple(
+                alias for alias in TOPIC_ALIASES.get(group.key, (group.key,)) if alias.isascii()
+            )
+            answer, pages = _pick_sentences(
+                group.chunks, aliases or (group.title.lower(),), limit=2, used=used_ans
+            )
+            answer = _strip_sentence_prefix(answer)
             if not answer:
                 picked = list(_iter_clean_sentences(group.chunks))
                 if picked:
-                    answer = picked[0][0]
+                    answer = _strip_sentence_prefix(picked[0][0])
                     pages = _sorted_pages([picked[0][1]])
             if answer:
-                questions.append(
-                    {
-                        "type": "descriptive",
-                        "question": f"Explain {group.title} as given in the Class 9 textbook.",
-                        "answer": answer,
-                        "pages": pages or _sorted_pages(group.pages),
-                    }
-                )
+                desc_parts = [answer]
+                pages = pages or _sorted_pages(group.pages)
+            else:
+                pages = _sorted_pages(group.pages)
+        else:
+            if people:
+                pages = people[0].get("pages") or []
+            if plan:
+                pages = pages or _sorted_pages(plan[0].pages)
+        if desc_parts:
+            title = people[0]["name"] if people else (plan[0].title if plan else "this topic")
+            questions.append(
+                {
+                    "type": "descriptive",
+                    "question": (
+                        f"Explain the main events connected with {title} "
+                        f"as given in the Class 9 textbook."
+                    ),
+                    "answer": " ".join(desc_parts),
+                    "pages": pages,
+                }
+            )
         if questions:
             content["exam_questions"] = questions
     if not content.get("mcqs"):
