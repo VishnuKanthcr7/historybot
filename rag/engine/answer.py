@@ -16,7 +16,13 @@ from rag.engine.classify import (
     last_user_question,
     strip_leading_greeting,
 )
-from rag.engine.evidence import evidence_is_sufficient, evidence_matches_topic, overlap_count
+from rag.engine.evidence import (
+    evidence_is_sufficient,
+    evidence_matches_topic,
+    evidence_subject_match,
+    overlap_count,
+    topic_supported_by_primary,
+)
 from rag.engine.intent import (
     collect_task_state,
     entity_focus_query,
@@ -38,6 +44,7 @@ from rag.engine.normalize import (
 )
 from rag.engine.pack import build_evidence_pack, detect_entity
 from rag.engine.coverage import generate_from_plan
+from rag.engine.sanitize import sanitize_student_text
 from rag.engine.validate import is_refusal, unsupported_named_items, validate_answer
 from rag.llm.client import complete
 from rag.llm.config import RAG_TOP_K
@@ -199,14 +206,20 @@ def answer_question(
     )
     primary_selected = pack.chunks
 
+    supported = topic_supported_by_primary(search_question)
+    if supported is False:
+        return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
+
     if looks_like_injection(rag_question) and not extract_topics(search_question):
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
     if looks_like_injection(rag_question) and not evidence_matches_topic(
         search_question, retrieval_query, primary_selected
     ):
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
-    if not evidence_is_sufficient(primary_selected) or not evidence_matches_topic(
-        search_question, retrieval_query, primary_selected
+    if (
+        not evidence_is_sufficient(primary_selected)
+        or not evidence_matches_topic(search_question, retrieval_query, primary_selected)
+        or not evidence_subject_match(search_question, primary_selected)
     ):
         if _looks_limited(search_question) and evidence_is_sufficient(primary_selected):
             return _limited(language, retrieval_query, primary_hits, primary_selected, intent, mode)
@@ -656,7 +669,7 @@ def _payload(
             "regenerated": coverage.get("regenerated"),
         }
     return {
-        "answer": answer,
+        "answer": sanitize_student_text(answer),
         "language": language,
         "grounded": True,
         "sources": sources if sources is not None else _sources(supporting_evidence(answer, selected, min_overlap=1)),

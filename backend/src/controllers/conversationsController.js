@@ -85,11 +85,17 @@ export async function getConversation(req, res, next) {
       [conversation.id]
     );
     const mapped = [];
+    let previousUserContent = "";
     for (const row of messages) {
       const sources = parseSources(row.source_pages);
       let images = [];
+      if (row.role === "user") {
+        previousUserContent = row.content || "";
+      }
       if (row.role === "assistant" && row.retrieval_ok) {
-        images = (await findVerifiedImages(row.content)).map(publicImage);
+        images = (
+          await findVerifiedImages(previousUserContent, row.content || "", sources)
+        ).map(publicImage);
       }
       mapped.push({
         id: row.id,
@@ -181,7 +187,7 @@ export async function postMessage(req, res, next) {
     });
 
     const imageRows = rag.grounded
-      ? await findVerifiedImages(body.message, rag.answer || "")
+      ? await findVerifiedImages(body.message, rag.answer || "", publicSourceList)
       : [];
 
     res.status(201).json({

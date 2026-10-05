@@ -16,6 +16,7 @@ from rag.engine.topic_map import (
     looks_like_map_chunk,
 )
 from rag.engine.intent import wants_easy_english
+from rag.engine.sanitize import sanitize_student_text
 from rag.engine.validate import unsupported_named_items
 from rag.llm.client import LlmError, complete
 from rag.prompts.tutor import SYSTEM_PROMPT
@@ -390,7 +391,7 @@ def _clean_student_text(text: str, title: str | None = None) -> str:
         cleaned = title_re.sub("", cleaned)
     cleaned = META_TERMS_RE.sub("", cleaned)
     cleaned = re.sub(r" {2,}", " ", cleaned)
-    return cleaned.strip()
+    return sanitize_student_text(cleaned.strip())
 
 
 def _page_label(pages: list) -> str:
@@ -438,6 +439,48 @@ def combine_entity_sections(entity: str | None, sections: list[tuple[CoverageGro
     if len(parts) == 1:
         return "The provided textbook does not give enough information to answer this fully."
     return "\n\n".join(parts)
+
+
+def _filter_entity_sentences(text: str, entity: str | None) -> str:
+    if not entity or not text:
+        return text
+    from rag.engine.entity import entity_subject_score
+
+    parts: list[str] = []
+    for block in re.split(r"(\n\s*\n)", text):
+        if not block.strip() or re.fullmatch(r"\n\s*\n", block):
+            parts.append(block)
+            continue
+        lines: list[str] = []
+        for line in block.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or stripped.startswith("Source:"):
+                lines.append(line)
+                continue
+            if stripped.startswith("**") and stripped.endswith("**"):
+                lines.append(line)
+                continue
+            prefix = ""
+            body = line
+            bullet = re.match(r"^(\s*(?:[-*]\s+|\d+\.\s+))", line)
+            if bullet:
+                prefix = bullet.group(1)
+                body = line[len(prefix) :]
+            kept: list[str] = []
+            for sent in re.split(r"(?<=[.!?])\s+", body):
+                sent = sent.strip()
+                if not sent:
+                    continue
+                if re.search(r"\[Pages?\s+", sent, re.I):
+                    kept.append(sent)
+                    continue
+                score, _reason = entity_subject_score(sent, entity)
+                if score >= 3:
+                    kept.append(sent)
+            if kept:
+                lines.append(prefix + " ".join(kept))
+        parts.append("\n".join(lines))
+    return "".join(parts).strip()
 
 
 def generate_entity_explanation(question: str, chunks: list[dict], entity: str | None) -> dict | None:
@@ -519,6 +562,8 @@ def generate_entity_explanation(question: str, chunks: list[dict], entity: str |
             text = draft
             used_extractive = True
             score = draft_score
+    text = _filter_entity_sentences(text, entity)
+    text = sanitize_student_text(text)
     if not re.search(r"\[Page", text):
         pages = sorted({page for group in plan if group_covered(text, group) for page in (group.pages or [])})
         if not pages:

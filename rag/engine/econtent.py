@@ -19,6 +19,7 @@ from rag.engine.coverage import (
     readable_extract,
 )
 from rag.engine.topic_map import AHOM_FAMILY, MARATHA_FAMILY, MUGHAL_FAMILY, RULER_KEYS
+from rag.engine.sanitize import sanitize_student_text, sanitize_structured
 from rag.engine.validate import unsupported_named_items
 from rag.llm.client import LlmError, complete
 from rag.prompts.econtent import ECONTENT_SYSTEM
@@ -125,23 +126,32 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
         return _refused(language, topic, [], [])
     retrieval_query = topic
     primary_hits = retrieve_primary(retrieval_query, top_k=ECONTENT_TOP_K, language="en")
-    pack = build_evidence_pack(topic, retrieval_query, "BROAD_TOPIC", raw_hits=primary_hits)
+    from rag.engine.classify import extract_topics
+    from rag.engine.evidence import topic_supported_by_primary
+    from rag.engine.pack import detect_entity
+
+    entity_key = detect_entity(extract_topics(topic))
+    supported = topic_supported_by_primary(topic)
+    if supported is False:
+        return _refused(language, retrieval_query, primary_hits, [])
+    pack_type = "EXPLANATION" if entity_key else "BROAD_TOPIC"
+    pack = build_evidence_pack(topic, retrieval_query, pack_type, raw_hits=primary_hits)
     primary_selected = pack.chunks
     if not evidence_is_sufficient(primary_selected) or not evidence_matches_topic(
         topic, retrieval_query, primary_selected
     ):
         return _refused(language, retrieval_query, primary_hits, primary_selected)
 
-    covered = generate_from_plan(topic, primary_selected, "BROAD_TOPIC")
+    covered = generate_from_plan(topic, primary_selected, "EXPLANATION" if entity_key else "BROAD_TOPIC")
     plan = filter_plan(topic, build_coverage_plan(primary_selected))
-    detailed = _clean_student_text(covered.get("answer") or "")
+    detailed = sanitize_student_text(_clean_student_text(covered.get("answer") or ""))
     if not detailed.strip():
         detailed = readable_extract(primary_selected, 8)
     if not detailed.strip():
         return _refused(language, retrieval_query, primary_hits, primary_selected)
 
     allowed_pages = _pages(primary_selected)
-    content = _assemble_module(topic, plan, detailed)
+    content = _assemble_module(topic, plan, detailed, entity=pack.entity or entity_key)
     _maybe_exam_from_model(topic, plan, primary_selected, content)
     _fill_exam_fallback(content, plan)
     content = _sanitize_content(content)
@@ -183,12 +193,14 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
     }
 
 
-def _assemble_module(topic: str, plan, detailed: str) -> dict:
+def _assemble_module(topic: str, plan, detailed: str, entity: str | None = None) -> dict:
+    if entity:
+        plan = [group for group in plan if _group_matches_entity(group, entity)] or plan
     titles = [group.title for group in plan]
-    people = _people_from_plan(plan)
+    people = _people_from_plan(plan, entity=entity)
     terms = _terms_from_plan(plan)
-    timeline, events = _timeline_from_plan(plan)
-    key_points = _key_points_from_plan(plan)
+    timeline, events = _timeline_from_plan(plan, entity=entity)
+    key_points = _key_points_from_plan(plan, entity=entity)
     intro = _introduction(topic, titles)
     objectives = [
         f"Identify the main people and topics in this Class 9 lesson on {topic}."
@@ -337,23 +349,80 @@ def _pick_sentences(chunks: list[dict], aliases: tuple[str, ...], limit: int = 2
     return " ".join(picked), _sorted_pages(pages)
 
 
-def _people_from_plan(plan) -> list[dict]:
+
+def _group_matches_entity(group, entity: str) -> bool:
+    if not entity:
+        return True
+    key = getattr(group, "key", "") or ""
+    if key == entity or key.startswith(f"{entity}:"):
+        return True
+    aliases = tuple(alias for alias in TOPIC_ALIASES.get(entity, (entity,)) if alias.isascii())
+    blob = " ".join((item.get("text") or "") for item in (group.chunks or [])).lower()
+    return any(alias in blob for alias in aliases)
+
+
+def _sentence_about_entity(sent: str, entity: str | None) -> bool:
+    if not entity:
+        return True
+    from rag.engine.entity import entity_subject_score
+
+    score, _reason = entity_subject_score(sent, entity)
+    if score >= 3:
+        return True
+    aliases = [alias for alias in TOPIC_ALIASES.get(entity, (entity,)) if alias.isascii()]
+    low = (sent or "").lower()
+    if not any(alias in low for alias in aliases):
+        return False
+    # Reject sentences dominated by a different ruler alias.
+    from rag.engine.pack import dominant_ruler
+
+    dominant = dominant_ruler(sent)
+    return dominant in {None, entity}
+
+def _people_from_plan(plan, entity: str | None = None) -> list[dict]:
     people = []
     seen = set()
     for group in plan:
-        if group.key not in RULER_KEYS and group.key not in {"peshwa"}:
-            extra = _named_people_in_group(group)
+        group_entity = group.key.split(":", 1)[0] if ":" in group.key else group.key
+        is_rulerish = group_entity in RULER_KEYS or group_entity == "peshwa" or group.key in RULER_KEYS
+        if entity and group_entity != entity and is_rulerish:
+            continue
+        if entity and group_entity != entity and not is_rulerish:
+            extra = [
+                row
+                for row in _named_people_in_group(group)
+                if _sentence_about_entity(row.get("note") or "", entity)
+            ]
             people.extend(extra)
             continue
-        aliases = tuple(alias for alias in TOPIC_ALIASES.get(group.key, (group.key,)) if alias.isascii()) + (group.title.lower(),)
-        note, pages = _pick_sentences(group.chunks, aliases, limit=2)
-        if not note:
+        if not entity and not is_rulerish:
+            people.extend(_named_people_in_group(group))
             continue
-        name = group.title
+        if not is_rulerish:
+            continue
+        alias_key = group_entity if group_entity in TOPIC_ALIASES else (entity or group.key)
+        aliases = tuple(
+            alias for alias in TOPIC_ALIASES.get(alias_key, (alias_key,)) if alias.isascii()
+        ) + (group.title.lower(),)
+        note, pages = _pick_sentences(group.chunks, aliases, limit=2)
+        if not note or (entity and not _sentence_about_entity(note, entity)):
+            continue
+        if entity:
+            from rag.engine.coverage import GROUP_TITLE
+
+            name = GROUP_TITLE.get(entity) or entity.replace("_", " ").title()
+        else:
+            name = group.title
         if name.lower() in seen:
             continue
         seen.add(name.lower())
-        people.append({"name": name, "note": note[:400], "pages": pages or _sorted_pages(group.pages)})
+        people.append(
+            {
+                "name": name,
+                "note": sanitize_student_text(note[:400]),
+                "pages": pages or _sorted_pages(group.pages),
+            }
+        )
     return people
 
 
@@ -431,12 +500,14 @@ def _terms_from_plan(plan) -> list[dict]:
     return terms
 
 
-def _timeline_from_plan(plan) -> tuple[list[dict], list[str]]:
+def _timeline_from_plan(plan, entity: str | None = None) -> tuple[list[dict], list[str]]:
     timeline = []
     events = []
     seen = set()
     for group in plan:
         for sent, page, _item in _iter_clean_sentences(group.chunks):
+            if entity and not _sentence_about_entity(sent, entity):
+                continue
             match = YEAR_RE.search(sent)
             is_event = any(hint in sent.lower() for hint in EVENT_HINTS)
             if match:
@@ -469,16 +540,18 @@ def _timeline_from_plan(plan) -> tuple[list[dict], list[str]]:
     return timeline, events[:8]
 
 
-def _key_points_from_plan(plan) -> list[str]:
+def _key_points_from_plan(plan, entity: str | None = None) -> list[str]:
     points = []
     for group in plan[:6]:
         aliases = tuple(alias for alias in TOPIC_ALIASES.get(group.key, (group.key,)) if alias.isascii())
         note, _pages = _pick_sentences(group.chunks, aliases or (group.title.lower(),), limit=1)
-        if note:
-            points.append(note)
+        if note and (not entity or _sentence_about_entity(note, entity)):
+            points.append(sanitize_student_text(note))
             continue
         for sent, _page, _item in _iter_clean_sentences(group.chunks):
-            points.append(sent)
+            if entity and not _sentence_about_entity(sent, entity):
+                continue
+            points.append(sanitize_student_text(sent))
             break
     return points[:8]
 
@@ -683,7 +756,7 @@ def _sanitize_content(content: dict) -> dict:
     for key in ALLOWED_KEYS:
         value = _scrub(content.get(key))
         if _usable(value):
-            cleaned[key] = value
+            cleaned[key] = sanitize_structured(value)
     return cleaned
 
 

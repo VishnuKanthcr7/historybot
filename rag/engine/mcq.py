@@ -270,6 +270,55 @@ def _scan_pool(text: str) -> dict[str, list[str]]:
     return pool
 
 
+
+def _grounded_distractors(fact: McqFact, facts: list[McqFact], scanned: dict[str, list[str]], titles: list[str]) -> list[str]:
+    """Prefer same-kind textbook answers; never invent filler options."""
+    out: list[str] = []
+    seen = {fact.answer.lower()}
+
+    def push(value: str) -> None:
+        value = _short(value)
+        if not value:
+            return
+        key = value.lower()
+        if key in seen:
+            return
+        # Reject options that merely echo the stem.
+        if key in fact.question.lower() and fact.kind != "person":
+            return
+        seen.add(key)
+        out.append(value)
+
+    for other in facts:
+        if other.kind == fact.kind and other.answer.lower() != fact.answer.lower():
+            push(other.answer)
+    for item in scanned.get(fact.kind, []):
+        push(item)
+    if fact.kind == "person":
+        for title in titles:
+            push(title)
+        for item in scanned.get("person", []):
+            push(item)
+    # Cross-kind fallback only from scanned textbook pool of related kinds.
+    if len(out) < 3:
+        related = {
+            "person": ("title", "place"),
+            "place": ("person", "title"),
+            "title": ("person", "term"),
+            "term": ("title", "work"),
+            "work": ("term", "title"),
+            "year": (),
+            "language": (),
+            "age": (),
+        }
+        for kind in related.get(fact.kind, ()):
+            for item in scanned.get(kind, []):
+                push(item)
+                if len(out) >= 6:
+                    break
+    return out
+
+
 def _pad_options(correct: str, distractors: list[str]) -> list[str] | None:
     options = [correct]
     for item in distractors:
@@ -332,16 +381,10 @@ def mcqs_from_pack(
         if len(items) >= count:
             break
         fp = fingerprint(fact.question, fact.answer)
-        if fp in skip or fact.question.lower() in used_q:
+        stem_key = re.sub(r"[^a-z0-9]+", "", fact.question.lower())
+        if fp in skip or fact.question.lower() in used_q or stem_key in used_q:
             continue
-        distractors = []
-        for other in facts:
-            if other.kind == fact.kind and other.answer.lower() != fact.answer.lower():
-                distractors.append(other.answer)
-        distractors.extend(item for item in scanned.get(fact.kind, []) if item.lower() != fact.answer.lower())
-        if fact.kind == "person":
-            distractors.extend(title for title in titles if title.lower() != fact.answer.lower())
-            distractors.extend(item for item in scanned.get("person", []) if item.lower() != fact.answer.lower())
+        distractors = _grounded_distractors(fact, facts, scanned, titles)
         options = _pad_options(fact.answer, distractors)
         if not options:
             continue
@@ -362,6 +405,7 @@ def mcqs_from_pack(
         )
         skip.add(fp)
         used_q.add(fact.question.lower())
+        used_q.add(stem_key)
     fps = [item["fingerprint"] for item in items]
     if not items:
         if previous_fingerprints or previous_answer:

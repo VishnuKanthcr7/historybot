@@ -91,7 +91,7 @@ def evidence_is_sufficient(selected: list[dict]) -> bool:
 def evidence_matches_topic(topic: str, retrieval_query: str, selected: list[dict]) -> bool:
     if not selected:
         return False
-    from rag.engine.classify import extract_topics
+    from rag.engine.classify import TOPIC_ALIASES, extract_topics
 
     blob = " ".join(item.get("text") or "" for item in selected)
     lowered = blob.lower()
@@ -103,6 +103,7 @@ def evidence_matches_topic(topic: str, retrieval_query: str, selected: list[dict
         "gdp",
         "prime minister",
         "plassey",
+        "napoleon",
         "wikipedia",
         "visionias",
     )
@@ -110,10 +111,18 @@ def evidence_matches_topic(topic: str, retrieval_query: str, selected: list[dict
         for term in blocked:
             if term in topic_l:
                 return term in lowered
-        return overlap_count(f"{topic} {retrieval_query}", blob) >= 1
-    if query_topics & blob_topics:
+        return evidence_subject_match(f"{topic} {retrieval_query}", selected)
+    # Named aliases with zero primary coverage are unsupported.
+    covered = {key for key in query_topics if primary_has_topic(key)}
+    if not covered:
+        return False
+    if covered & blob_topics:
         return True
-    return overlap_count(f"{topic} {retrieval_query}", blob) >= 1
+    for key in covered:
+        aliases = [alias for alias in TOPIC_ALIASES.get(key, (key,)) if alias.isascii()]
+        if any(alias in lowered for alias in aliases):
+            return True
+    return False
 
 
 def _page(item: dict) -> int | None:
@@ -180,3 +189,54 @@ def expand_evidence(
         by_id.values(),
         key=lambda item: (_page(item) or 99, item.get("distance") if item.get("distance") is not None else 9),
     )[:max_keep]
+
+def primary_has_topic(topic_key: str) -> bool:
+    """True when the primary topic map has at least one chunk/page for the key."""
+    if not topic_key:
+        return False
+    from rag.engine.topic_map import build_topic_index, chunks_for_topics
+
+    index = build_topic_index()
+    entry = index.get(topic_key) or {}
+    if entry.get("pages"):
+        return True
+    return bool(chunks_for_topics({topic_key}))
+
+
+def topic_supported_by_primary(question: str) -> bool | None:
+    """False when named aliases lack primary coverage; None if no aliases extracted."""
+    from rag.engine.classify import extract_topics
+
+    topics = extract_topics(question or "")
+    if not topics:
+        return None
+    return any(primary_has_topic(key) for key in topics)
+
+
+def evidence_subject_match(question: str, selected: list[dict]) -> bool:
+    """Require selected evidence to mention extracted topic aliases."""
+    from rag.engine.classify import TOPIC_ALIASES, extract_topics
+
+    if not selected:
+        return False
+    topics = extract_topics(question or "")
+    blob = " ".join(item.get("text") or "" for item in selected).lower()
+    if not topics:
+        # Distinctive token must appear; avoid weak one-token false grounding.
+        tokens = content_tokens(question)
+        if not tokens:
+            return False
+        hits = [tok for tok in tokens if tok in blob]
+        if len(hits) >= 2:
+            return True
+        if len(hits) == 1 and len(hits[0]) >= 5:
+            return True
+        return False
+    covered = [key for key in topics if primary_has_topic(key)]
+    if not covered:
+        return False
+    for key in covered:
+        aliases = [alias for alias in TOPIC_ALIASES.get(key, (key,)) if alias.isascii()]
+        if any(alias in blob for alias in aliases):
+            return True
+    return False
