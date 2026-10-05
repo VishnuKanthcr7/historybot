@@ -13,10 +13,25 @@ function required(name) {
   return value;
 }
 
+function parseCorsOrigin(raw) {
+  const fallback = ["http://localhost:5173", "http://127.0.0.1:5173"];
+  if (!raw || !String(raw).trim()) return fallback;
+  const parts = String(raw)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Dev convenience: if only one of localhost/127.0.0.1 is listed, allow both.
+  const set = new Set(parts);
+  if (set.has("http://localhost:5173")) set.add("http://127.0.0.1:5173");
+  if (set.has("http://127.0.0.1:5173")) set.add("http://localhost:5173");
+  const list = [...set];
+  return list.length === 1 ? list[0] : list;
+}
+
 export const config = {
   env: process.env.NODE_ENV || "development",
   port: Number(process.env.PORT || process.env.APP_PORT || 3000),
-  corsOrigin: process.env.CORS_ORIGIN || "http://localhost:5173",
+  corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
   mysql: {
     host: process.env.MYSQL_HOST || "localhost",
     port: Number(process.env.MYSQL_PORT || 3306),
@@ -32,7 +47,7 @@ export const config = {
   },
   rateLimit: {
     windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
-    max: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 30),
+    max: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 120),
   },
   maxMessageChars: 2000,
 };

@@ -409,11 +409,13 @@ def build_evidence_pack(
             if not looks_like_toc(item.get("text") or "")
             and not looks_like_map_chunk(item.get("text") or "")
             and not primarily_other_dynasty(item, family)
-            and not ahom_primary_chunk(item)
+            and (family == AHOM_FAMILY or not ahom_primary_chunk(item))
             and ((_page(item) or 99) > 1 or family == AHOM_FAMILY)
         ]
         pack.chunks = diversify_by_page(combined, 12)
-        pack.chunks = [item for item in pack.chunks if not ahom_primary_chunk(item)]
+        # Strip Ahom bleed from Mughal/Maratha packs only — keep Ahom chunks for Ahom asks.
+        if family != AHOM_FAMILY:
+            pack.chunks = [item for item in pack.chunks if not ahom_primary_chunk(item)]
         if family == MUGHAL_FAMILY:
             ensure_keys = ["babar", "akbar", "shahjahan", "aurangzeb"]
             if "sher" in topics:
@@ -482,6 +484,21 @@ def build_evidence_pack(
                     if dominant_ruler(item.get("text") or "") != "sher"
                     and "sher shah" not in (item.get("text") or "").lower()[:120]
                 ]
+        elif topics & {"ahom"}:
+            mapped = [
+                item
+                for item in chunks_for_topics({"ahom"})
+                if not looks_like_exercise_chunk(item)
+                and not looks_like_toc(item.get("text") or "")
+            ]
+            pack.reasons.append("ahom-explanation-map")
+        elif topics & {"ashapradhan"}:
+            mapped = [
+                item
+                for item in chunks_for_topics({"ashapradhan"})
+                if not looks_like_exercise_chunk(item)
+            ]
+            pack.reasons.append("ashapradhan-explanation-map")
         if entity:
             combined = _merge(seed, mapped)
             if facet == "administration":
@@ -500,8 +517,8 @@ def build_evidence_pack(
             for item in combined
             if not looks_like_map_chunk(item.get("text") or "")
             and not looks_like_toc(item.get("text") or "")
-            and not ahom_primary_chunk(item)
-            and ((_page(item) or 99) > 1 or "ahom" in (item.get("topics") or []))
+            and ("ahom" in topics or not ahom_primary_chunk(item))
+            and ((_page(item) or 99) > 1 or "ahom" in (item.get("topics") or []) or "ahom" in topics)
         ]
         pack.chunks = diversify_by_page(combined, 12)
         pack.pages = _pages(pack.chunks)
@@ -524,15 +541,36 @@ def build_evidence_pack(
         if not seed:
             seed = mapped[:4]
             pack.reasons.append("entity-topic-map-seed")
+    if "ahom" in topics and not entity:
+        ahom_mapped = [
+            item
+            for item in chunks_for_topics({"ahom"})
+            if not looks_like_exercise_chunk(item)
+            and not looks_like_toc(item.get("text") or "")
+            and not looks_like_map_chunk(item.get("text") or "")
+        ]
+        mapped = _merge(ahom_mapped, mapped)
+        pack.reasons.append("ahom-topic-map")
+    if "ashapradhan" in topics and not entity:
+        asha_mapped = [
+            item
+            for item in chunks_for_topics({"ashapradhan"})
+            if not looks_like_exercise_chunk(item)
+        ]
+        mapped = _merge(asha_mapped, mapped)
+        pack.reasons.append("ashapradhan-topic-map")
     if entity:
         combined = _merge(_merge(seed, mapped), same if question_type == "FOLLOW_UP" else [])
         combined = filter_entity_chunks(combined, entity, facet)
+    elif "ahom" in topics or "ashapradhan" in topics:
+        combined = _merge(mapped, seed)
     else:
         combined = add_same_page_continuations(_merge(seed, same), entity, facet)
     combined = [item for item in combined if not looks_like_exercise_chunk(item)]
     if question_type != "FOLLOW_UP":
         combined = [item for item in combined if not looks_like_map_chunk(item.get("text") or "")]
-        combined = [item for item in combined if not ahom_primary_chunk(item)]
+        if "ahom" not in topics:
+            combined = [item for item in combined if not ahom_primary_chunk(item)]
         if entity:
             combined = [item for item in combined if (_page(item) or 99) > 1]
     cap = 8 if question_type == "FOLLOW_UP" else 6

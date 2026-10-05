@@ -247,20 +247,23 @@ def answer_question(
         primary_selected = prefer_unused_chunks(primary_selected, used_ids)
         pack.chunks = primary_selected
 
-    supported = topic_supported_by_primary(search_question)
+    # Follow-ups often lack named topics ("Why is he important?"); gate on the
+    # rewritten retrieval_query that carries the prior entity/topic.
+    gate_question = retrieval_query if intent == "FOLLOW_UP" else search_question
+    supported = topic_supported_by_primary(gate_question)
     if supported is False:
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
 
-    if looks_like_injection(rag_question) and not extract_topics(search_question):
+    if looks_like_injection(rag_question) and not extract_topics(gate_question):
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
     if looks_like_injection(rag_question) and not evidence_matches_topic(
-        search_question, retrieval_query, primary_selected
+        gate_question, retrieval_query, primary_selected
     ):
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
     if (
         not evidence_is_sufficient(primary_selected)
-        or not evidence_matches_topic(search_question, retrieval_query, primary_selected)
-        or not evidence_subject_match(search_question, primary_selected)
+        or not evidence_matches_topic(gate_question, retrieval_query, primary_selected)
+        or not evidence_subject_match(gate_question, primary_selected)
     ):
         if _looks_limited(search_question) and evidence_is_sufficient(primary_selected):
             return _limited(language, retrieval_query, primary_hits, primary_selected, intent, mode)

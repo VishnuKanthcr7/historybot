@@ -5,14 +5,22 @@ import { LABELS } from "../i18n/labels.js";
 
 export default function Home() {
   const navigate = useNavigate();
-  const { language, setLanguage } = useApp();
+  const { language, setLanguage, beginFreshChat } = useApp();
   const t = LABELS[language];
   const [query, setQuery] = useState("");
 
   function start(event) {
     event?.preventDefault();
     const q = query.trim();
-    navigate(q ? `/chat?q=${encodeURIComponent(q)}` : "/chat");
+    // Always open a blank main chat from Home CTAs; do not restore prior thread.
+    beginFreshChat();
+    navigate(q ? `/chat?q=${encodeURIComponent(q)}` : "/chat?fresh=1");
+  }
+
+  function startLearning(event) {
+    event?.preventDefault();
+    beginFreshChat();
+    navigate("/chat?fresh=1");
   }
 
   return (
@@ -43,12 +51,13 @@ export default function Home() {
               <option value="en">{t.english}</option>
               <option value="kn">{t.kannada}</option>
             </select>
-            <Link
-              to="/chat"
+            <button
+              type="button"
+              onClick={startLearning}
               className="hidden min-h-10 items-center border border-navy px-3 text-sm font-medium text-navy hover:bg-navy hover:text-cream sm:inline-flex"
             >
               {t.start}
-            </Link>
+            </button>
           </div>
         </div>
       </header>

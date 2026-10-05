@@ -45,8 +45,11 @@ export function AppProvider({ children }) {
         let sid = localStorage.getItem(SESSION_KEY);
         if (!sid) {
           const created = await api.createSession();
-          sid = created.session_id;
-          localStorage.setItem(SESSION_KEY, sid);
+          // Prefer a session another flow wrote while createSession was in flight
+          // (e.g. test harness / another tab), so we do not clobber it.
+          const existing = localStorage.getItem(SESSION_KEY);
+          sid = existing || created.session_id;
+          if (!existing) localStorage.setItem(SESSION_KEY, sid);
         }
         if (cancelled) return;
         setSessionId(sid);
@@ -68,15 +71,29 @@ export function AppProvider({ children }) {
     localStorage.setItem(LANG_KEY, value);
   }, []);
 
+  const beginFreshChat = useCallback(() => {
+    // Clear active main-chat state only. Sidebar history is untouched.
+    setCurrentId("");
+    localStorage.removeItem(CURRENT_KEY);
+    setMessages([]);
+    setEcontent(null);
+    setError("");
+  }, []);
+
   const openConversation = useCallback(
     async (conversationId, sid = sessionId) => {
       if (!sid || !conversationId) return;
       setError("");
       setEcontent(null);
-      const data = await api.getConversation(conversationId, sid);
-      setCurrentId(conversationId);
-      localStorage.setItem(CURRENT_KEY, conversationId);
-      setMessages(data.messages || []);
+      try {
+        const data = await api.getConversation(conversationId, sid);
+        setCurrentId(conversationId);
+        localStorage.setItem(CURRENT_KEY, conversationId);
+        setMessages(data.messages || []);
+      } catch (err) {
+        setError(err.message || "This chat could not be opened.");
+        throw err;
+      }
     },
     [sessionId]
   );
@@ -193,6 +210,7 @@ export function AppProvider({ children }) {
       error,
       setError,
       ready,
+      beginFreshChat,
       openConversation,
       newChat,
       send,
@@ -213,6 +231,7 @@ export function AppProvider({ children }) {
       econtent,
       error,
       ready,
+      beginFreshChat,
       openConversation,
       newChat,
       send,

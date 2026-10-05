@@ -20,6 +20,7 @@ export default function Chat() {
     econtent,
     error,
     ready,
+    beginFreshChat,
     openConversation,
     newChat,
     send,
@@ -31,13 +32,37 @@ export default function Chat() {
   const [params, setParams] = useSearchParams();
   const [menuOpen, setMenuOpen] = useState(false);
   const pendingQuestion = useRef(false);
-  const restored = useRef(false);
+  // When true, do not auto-restore last CURRENT_KEY (Start Learning / New Chat).
+  const skipAutoRestore = useRef(false);
+  // Prevents repeat auto-restore loops for the same conversation id.
+  const restoreAttemptedFor = useRef("");
+  const freshHandled = useRef(false);
+
+  // Start Learning / Home CTA: force blank main chat and skip restore race.
+  useEffect(() => {
+    if (freshHandled.current) return;
+    if (params.get("fresh") !== "1") return;
+    freshHandled.current = true;
+    skipAutoRestore.current = true;
+    restoreAttemptedFor.current = "";
+    beginFreshChat();
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("fresh");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [params, beginFreshChat, setParams]);
 
   useEffect(() => {
     if (!ready || pendingQuestion.current) return;
     const q = params.get("q");
     if (q) {
       pendingQuestion.current = true;
+      skipAutoRestore.current = true;
+      restoreAttemptedFor.current = "";
       setParams({}, { replace: true });
       send(q);
     }
@@ -46,20 +71,43 @@ export default function Chat() {
   useEffect(() => {
     // Skip while a send is in flight: newChat() briefly clears messages and would
     // race-reload an incomplete conversation, dropping the optimistic user turn.
-    if (!ready || restored.current || params.get("q") || loading) return;
-    if (currentId && messages.length === 0) {
-      restored.current = true;
-      openConversation(currentId).catch(() => {});
+    // Also skip after Start Learning (?fresh=1) / New Chat so nav cannot lose to restore.
+    if (!ready || skipAutoRestore.current || params.get("q") || params.get("fresh") || loading) {
+      return;
     }
+    if (!currentId || messages.length > 0) return;
+    if (restoreAttemptedFor.current === currentId) return;
+    restoreAttemptedFor.current = currentId;
+    let cancelled = false;
+    openConversation(currentId).catch(() => {
+      // Allow a later retry (e.g. after session settles) if this attempt failed.
+      if (!cancelled && restoreAttemptedFor.current === currentId) {
+        restoreAttemptedFor.current = "";
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [ready, currentId, messages.length, openConversation, params, loading]);
 
   async function handleNewChat() {
+    skipAutoRestore.current = true;
+    restoreAttemptedFor.current = "";
     await newChat(t.newChat);
+    // Keep skipAutoRestore true so the empty new thread is not re-fetched as a race.
     setMenuOpen(false);
   }
 
   async function handleOpen(id) {
-    await openConversation(id);
+    // History click must always restore that conversation's messages.
+    skipAutoRestore.current = false;
+    restoreAttemptedFor.current = id;
+    try {
+      await openConversation(id);
+    } catch {
+      // Error surfaced via AppContext.setError
+      restoreAttemptedFor.current = "";
+    }
     setMenuOpen(false);
   }
 

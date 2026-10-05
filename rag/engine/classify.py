@@ -28,7 +28,9 @@ TOPIC_ALIASES: dict[str, tuple[str, ...]] = {
     "ahom": ("ahom", "sukaphaa", "lachit", "saraighat", "charaideo"),
     "sher": ("sher shah", "farid khan", "sadak-e-azam"),
     "mansab": ("mansab", "mansabdari", "zat ranking"),
+    "ashapradhan": ("ashapradhan", "ashtapradhan", "asha pradhan", "ashta pradhan", "ashapradhans"),
 }
+
 
 STANDALONE_START = re.compile(
     r"^(what|who|where|when|why|how|tell|explain|describe|list)\b",
@@ -174,7 +176,7 @@ def last_user_question(history: list[dict] | None) -> str:
 
 FOLLOW_SHORT_RE = re.compile(
     r"^(tell me more|explain more|give me more( details)?|what else|continue|"
-    r"go deeper|more|why|how|and then|what happened after that|"
+    r"go deeper|more|why|how|and then|what happened after that|what did he do after that|why is he important|why (was|is) (he|she|it) important|"
     r"more questions|more mcqs|go on|next|another one|anything else|"
     r"another 10|another ten|give me more questions|"
     r"next 10|next ten|give me another set|another set)\??$",

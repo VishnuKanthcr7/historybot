@@ -184,6 +184,24 @@ def _topic_allowed_group(group, topics: set[str]) -> bool:
     title = (group.title or "").lower()
     if "sher" in key or "sher" in title:
         return "sher" in topics
+    # Specific ruler ask (e.g. Babur MCQs): keep that ruler's groups only.
+    _RULER_TOPIC_NAMES = {
+        "babar": ("babar", "babur"),
+        "humayun": ("humayun",),
+        "akbar": ("akbar",),
+        "jahangir": ("jahangir",),
+        "shahjahan": ("shahjahan", "shah jahan"),
+        "aurangzeb": ("aurangzeb",),
+        "shivaji": ("shivaji",),
+        "sambhaji": ("sambhaji",),
+        "bajirao": ("bajirao", "baji rao"),
+    }
+    asked_rulers = topics & set(_RULER_TOPIC_NAMES)
+    if asked_rulers and not (topics & {"mughal", "maratha"}):
+        blob = f"{key} {title}"
+        if any(any(name in blob for name in _RULER_TOPIC_NAMES[ruler]) for ruler in asked_rulers):
+            return True
+        return False
     if topics & {"mughal"} and not (topics & {"maratha", "shivaji", "sambhaji", "bajirao"}):
         mughal_ok = {
             "mughal",
@@ -244,7 +262,7 @@ def _facts_from_group(group) -> list[McqFact]:
     # Prefer concrete stems only (autobiography / administration); skip vague associated-with.
     if match and re.search(r"translated.*?into the ([A-Za-z]+) language|translated.*?into ([A-Za-z]+)", text, re.I):
         m2 = re.search(r"translated.*?into (?:the )?([A-Za-z]+)(?: language)?", text, re.I)
-        if m2:
+        if m2 and "akbar" in title.lower():
             add("Into which language were Hindu religious books translated under Akbar?", m2.group(1).title(), "language")
     match = BORN_RE.search(text)
     if match:
