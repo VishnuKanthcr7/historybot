@@ -289,7 +289,103 @@ def classify_depth(question: str, *, more_followup: bool = False) -> DepthProfil
     )
 
 
-def depth_prompt_extra(profile: DepthProfile) -> str:
+
+MOTIVE_CUES = (
+    "because",
+    "intention",
+    "in order to",
+    "so that",
+    "reason",
+    "aimed to",
+    "wanted to",
+    "with the intention",
+    "with an intention",
+    "to assist",
+    "to help",
+    "to stop",
+    "to establish",
+)
+
+
+
+def evidence_states_motive(
+    chunks: list[dict] | None,
+    entity: str | None = None,
+    question: str | None = None,
+) -> bool:
+    """True when evidence states an explicit motive for the asked entity/action.
+
+    When a question is provided, only sentences that mention the entity and
+    overlap the question's content tokens are considered (avoids treating a
+    different action's purpose as the why-answer).
+    """
+    rows = [item.get("text") or "" for item in (chunks or []) if item.get("text")]
+    if not rows:
+        return False
+    blob = " ".join(rows).lower()
+    from rag.engine.classify import TOPIC_ALIASES
+    from rag.engine.topic_map import RULER_KEYS
+    from rag.engine.evidence import content_tokens
+
+    aliases = []
+    if entity:
+        aliases = [a for a in TOPIC_ALIASES.get(entity, (entity,)) if isinstance(a, str) and a.isascii()]
+    q_tokens = content_tokens(question or "")
+    # Drop ultra-generic tokens that appear in every Maratha passage.
+    q_tokens -= {"mughal", "maratha", "kingdom", "empire", "peshwa"}
+
+    def _sentences(text: str) -> list[str]:
+        return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+
+    candidates: list[str] = []
+    for text in rows:
+        for sent in _sentences(text):
+            low = sent.lower()
+            if aliases and not any(alias in low for alias in aliases):
+                continue
+            if q_tokens:
+                sent_tokens = content_tokens(sent)
+                if not (q_tokens & sent_tokens):
+                    continue
+            candidates.append(low)
+    if aliases and q_tokens and not candidates:
+        # Fall back to entity sentences if action overlap was too strict.
+        for text in rows:
+            for sent in _sentences(text):
+                low = sent.lower()
+                if any(alias in low for alias in aliases):
+                    candidates.append(low)
+    if not candidates:
+        candidates = [blob]
+
+    other_aliases = []
+    for key in RULER_KEYS:
+        if key == entity:
+            continue
+        other_aliases.extend(
+            a for a in TOPIC_ALIASES.get(key, ()) if isinstance(a, str) and a.isascii() and len(a) >= 4
+        )
+    other_aliases.sort(key=len, reverse=True)
+
+    for low in candidates:
+        if entity and aliases:
+            for alias in aliases:
+                for match in re.finditer(re.escape(alias), low):
+                    after = low[match.end() : match.end() + 140]
+                    for other in other_aliases:
+                        cut = after.find(other)
+                        if cut >= 0:
+                            after = after[:cut]
+                            break
+                    before = low[max(0, match.start() - 48) : match.start()]
+                    if any(cue in after or cue in before for cue in MOTIVE_CUES):
+                        return True
+        elif any(cue in low for cue in MOTIVE_CUES):
+            return True
+    return False
+
+
+def depth_prompt_extra(profile: DepthProfile, chunks: list[dict] | None = None, entity: str | None = None, question: str | None = None) -> str:
     """Extra LLM instructions by depth — still textbook-only."""
     bits = []
     if profile.depth == "short":
@@ -312,9 +408,18 @@ def depth_prompt_extra(profile: DepthProfile) -> str:
             "If one side lacks evidence, say the textbook does not provide that comparison point."
         )
     elif profile.depth == "why":
-        bits.append(
-            "Focus on causes/reasons stated in the evidence. Do not invent motives."
-        )
+        if chunks is not None and not evidence_states_motive(chunks, entity, question):
+            bits.append(
+                "The evidence states an action or event but does not state an explicit motive or reason. "
+                "Say that the textbook does not give the motive, then only add surrounding supported context. "
+                "Do not invent or imply motives."
+            )
+        else:
+            bits.append(
+                "Focus on causes/reasons explicitly stated in the evidence for the asked person or event. "
+                "If the textbook states an action but does not state a motive or reason, say that clearly "
+                "and only add surrounding supported context. Do not invent or imply motives beyond the evidence."
+            )
     elif profile.depth == "how":
         bits.append(
             "Explain the process or method using only steps/facts in the evidence."

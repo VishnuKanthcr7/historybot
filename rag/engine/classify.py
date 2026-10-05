@@ -17,6 +17,8 @@ TOPIC_ALIASES: dict[str, tuple[str, ...]] = {
     "bajirao": ("baji rao", "bajirao"),
     "balaji": ("balaji vishwanath",),
     "madhav": ("madhav rao",),
+    "nizam": ("nizam-ul-mulk", "nizam ul mulk", "nizamulmulk"),
+    "bhopal": ("bhopal", "battle near bhopal"),
     "panipat": ("panipat",),
     "taj": ("taj mahal", "tajmahal", "ತಾಜ್ ಮಹಲ್", "ತಾಜ್"),
     "guerilla": ("guerilla", "guerrilla", "ಗೆರಿಲ್ಲಾ"),
@@ -271,7 +273,7 @@ def classify_question_type(question: str, intent: str | None = None) -> str:
     topics = extract_topics(text)
     has_admin = "administration" in lowered or "administrative" in lowered
     dynasty_only = bool(DYNASTY_RE.search(text)) and not (
-        topics & {"babar", "akbar", "shivaji", "shahjahan", "aurangzeb", "bajirao", "humayun"}
+        topics & {"babar", "akbar", "shivaji", "shahjahan", "aurangzeb", "bajirao", "humayun", "madhav", "nizam", "sher"}
     )
     if EXAM_RE.search(text):
         return "EXAM"
@@ -314,6 +316,9 @@ def classify_question_type(question: str, intent: str | None = None) -> str:
                 "humayun",
                 "madhav",
                 "sher",
+                "nizam",
+                "sambhaji",
+                "balaji",
             }
             return "EXPLANATION" if has_admin or EXPLAIN_RE.search(text) or person else "BROAD_TOPIC"
     if EXPLAIN_RE.search(text):

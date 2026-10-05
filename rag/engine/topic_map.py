@@ -30,6 +30,8 @@ MARATHA_FAMILY = {
     "bajirao",
     "balaji",
     "madhav",
+    "nizam",
+    "bhopal",
     "guerilla",
     "raigad",
 }
@@ -47,6 +49,7 @@ RULER_KEYS = (
     "bajirao",
     "balaji",
     "madhav",
+    "nizam",
 )
 FACET_TERMS = {
     "administration": (
@@ -173,7 +176,7 @@ def chunks_for_topics(topic_keys: set[str], *, include_exercises: bool = False) 
 
 def dynasty_keys(topic_keys: set[str]) -> set[str]:
     keys = set(topic_keys)
-    maratha_named = keys & {"maratha", "shivaji", "sambhaji", "peshwa", "bajirao", "balaji", "madhav", "guerilla", "raigad"}
+    maratha_named = keys & {"maratha", "shivaji", "sambhaji", "peshwa", "bajirao", "balaji", "madhav", "nizam", "bhopal", "guerilla", "raigad"}
     mughal_named = keys & {"mughal", "babar", "humayun", "akbar", "jahangir", "shahjahan", "aurangzeb", "taj", "din", "mansab", "sher"}
     if maratha_named and not (mughal_named - {"mughal", "aurangzeb"}):
         return MARATHA_FAMILY

@@ -251,14 +251,23 @@ def entity_subject_score(text: str, entity: str) -> tuple[int, str]:
     mentions = _mentions(text, entity)
     if mentions <= 0:
         return 0, "no-mention"
+    from rag.engine.pack import PLACE_EVENT_KEYS
+
     heading = heading_entity_key(text)
     if heading == entity:
         return 5 + min(mentions, 3), "heading-subject"
-    if heading and heading in RULER_KEYS and heading != entity:
+    if heading and heading in RULER_KEYS and heading != entity and entity in RULER_KEYS:
         return 0, "other-heading"
+    # Place/event focus keys: a single clear mention is enough even beside a co-named ruler.
+    if entity in PLACE_EVENT_KEYS:
+        return 4 + min(mentions, 2), "place-event-subject"
+    from rag.engine.pack import entity_has_agency
+
     dominant = dominant_ruler(text)
     if dominant == entity:
         return 4 + min(mentions, 2), "dominant-subject"
+    if entity_has_agency(text, entity):
+        return 3 + min(mentions, 2), "agency-co-mention"
     if dominant and dominant != entity and mentions <= ruler_counts(text).get(dominant, 0):
         return 0, "incidental-mention"
     start = " ".join(text.split())[:160].lower()

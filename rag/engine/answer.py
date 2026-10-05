@@ -402,6 +402,7 @@ def answer_question(
             coverage_info = covered
         raw = _strip_invented_pages(raw)
         raw = _apply_partial_refusals(rag_question, raw, selected)
+        raw = _apply_why_motive_note(rag_question, raw, selected, pack.entity, depth_profile.depth)
         if more and previous_task == "EXPLAIN":
             prev = previous_assistant(history)
             filtered = filter_new_sentences(raw, prev)
@@ -445,7 +446,7 @@ def answer_question(
         result["timings"] = timings
         return result
 
-    payload = _ask_llm(search_question, primary_selected, mode, strict=False, question_type=question_type, depth_profile=depth_profile)
+    payload = _ask_llm(search_question, primary_selected, mode, strict=False, question_type=question_type, depth_profile=depth_profile, entity=pack.entity)
     regenerations = 0
     ok, reason = validate_answer(
         payload["raw"],
@@ -458,7 +459,7 @@ def answer_question(
     )
     if not ok:
         regenerations = 1
-        payload = _ask_llm(search_question, primary_selected, mode, strict=True, question_type=question_type, depth_profile=depth_profile)
+        payload = _ask_llm(search_question, primary_selected, mode, strict=True, question_type=question_type, depth_profile=depth_profile, entity=pack.entity)
         ok, reason = validate_answer(
             payload["raw"],
             "en",
@@ -510,6 +511,7 @@ def answer_question(
 
     raw = _strip_invented_pages(payload["raw"])
     raw = _apply_partial_refusals(rag_question, raw, selected)
+    raw = _apply_why_motive_note(rag_question, raw, selected, pack.entity, depth_profile.depth)
     raw = _decorate_student_answer(rag_question, raw, off_labels)
     sources = _sources(supporting_evidence(raw, selected, min_overlap=1 if mode == "DETAILED" else 2))
     answer = f"{raw}\n\n{_citation_block(sources)}"
@@ -706,6 +708,25 @@ def _clarify(language: str, question: str, intent: str, mode: str) -> dict:
     }
 
 
+
+def _apply_why_motive_note(question: str, answer: str, evidence: list[dict], entity: str | None, depth: str | None) -> str:
+    """If a why-question has action evidence but no motive, say so before supported context."""
+    if (depth or "") != "why" or not (answer or "").strip():
+        return answer
+    from rag.engine.depth import evidence_states_motive
+
+    if evidence_states_motive(evidence, entity, question):
+        return answer
+    low = (answer or "").lower()
+    if "does not state a motive" in low or "does not give the motive" in low or "motive is not" in low:
+        return answer
+    note = (
+        "The prescribed textbook does not state a motive or reason for this. "
+        "Here is the surrounding supported context from the textbook:"
+    )
+    return f"{note}\n\n{answer}"
+
+
 def _apply_partial_refusals(question: str, answer: str, evidence: list[dict]) -> str:
     lowered = (question or "").lower()
     blob = " ".join(item.get("text") or "" for item in evidence).lower()
@@ -773,7 +794,7 @@ def _payload(
     }
 
 
-def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, question_type: str = "DIRECT", depth_profile=None) -> dict:
+def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, question_type: str = "DIRECT", depth_profile=None, entity: str | None = None) -> dict:
     primary_blocks = _blocks(primary, "TEXTBOOK")
     extra = ""
     if strict:
@@ -798,7 +819,7 @@ def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, questi
     if question_type == "EXAM":
         extra += "\nWrite short textbook-grounded practice questions and answers. Do not invent facts."
     if depth_profile is not None:
-        extra += "\n" + depth_prompt_extra(depth_profile)
+        extra += "\n" + depth_prompt_extra(depth_profile, chunks=primary, entity=entity, question=question)
     if question_type == "BROAD_TOPIC":
         primary_blocks = _blocks(primary, "TEXTBOOK", max_chars=650)
         user = (

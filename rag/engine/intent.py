@@ -176,7 +176,7 @@ def entity_focus_query(entity: str | None, topics: set[str], question_type: str)
 
 def is_broad_dynasty_request(question: str, topics: set[str]) -> bool:
     dynasty_only = bool(re.search(r"\b(mughals?|marathas?|ahoms?)\b", question or "", re.I)) and not (
-        topics & {"babar", "akbar", "shivaji", "shahjahan", "aurangzeb", "bajirao", "humayun"}
+        topics & {"babar", "akbar", "shivaji", "shahjahan", "aurangzeb", "bajirao", "humayun", "madhav", "nizam", "sher"}
     )
     if not dynasty_only:
         return False

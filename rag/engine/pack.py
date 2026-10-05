@@ -74,8 +74,26 @@ def detect_facet(question: str) -> str | None:
     return None
 
 
+# Place/event keys that should become pack entities (not rulers).
+PLACE_EVENT_KEYS = (
+    "bhopal",
+    "panipat",
+    "raigad",
+    "plassey",
+    "taj",
+    "guerilla",
+    "din",
+    "mansab",
+    "ashapradhan",
+)
+
+
 def detect_entity(topic_keys: set[str]) -> str | None:
+    """Prefer a named ruler, else a place/event/term focus key."""
     for key in RULER_KEYS:
+        if key in topic_keys:
+            return key
+    for key in PLACE_EVENT_KEYS:
         if key in topic_keys:
             return key
     return None
@@ -103,6 +121,42 @@ def dominant_ruler(text: str) -> str | None:
     if len(leaders) == 1:
         return leaders[0]
     return None
+
+
+AGENCY_CUES = (
+    "intention",
+    "tried to",
+    "marched",
+    "march towards",
+    "lost to",
+    "lost the",
+    "defeated",
+    "fought",
+    "declared",
+    "appointed",
+    "conquered",
+    "established",
+    "assisting",
+    "became",
+    "ruled",
+    "attacked",
+    "imprisoned",
+    "sent",
+)
+
+
+def entity_has_agency(text: str, entity: str) -> bool:
+    """True when the named entity appears with action/agency cues nearby."""
+    if not text or not entity:
+        return False
+    lowered = text.lower()
+    aliases = [alias for alias in TOPIC_ALIASES.get(entity, (entity,)) if alias.isascii()]
+    for alias in aliases:
+        for match in re.finditer(re.escape(alias), lowered):
+            window = lowered[max(0, match.start() - 36) : match.end() + 100]
+            if any(cue in window for cue in AGENCY_CUES):
+                return True
+    return False
 
 
 def filter_entity_chunks(chunks: list[dict], entity: str | None, facet: str | None) -> list[dict]:
@@ -157,9 +211,17 @@ def filter_entity_chunks(chunks: list[dict], entity: str | None, facet: str | No
         if mentions_entity and dominant in {None, entity}:
             kept.append({**item, "relevance_reason": "entity-primary"})
             continue
+        if mentions_entity and entity in PLACE_EVENT_KEYS:
+            # Place/event focus: keep matching passages even when a ruler co-dominates.
+            kept.append({**item, "relevance_reason": "place-event-primary"})
+            continue
         if mentions_entity and dominant and dominant != entity:
-            # Contextual mention (e.g. Shivaji vs Aurangzeb) — keep only if not another ruler's admin block.
-            if facet is None and not chunk_has_facet(text, "administration"):
+            # Co-mention / interaction: keep for non-admin asks even when the
+            # question facet is warfare/etc. Drop only pure other-ruler admin blocks
+            # unless the asked entity clearly acts in the passage.
+            if facet != "administration" and (
+                not chunk_has_facet(text, "administration") or entity_has_agency(text, entity)
+            ):
                 kept.append({**item, "relevance_reason": "entity-context"})
             continue
         if dominant == entity:
@@ -201,6 +263,7 @@ NAMED_RULERS = {
     "bajirao",
     "balaji",
     "madhav",
+    "nizam",
 }
 
 AHOM_HINTS = ("ahom", "charaideo", "sukaphaa", "lachit", "saraighat", "jayadhwaj")
