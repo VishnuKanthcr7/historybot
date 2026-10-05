@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 
 from rag.engine.citations import supporting_evidence
 from rag.engine.classify import (
@@ -44,6 +45,12 @@ from rag.engine.normalize import (
 )
 from rag.engine.pack import build_evidence_pack, detect_entity
 from rag.engine.coverage import generate_from_plan
+from rag.engine.depth import (
+    classify_depth,
+    depth_prompt_extra,
+    filter_new_sentences,
+    prefer_unused_chunks,
+)
 from rag.engine.sanitize import sanitize_student_text
 from rag.engine.validate import is_refusal, unsupported_named_items, validate_answer
 from rag.llm.client import complete
@@ -93,6 +100,8 @@ def answer_question(
     language = "kn" if language == "kn" else "en"
     question = normalize_question(question)
     history = trim_history(history)
+    t0 = time.perf_counter()
+    timings: dict[str, float] = {}
     casual = classify_casual(question)
     if casual:
         return {
@@ -190,9 +199,36 @@ def answer_question(
             search_question, rewrite_history, force=bool(rewrite_history)
         )
 
-    top_k = 16 if question_type == "BROAD_TOPIC" else (14 if mode == "DETAILED" else 10)
+    depth_profile = classify_depth(
+        search_question if not more else rag_question,
+        more_followup=bool(more and previous_task == "EXPLAIN"),
+    )
+    if more and previous_task == "EXPLAIN":
+        mode = depth_profile.mode
+    elif not more:
+        if depth_profile.mode == "DETAILED" and mode == "NORMAL":
+            mode = "DETAILED"
+        if depth_profile.mode == "ECONTENT":
+            mode = "ECONTENT"
+    if depth_profile.question_type_hint and question_type == "DIRECT" and depth_profile.depth in {
+        "medium",
+        "detail",
+        "why",
+        "how",
+        "compare",
+        "list",
+        "more",
+    }:
+        question_type = depth_profile.question_type_hint
+    top_k = depth_profile.top_k
+    if question_type == "BROAD_TOPIC":
+        top_k = max(top_k, 16)
+    elif mode == "DETAILED":
+        top_k = max(top_k, 14)
     top_k = max(RAG_TOP_K, top_k)
+    t_retrieve = time.perf_counter()
     primary_hits = retrieve_primary(retrieval_query, top_k=top_k, language="en")
+    timings["T1_retrieve_ms"] = round((time.perf_counter() - t_retrieve) * 1000, 1)
     if looks_like_mcq_request(search_question) or looks_like_mcq_request(rag_question):
         question_type = "EXAM"
     pack = build_evidence_pack(
@@ -205,6 +241,11 @@ def answer_question(
         history=history,
     )
     primary_selected = pack.chunks
+    timings["T2_pack_ms"] = round((time.perf_counter() - t_retrieve) * 1000, 1)
+    if depth_profile.prefer_unused:
+        used_ids = list(stored_task.get("used_chunk_ids") or stored_task.get("ids") or [])
+        primary_selected = prefer_unused_chunks(primary_selected, used_ids)
+        pack.chunks = primary_selected
 
     supported = topic_supported_by_primary(search_question)
     if supported is False:
@@ -267,7 +308,12 @@ def answer_question(
                     "count": count,
                     "fingerprints": fingerprints,
                     "generation_index": int(stored_task.get("generation_index") or 0) + len(fingerprints),
+                    "used_chunk_ids": [item.get("chunk_id") for item in selected if item.get("chunk_id")],
+                    "depth": "exam",
                 }
+                timings["T8_total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+                result["timings"] = timings
+                result["depth"] = {"depth": "exam", "mode": mode}
                 return result
             return _unavailable(language, retrieval_query, primary_hits, selected, intent=intent, mode=mode)
         exam = _exam_from_pack(search_question, selected)
@@ -294,11 +340,23 @@ def answer_question(
         question_type == "FOLLOW_UP"
         and (pack.facet == "administration" or pack.entity or len(selected) >= 5)
     )
+    if depth_profile.use_plan and question_type in {"DIRECT", "FOLLOW_UP"} and depth_profile.depth in {
+        "medium", "detail", "why", "how", "compare", "list", "more"
+    }:
+        use_plan = True
     regenerations = 0
     coverage_info = None
     if use_plan:
         plan_type = "BROAD_TOPIC" if question_type == "BROAD_TOPIC" else "EXPLANATION"
-        covered = generate_from_plan(search_question, selected, plan_type)
+        t_gen = time.perf_counter()
+        covered = generate_from_plan(
+            search_question,
+            selected,
+            plan_type,
+            depth_profile=depth_profile,
+            previous_answer=previous_assistant(history) if (more and previous_task == "EXPLAIN") else "",
+        )
+        timings["T3_generate_ms"] = round((time.perf_counter() - t_gen) * 1000, 1)
         coverage_info = covered
         regenerations = 1 if covered.get("regenerated") else 0
         raw = covered.get("answer") or ""
@@ -341,6 +399,13 @@ def answer_question(
             coverage_info = covered
         raw = _strip_invented_pages(raw)
         raw = _apply_partial_refusals(rag_question, raw, selected)
+        if more and previous_task == "EXPLAIN":
+            prev = previous_assistant(history)
+            filtered = filter_new_sentences(raw, prev)
+            if filtered and len(filtered.split()) >= 40:
+                raw = filtered
+            if not raw.strip().lower().startswith("additional"):
+                raw = "Additional textbook points:\n\n" + raw
         raw = _decorate_student_answer(rag_question, raw, off_labels)
         sources = _sources(supporting_evidence(raw, selected, min_overlap=2))
         if not sources:
@@ -369,10 +434,15 @@ def answer_question(
             "type": "EXPLAIN",
             "topic": pack.entity or (pack.topics[0] if pack.topics else None),
             "entity": pack.entity,
+            "used_chunk_ids": [item.get("chunk_id") for item in selected if item.get("chunk_id")],
+            "depth": depth_profile.depth,
         }
+        result["depth"] = depth_profile.as_public()
+        timings["T8_total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        result["timings"] = timings
         return result
 
-    payload = _ask_llm(search_question, primary_selected, mode, strict=False, question_type=question_type)
+    payload = _ask_llm(search_question, primary_selected, mode, strict=False, question_type=question_type, depth_profile=depth_profile)
     regenerations = 0
     ok, reason = validate_answer(
         payload["raw"],
@@ -385,7 +455,7 @@ def answer_question(
     )
     if not ok:
         regenerations = 1
-        payload = _ask_llm(search_question, primary_selected, mode, strict=True, question_type=question_type)
+        payload = _ask_llm(search_question, primary_selected, mode, strict=True, question_type=question_type, depth_profile=depth_profile)
         ok, reason = validate_answer(
             payload["raw"],
             "en",
@@ -420,7 +490,12 @@ def answer_question(
                 "type": "EXPLAIN",
                 "topic": pack.entity or (pack.topics[0] if pack.topics else None),
                 "entity": pack.entity,
+                "used_chunk_ids": [item.get("chunk_id") for item in selected if item.get("chunk_id")],
+                "depth": depth_profile.depth,
             }
+            result["depth"] = depth_profile.as_public()
+            timings["T8_total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            result["timings"] = timings
             return result
         result = _unavailable(language, retrieval_query, primary_hits, selected, intent=intent, mode=mode)
         result["validation_reason"] = reason
@@ -453,7 +528,12 @@ def answer_question(
         "type": "EXPLAIN",
         "topic": pack.entity or (pack.topics[0] if pack.topics else None),
         "entity": pack.entity,
+        "used_chunk_ids": [item.get("chunk_id") for item in selected if item.get("chunk_id")],
+        "depth": depth_profile.depth,
     }
+    result["depth"] = depth_profile.as_public()
+    timings["T8_total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+    result["timings"] = timings
     return result
 
 
@@ -690,7 +770,7 @@ def _payload(
     }
 
 
-def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, question_type: str = "DIRECT") -> dict:
+def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, question_type: str = "DIRECT", depth_profile=None) -> dict:
     primary_blocks = _blocks(primary, "TEXTBOOK")
     extra = ""
     if strict:
@@ -714,6 +794,8 @@ def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, questi
         extra += "\nDo not write fiction or invented dialogue. State textbook facts only."
     if question_type == "EXAM":
         extra += "\nWrite short textbook-grounded practice questions and answers. Do not invent facts."
+    if depth_profile is not None:
+        extra += "\n" + depth_prompt_extra(depth_profile)
     if question_type == "BROAD_TOPIC":
         primary_blocks = _blocks(primary, "TEXTBOOK", max_chars=650)
         user = (
@@ -751,6 +833,8 @@ def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, questi
             "Do not add page numbers; the system will attach them."
         )
         max_tokens = 700
+    if depth_profile is not None:
+        max_tokens = max(max_tokens, int(getattr(depth_profile, "max_tokens", max_tokens) or max_tokens))
     raw = complete(
         [
             {"role": "system", "content": SYSTEM_PROMPT},

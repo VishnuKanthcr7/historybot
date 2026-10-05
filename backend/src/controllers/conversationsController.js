@@ -237,15 +237,20 @@ function encodeChunkIds(ids, task) {
   if (!task || typeof task !== "object") {
     return JSON.stringify(ids || []);
   }
+  const used = Array.isArray(task.used_chunk_ids) && task.used_chunk_ids.length
+    ? task.used_chunk_ids
+    : ids || [];
   return JSON.stringify({
     historybot_task: true,
-    ids: ids || [],
+    ids: used || [],
     type: task.type || null,
     topic: task.topic || null,
     entity: task.entity || null,
     count: task.count ?? null,
     fingerprints: Array.isArray(task.fingerprints) ? task.fingerprints.slice(0, 80) : [],
     generation_index: task.generation_index ?? null,
+    used_chunk_ids: (used || []).slice(0, 80),
+    depth: task.depth || null,
   });
 }
 
@@ -271,11 +276,18 @@ function decodeTask(value) {
     count: parsed.count ?? null,
     fingerprints: Array.isArray(parsed.fingerprints) ? parsed.fingerprints : [],
     generation_index: parsed.generation_index ?? null,
+    used_chunk_ids: Array.isArray(parsed.used_chunk_ids)
+      ? parsed.used_chunk_ids
+      : Array.isArray(parsed.ids)
+        ? parsed.ids
+        : [],
+    depth: parsed.depth || null,
   };
 }
 
 function collectTaskState(rows) {
   const fingerprints = [];
+  const usedChunkIds = [];
   let last = null;
   for (const row of rows) {
     const task = decodeTask(row.chunk_ids);
@@ -284,6 +296,7 @@ function collectTaskState(rows) {
     }
     last = task;
     fingerprints.push(...(task.fingerprints || []));
+    usedChunkIds.push(...(task.used_chunk_ids || []));
   }
   if (!last) {
     return null;
@@ -296,7 +309,15 @@ function collectTaskState(rows) {
       unique.push(item);
     }
   }
-  return { ...last, fingerprints: unique };
+  const usedUnique = [];
+  const usedSeen = new Set();
+  for (const item of usedChunkIds) {
+    if (item && !usedSeen.has(item)) {
+      usedSeen.add(item);
+      usedUnique.push(item);
+    }
+  }
+  return { ...last, fingerprints: unique, used_chunk_ids: usedUnique };
 }
 
 function parseSources(value) {

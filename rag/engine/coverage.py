@@ -573,7 +573,7 @@ def generate_entity_explanation(question: str, chunks: list[dict], entity: str |
                 {"role": "user", "content": user},
             ],
             temperature=0.1,
-            max_tokens=700,
+            max_tokens=900,
             timeout=90,
         )
         text = _clean_student_text((raw or "").strip(), title)
@@ -634,7 +634,7 @@ def generate_entity_explanation(question: str, chunks: list[dict], entity: str |
     }
 
 
-def generate_from_plan(question: str, chunks: list[dict], question_type: str) -> dict:
+def generate_from_plan(question: str, chunks: list[dict], question_type: str, depth_profile=None, previous_answer: str = "") -> dict:
     from rag.engine.pack import detect_entity
 
     entity = detect_entity(extract_topics(question))
@@ -654,6 +654,10 @@ def generate_from_plan(question: str, chunks: list[dict], question_type: str) ->
             )
         ]
     rich = question_type == "EXPLANATION" and len(plan) <= 2
+    if depth_profile is not None:
+        rich = bool(getattr(depth_profile, "full_facts", False)) or rich
+        if getattr(depth_profile, "coverage", "") == "high":
+            rich = True
     sections: list[tuple[CoverageGroup, str]] = []
     used_extractive = False
     for group in plan:
@@ -688,6 +692,13 @@ def generate_from_plan(question: str, chunks: list[dict], question_type: str) ->
         used_extractive = True
         score = coverage_score(answer, plan)
         score["grade"] = score["grade"] if score["generated"] else "FAIL"
+    if previous_answer and depth_profile is not None and getattr(depth_profile, "prefer_unused", False):
+        from rag.engine.depth import filter_new_sentences
+
+        filtered = filter_new_sentences(answer, previous_answer)
+        if filtered and len(filtered.split()) >= 35:
+            answer = filtered
+            score = coverage_score(answer, plan)
     return {
         "answer": answer,
         "plan": [group.as_public() for group in plan],

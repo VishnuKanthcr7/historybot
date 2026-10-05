@@ -107,7 +107,7 @@ def query(body: QueryRequest, x_internal_secret: str | None = Header(default=Non
         )
     except Exception:
         raise HTTPException(status_code=502, detail="RAG engine failed.")
-    return {
+    payload = {
         "answer": result.get("answer"),
         "language": result.get("language", language),
         "grounded": bool(result.get("grounded")),
@@ -116,6 +116,11 @@ def query(body: QueryRequest, x_internal_secret: str | None = Header(default=Non
         "mode": result.get("mode"),
         "task": result.get("task"),
     }
+    if result.get("depth"):
+        payload["depth"] = result.get("depth")
+    if result.get("timings"):
+        payload["timings"] = result.get("timings")
+    return payload
 
 
 @app.post("/internal/econtent")

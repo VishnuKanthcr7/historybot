@@ -122,10 +122,15 @@ def collect_task_state(history: list[dict] | None, incoming: dict | None = None)
         payload = item.get("task_state") or {}
         if not isinstance(payload, dict):
             continue
-        for key in ("type", "topic", "entity", "count", "generation_index"):
+        for key in ("type", "topic", "entity", "count", "generation_index", "depth"):
             if payload.get(key) not in (None, "", []):
                 last[key] = payload[key]
         fingerprints.extend(payload.get("fingerprints") or [])
+        for cid in payload.get("used_chunk_ids") or payload.get("ids") or []:
+            if cid:
+                last.setdefault("used_chunk_ids", [])
+                if cid not in last["used_chunk_ids"]:
+                    last["used_chunk_ids"].append(cid)
     seen: set[str] = set()
     unique: list[str] = []
     for item in fingerprints:
@@ -133,6 +138,14 @@ def collect_task_state(history: list[dict] | None, incoming: dict | None = None)
             seen.add(item)
             unique.append(item)
     last["fingerprints"] = unique
+    if "used_chunk_ids" in last:
+        seen_ids: set[str] = set()
+        ids: list[str] = []
+        for item in last["used_chunk_ids"]:
+            if item and item not in seen_ids:
+                seen_ids.add(item)
+                ids.append(item)
+        last["used_chunk_ids"] = ids
     return last
 
 

@@ -6,11 +6,11 @@ export default function EcontentPanel({ data, labels, language, onClose, onPdf, 
   const content = data.content || {};
   const citations = content.section_citations || {};
   return (
-    <aside className="max-h-[48vh] overflow-y-auto border-t border-rule bg-cream px-4 py-4 md:px-10">
+    <aside className="max-h-[52vh] overflow-y-auto border-t border-rule bg-cream px-4 py-4 md:px-10" aria-label={labels.econtent}>
       <div className="mx-auto flex max-w-2xl items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-brass">{labels.econtent}</p>
-          <h2 className="font-serif text-xl text-navy">{data.title}</h2>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brass">{labels.econtent}</p>
+          <h2 className="mt-1 font-serif text-xl text-navy sm:text-2xl">{data.title}</h2>
         </div>
         <div className="flex gap-2">
           {data.id ? (

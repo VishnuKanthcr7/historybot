@@ -66,13 +66,17 @@ export default function Chat() {
   const lastUser = [...messages].reverse().find((item) => item.role === "user");
 
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-paper text-ink">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-rule bg-cream px-3 py-2.5 md:px-4">
+    <div className="flex h-[100dvh] min-h-0 flex-col bg-paper font-sans text-ink">
+      <a href="#chat-main" className="skip-link">
+        Skip to chat
+      </a>
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-rule bg-cream/95 px-3 py-2.5 backdrop-blur md:px-5">
         <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
             className="min-h-10 border border-rule px-3 text-sm md:hidden"
             aria-label={menuOpen ? t.closeMenu : t.openMenu}
+            aria-expanded={menuOpen}
             onClick={() => setMenuOpen((v) => !v)}
           >
             {t.history}
@@ -80,12 +84,15 @@ export default function Chat() {
           <Link to="/" className="truncate font-serif text-xl text-navy">
             HistoryBot
           </Link>
+          <span className="hidden text-[10px] uppercase tracking-[0.16em] text-brass lg:inline">
+            Textbook tutor
+          </span>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
             onClick={handleNewChat}
-            className="min-h-10 border border-navy px-3 text-sm text-navy hover:bg-navy hover:text-cream"
+            className="min-h-10 border border-navy px-3 text-sm text-navy transition hover:bg-navy hover:text-cream"
           >
             {t.newChat}
           </button>
@@ -93,7 +100,8 @@ export default function Chat() {
             type="button"
             disabled={econtentLoading || !lastUser || loading}
             onClick={() => requestEcontent(lastUser?.content)}
-            className="min-h-10 border border-brass px-3 text-sm text-navy disabled:opacity-50"
+            className="min-h-10 border border-brass/70 bg-cream px-3 text-sm text-navy transition hover:border-brass disabled:opacity-50"
+            title={!lastUser ? "Ask a question first" : undefined}
           >
             {econtentLoading ? t.econtentWorking : t.makeEcontent}
           </button>
@@ -121,15 +129,31 @@ export default function Chat() {
           onClose={() => setMenuOpen(false)}
           labels={t}
         />
-        <section className="flex min-w-0 flex-1 flex-col">
+        <section id="chat-main" className="flex min-w-0 flex-1 flex-col bg-paper">
           {error ? (
-            <p className="mx-4 mt-3 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+            <p
+              className="mx-3 mt-3 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 md:mx-5"
+              role="alert"
+            >
               {error}
             </p>
           ) : null}
           {econtentLoading ? (
-            <p className="mx-4 mt-3 border border-brass/40 bg-cream px-3 py-2 text-sm text-navy" role="status">
+            <p
+              className="mx-3 mt-3 border border-brass/40 bg-cream px-3 py-2 text-sm text-navy md:mx-5"
+              role="status"
+              aria-live="polite"
+            >
               {t.econtentWait}
+            </p>
+          ) : null}
+          {loading ? (
+            <p
+              className="mx-3 mt-2 text-xs text-stone-500 md:mx-5"
+              role="status"
+              aria-live="polite"
+            >
+              Retrieving textbook evidence and drafting a grounded answer…
             </p>
           ) : null}
           <MessageList messages={messages} loading={loading} language={language} />

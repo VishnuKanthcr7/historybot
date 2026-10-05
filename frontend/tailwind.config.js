@@ -16,6 +16,9 @@ export default {
         serif: ['"Palatino Linotype"', "Palatino", "Georgia", "serif"],
         sans: ['"Segoe UI"', '"Noto Sans"', '"Noto Sans Kannada"', "sans-serif"],
       },
+      screens: {
+        xs: "375px",
+      },
     },
   },
   plugins: [],
