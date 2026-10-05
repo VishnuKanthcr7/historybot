@@ -115,10 +115,16 @@ export function AppProvider({ children }) {
       try {
         let conversationId = currentId;
         if (!conversationId) {
+          // newChat() resets messages for a blank thread; restore the optimistic
+          // user turn so lastUser stays available for "Make a learning module".
           conversationId = await newChat(question.slice(0, 80));
+          setMessages([userMsg]);
         }
         const result = await api.sendMessage(conversationId, sessionId, question, language);
-        setMessages((prev) => [...prev, result.message]);
+        setMessages((prev) => {
+          const withoutDup = prev.filter((m) => m.id !== userMsg.id);
+          return [...withoutDup, userMsg, result.message];
+        });
         await refreshList(sessionId);
       } catch (err) {
         setError(err.message || "Request failed.");

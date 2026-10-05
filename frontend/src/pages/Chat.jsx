@@ -44,12 +44,14 @@ export default function Chat() {
   }, [ready, params, send, setParams]);
 
   useEffect(() => {
-    if (!ready || restored.current || params.get("q")) return;
+    // Skip while a send is in flight: newChat() briefly clears messages and would
+    // race-reload an incomplete conversation, dropping the optimistic user turn.
+    if (!ready || restored.current || params.get("q") || loading) return;
     if (currentId && messages.length === 0) {
       restored.current = true;
       openConversation(currentId).catch(() => {});
     }
-  }, [ready, currentId, messages.length, openConversation, params]);
+  }, [ready, currentId, messages.length, openConversation, params, loading]);
 
   async function handleNewChat() {
     await newChat(t.newChat);
