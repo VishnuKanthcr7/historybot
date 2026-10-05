@@ -235,6 +235,8 @@ CLAIM_SKIP = {
     "towards",
     "different",
     "religions",
+    "page",
+    "pages",
 }
 
 
@@ -270,6 +272,7 @@ def unsupported_named_items(answer: str, evidence: list[dict]) -> list[str]:
             continue
         body_lines.append(line)
     text = "\n".join(body_lines)
+    text = re.sub(r"\[Pages?\s+[0-9,\s]+\]", " ", text)
     flagged: list[str] = []
 
     def add(item: str) -> None:

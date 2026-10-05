@@ -373,6 +373,10 @@ def build_evidence_pack(
         retrieved_pages=_pages(hits),
     )
 
+    if question_type == "FOLLOW_UP" and entity and not facet:
+        question_type = "EXPLANATION"
+        pack.question_type = "FOLLOW_UP"
+        pack.reasons.append("followup-entity-as-explanation")
     if question_type == "FOLLOW_UP" and facet == "administration" and entity:
         question_type = "EXPLANATION"
         pack.question_type = "FOLLOW_UP"
@@ -380,8 +384,8 @@ def build_evidence_pack(
 
     if question_type == "BROAD_TOPIC" and topics:
         family = dynasty_keys(topics)
-        if entity and entity in {"shivaji", "akbar", "babar", "bajirao"} and "mughal" not in topics and "maratha" not in topics:
-            mapped = chunks_for_topics({entity} | ({"guerilla"} if entity == "shivaji" else set()))
+        if entity and entity in RULER_KEYS and "mughal" not in topics and "maratha" not in topics and "ahom" not in topics:
+            mapped = chunks_for_topics({entity})
             mapped = filter_entity_chunks(mapped, entity, None)
             pack.reasons.append("broad-person-topic-map")
         else:
@@ -424,6 +428,18 @@ def build_evidence_pack(
 
     if question_type == "EXPLANATION":
         seed = select_evidence(question, retrieval_query, hits, max_keep=8)
+        if entity:
+            from rag.engine.entity import collect_entity_chunks
+
+            same = retrieve_same_pages(retrieval_query, [_page(item) for item in seed if _page(item) is not None])
+            same = [item for item in same if item.get("source_type") == "primary_textbook"]
+            kept, excluded = collect_entity_chunks(entity, extra=_merge(_merge(seed, same), hits))
+            pack.chunks = kept[:14]
+            pack.pages = _pages(pack.chunks)
+            pack.reasons.append("entity-complete-pack")
+            pack.reasons.append(f"excluded:{len(excluded)}")
+            pack.reasons.append(f"kept:{len(pack.chunks)}")
+            return pack
         same = retrieve_same_pages(retrieval_query, [_page(item) for item in seed if _page(item) is not None])
         same = [item for item in same if item.get("source_type") == "primary_textbook"]
         mapped = []

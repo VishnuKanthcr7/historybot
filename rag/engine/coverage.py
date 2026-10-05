@@ -66,7 +66,7 @@ PREFERRED_ORDER = (
 )
 
 LEADIN_RE = re.compile(
-    r"(?is)^(?:here(?:'s| is) (?:a short section(?: on [^.\n]+)?|what (?:the )?(?:class 9 )?textbook says[^\n]*)[.!]?\s*|"
+    r"(?is)^(?:here(?:'s| is) (?:a rewritten explanation[^\n]*|a short section(?: on [^.\n]+)?|what (?:the )?(?:class 9 )?textbook says[^\n]*)[.!]?\s*|"
     r"according to the (?:retrieved )?evidence(?: provided)?[,:]?\s*|"
     r"based on the retrieved evidence[,:]?\s*|"
     r"the (?:retrieved )?evidence (?:says|shows|provided)[,:]?\s*|"
@@ -270,9 +270,10 @@ def coverage_score(answer: str, plan: list[CoverageGroup]) -> dict:
     }
 
 
-def readable_extract(chunks: list[dict], limit: int = 3, max_words: int = 42) -> str:
+def readable_extract(chunks: list[dict], limit: int = 8, max_words: int = 90) -> str:
     sentences = []
     seen = set()
+    dangling = {"the", "of", "and", "to", "a", "an", "with", "for", "in"}
     for item in chunks:
         text = " ".join((item.get("text") or "").split())
         if looks_like_toc(text) or looks_like_map_chunk(text) or _spaced_ocr(text):
@@ -280,6 +281,8 @@ def readable_extract(chunks: list[dict], limit: int = 3, max_words: int = 42) ->
         for sent in re.split(r"(?<=[.!?])\s+", text):
             words = sent.split()
             if len(words) < 6 or len(words) > max_words:
+                continue
+            if words[-1].lower().strip(".,;:") in dangling:
                 continue
             key = sent[:60].lower()
             if key in seen:
@@ -414,7 +417,132 @@ def combine_sections(question: str, sections: list[tuple[CoverageGroup, str]]) -
     return "\n\n".join(parts)
 
 
+def _entity_title(entity: str | None) -> str:
+    if not entity:
+        return "Explanation"
+    return GROUP_TITLE.get(entity) or entity.replace("_", " ").title()
+
+
+def combine_entity_sections(entity: str | None, sections: list[tuple[CoverageGroup, str]]) -> str:
+    title = _entity_title(entity)
+    parts = [f"## {title}"]
+    used_pages = []
+    for group, body in sections:
+        body = _clean_student_text(body, group.title)
+        if not body:
+            continue
+        if not re.search(r"\[Page", body):
+            body = f"{body}{_page_label(group.pages)}"
+        parts.append(f"**{group.title}**\n\n{body}")
+        used_pages.extend(group.pages or [])
+    if len(parts) == 1:
+        return "The provided textbook does not give enough information to answer this fully."
+    return "\n\n".join(parts)
+
+
+def generate_entity_explanation(question: str, chunks: list[dict], entity: str | None) -> dict | None:
+    from rag.engine.entity import build_entity_plan, entity_readable
+    from rag.engine.pack import detect_entity
+
+    entity = entity or detect_entity(extract_topics(question))
+    if not entity:
+        return None
+    plan = build_entity_plan(question, chunks, entity)
+    if not plan:
+        return None
+    title = _entity_title(entity)
+    draft = combine_entity_sections(entity, [(group, entity_readable([group])) for group in plan])
+    extra = ""
+    if wants_easy_english(question) or re.search(
+        r"easy english|simple english|explain simply|class 9 student", question or "", re.I
+    ):
+        extra = (
+            " Write in very simple Class 9 English. Short sentences. "
+            "Easy English is only simpler wording; keep every fact from the draft."
+        )
+    user = (
+        f"Student question: {question}\n"
+        f"Rewrite the draft explanation of {title} in clear Class 9 English.{extra} "
+        "Do not drop facts, names, places, or events that appear in the draft. "
+        "Do not add names, dates, or events that are not in the draft. "
+        "Do not mention RAG, retrieval, chunks, or page numbers in the prose. "
+        "Keep the markdown headings.\n\n"
+        f"Draft (textbook-grounded, complete):\n{draft}"
+    )
+    used_extractive = False
+    try:
+        raw = complete(
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.1,
+            max_tokens=700,
+            timeout=90,
+        )
+        text = _clean_student_text((raw or "").strip(), title)
+    except (LlmError, TimeoutError, OSError):
+        text = ""
+    if not text or unsupported_named_items(text, chunks):
+        text = draft
+        used_extractive = True
+    score = coverage_score(text, plan)
+    draft_score = coverage_score(draft, plan)
+    regenerated = False
+    thin = len(text.split()) < max(70, int(len(draft.split()) * 0.55))
+    if score["missing"] or thin:
+        missing_groups = [group for group in plan if group.key in score["missing"]] or plan
+        regen_user = (
+            "Rewrite the Class 9 answer so it covers the missing textbook evidence below. "
+            "Keep simple English. Use ONLY this evidence plus the current answer. Do not add outside facts.\n\n"
+            f"Current answer:\n{text}\n\nMissing evidence:\n{entity_readable(missing_groups)}"
+        )
+        try:
+            extra_raw = complete(
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": regen_user},
+                ],
+                temperature=0.0,
+                max_tokens=700,
+                timeout=90,
+            )
+            extra_text = _clean_student_text((extra_raw or "").strip(), title)
+            if extra_text and not unsupported_named_items(extra_text, chunks):
+                text = extra_text
+                regenerated = True
+                score = coverage_score(text, plan)
+                thin = len(text.split()) < max(70, int(len(draft.split()) * 0.55))
+        except (LlmError, TimeoutError, OSError):
+            pass
+        if score["missing"] or thin:
+            text = draft
+            used_extractive = True
+            score = draft_score
+    if not re.search(r"\[Page", text):
+        pages = sorted({page for group in plan if group_covered(text, group) for page in (group.pages or [])})
+        if not pages:
+            pages = sorted({page for group in plan for page in (group.pages or [])})
+        if pages:
+            text = f"{text}{_page_label(pages)}"
+    return {
+        "answer": text,
+        "plan": [group.as_public() for group in plan],
+        "coverage": score,
+        "regenerated": regenerated,
+        "fallback_used": used_extractive,
+        "section_pages": {group.key: group.pages for group in plan if group_covered(text, group)},
+    }
+
+
 def generate_from_plan(question: str, chunks: list[dict], question_type: str) -> dict:
+    from rag.engine.pack import detect_entity
+
+    entity = detect_entity(extract_topics(question))
+    if question_type == "EXPLANATION" and entity:
+        entity_result = generate_entity_explanation(question, chunks, entity)
+        if entity_result:
+            return entity_result
     plan = filter_plan(question, build_coverage_plan(chunks))
     if question_type == "EXPLANATION" and len(plan) <= 1:
         plan = plan or [

@@ -278,7 +278,8 @@ def answer_question(
                 sources=sources,
             )
     use_plan = question_type in {"BROAD_TOPIC", "EXPLANATION"} or (
-        question_type == "FOLLOW_UP" and (pack.facet == "administration" or len(selected) >= 5)
+        question_type == "FOLLOW_UP"
+        and (pack.facet == "administration" or pack.entity or len(selected) >= 5)
     )
     regenerations = 0
     coverage_info = None
@@ -299,13 +300,28 @@ def answer_question(
         )
         claims = unsupported_named_items(raw, selected)
         if not ok:
-            from rag.engine.coverage import combine_sections, filter_plan, readable_extract, build_coverage_plan
-
-            plan = filter_plan(search_question, build_coverage_plan(selected))
-            raw = combine_sections(
-                search_question,
-                [(group, readable_extract(group.chunks)) for group in plan],
+            from rag.engine.coverage import (
+                combine_entity_sections,
+                combine_sections,
+                filter_plan,
+                readable_extract,
+                build_coverage_plan,
             )
+            from rag.engine.entity import build_entity_plan, entity_readable
+
+            entity_key = pack.entity or detect_entity(extract_topics(search_question))
+            entity_plan = build_entity_plan(search_question, selected, entity_key) if entity_key else []
+            if entity_plan:
+                raw = combine_entity_sections(
+                    entity_key,
+                    [(group, entity_readable([group])) for group in entity_plan],
+                )
+            else:
+                plan = filter_plan(search_question, build_coverage_plan(selected))
+                raw = combine_sections(
+                    search_question,
+                    [(group, readable_extract(group.chunks)) for group in plan],
+                )
             reason = f"{reason}+structured_fallback"
             claims = unsupported_named_items(raw, selected)
             covered["fallback_used"] = True
