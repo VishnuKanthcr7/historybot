@@ -65,6 +65,24 @@ def _fix_broken_joins(text: str) -> str:
         r"of \1. \1 \2",
         text,
     )
+    # Smashed "history/relationship ... and Name Verb" -> split or drop glue.
+    text = re.sub(
+        r"\b(history of|relationship between)\s+([^.]{3,60}?)\s+and\s+([A-Z][A-Za-z][A-Za-z.\s]{0,40}?)\s+(fought|defeated|conquered|imprisoned|declared|launched)\b",
+        r"\1 \2. \3 \4",
+        text,
+    )
+    # Strip leftover "Name :" prefixes mid-answer (OCR heading bleed).
+    text = re.sub(
+        r"(?:(?<=[.!?\s])|^)([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\s*:\s+(?=After\b|When\b|He\b|She\b|The\b)",
+        "",
+        text,
+    )
+    # Collapse duplicated "history of Name Verb" smash leftovers into "Name Verb".
+    text = re.sub(
+        r"\b(?:history of|story of|life of)\s+([A-Z][A-Za-z]+(?:\s+(?:[IVX]{1,4}|[A-Z][A-Za-z]+))?)\s+(emerged|was|were|became|launched|fought|declared|assumed|conquered|defeated|appointed|established|wrote|built)\b",
+        r"\1 \2",
+        text,
+    )
     return text
 
 

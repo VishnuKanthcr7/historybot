@@ -415,12 +415,23 @@ def build_evidence_pack(
         pack.chunks = diversify_by_page(combined, 12)
         pack.chunks = [item for item in pack.chunks if not ahom_primary_chunk(item)]
         if family == MUGHAL_FAMILY:
+            ensure_keys = ["babar", "akbar", "shahjahan", "aurangzeb"]
+            if "sher" in topics:
+                ensure_keys.insert(1, "sher")
             pack.chunks = fill_missing_rulers(
                 pack.chunks,
                 mapped,
-                ("babar", "sher", "akbar", "shahjahan", "aurangzeb"),
+                tuple(ensure_keys),
                 12,
             )
+            # Topic-bound: drop Sher Shah dominant chunks unless explicitly requested.
+            if "sher" not in topics:
+                pack.chunks = [
+                    item
+                    for item in pack.chunks
+                    if dominant_ruler(item.get("text") or "") != "sher"
+                    and "sher shah" not in (item.get("text") or "").lower()[:120]
+                ]
             pack.reasons.append("ensure-mughal-rulers")
         pack.pages = _pages(pack.chunks)
         pack.reasons.append(f"kept:{len(pack.chunks)}")

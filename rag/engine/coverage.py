@@ -430,7 +430,10 @@ def combine_entity_sections(entity: str | None, sections: list[tuple[CoverageGro
     used_pages = []
     for group, body in sections:
         body = _clean_student_text(body, group.title)
-        if not body:
+        body = sanitize_student_text(body)
+        # Page-only / blank sections become empty headings — omit them.
+        body_core = re.sub(r"\[Pages?\s+[0-9,\s]+\]", "", body or "", flags=re.I).strip()
+        if not body_core:
             continue
         if not re.search(r"\[Page", body):
             body = f"{body}{_page_label(group.pages)}"
@@ -439,6 +442,56 @@ def combine_entity_sections(entity: str | None, sections: list[tuple[CoverageGro
     if len(parts) == 1:
         return "The provided textbook does not give enough information to answer this fully."
     return "\n\n".join(parts)
+
+
+
+def _drop_empty_headings(text: str) -> str:
+    """Remove markdown section headings that have no real body (page-only or blank)."""
+    if not text:
+        return text or ""
+    blocks = re.split(r"\n\s*\n", text)
+    kept: list[str] = []
+    page_only = re.compile(r"^\[Pages?\s+[0-9,\s]+\]$", re.I)
+
+    def _is_heading_line(s: str) -> bool:
+        s = s.strip()
+        return s.startswith("## ") or (s.startswith("**") and s.endswith("**"))
+
+    def _block_has_body(block: str) -> bool:
+        for ln in block.splitlines():
+            s = ln.strip()
+            if not s:
+                continue
+            if _is_heading_line(s) or page_only.match(s):
+                continue
+            return True
+        return False
+
+    for block in blocks:
+        if not block.strip():
+            continue
+        lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+        if not lines:
+            continue
+        if all(_is_heading_line(ln) or page_only.match(ln) for ln in lines):
+            # keep ## title temporarily; drop empty **sections**
+            if lines[0].startswith("## "):
+                kept.append(block)
+            continue
+        kept.append(block)
+
+    final: list[str] = []
+    for idx, block in enumerate(kept):
+        lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+        if lines and lines[0].startswith("## ") and not _block_has_body(block):
+            # keep title only if a later block has body
+            if any(_block_has_body(later) for later in kept[idx + 1 :]):
+                final.append(block)
+            continue
+        if lines and _is_heading_line(lines[0]) and not _block_has_body(block):
+            continue
+        final.append(block)
+    return "\n\n".join(final).strip()
 
 
 def _filter_entity_sentences(text: str, entity: str | None) -> str:
@@ -564,6 +617,7 @@ def generate_entity_explanation(question: str, chunks: list[dict], entity: str |
             score = draft_score
     text = _filter_entity_sentences(text, entity)
     text = sanitize_student_text(text)
+    text = _drop_empty_headings(text)
     if not re.search(r"\[Page", text):
         pages = sorted({page for group in plan if group_covered(text, group) for page in (group.pages or [])})
         if not pages:

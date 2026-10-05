@@ -131,11 +131,105 @@ def heading_entity_key(text: str) -> str | None:
     return best_key
 
 
+
+def _other_ruler_keys(entity: str) -> set[str]:
+    return {key for key in RULER_KEYS if key != entity}
+
+
+def _alias_pattern(entity: str) -> str:
+    aliases = sorted(_aliases(entity), key=len, reverse=True)
+    if not aliases:
+        return re.escape(entity)
+    return "|".join(re.escape(alias) for alias in aliases)
+
+
+def _is_posthumous_bleed(text: str, entity: str) -> bool:
+    """True when the sentence is about events after the entity died (successor/next ruler)."""
+    if not text or not entity:
+        return False
+    low = text.lower()
+    pat = _alias_pattern(entity)
+    if re.search(rf"\bafter\s+(?:the\s+)?(?:death|demise)\s+of\s+(?:{pat})\b", low):
+        return True
+    if re.search(rf"\bafter\s+(?:{pat})\s+(?:died|was\s+killed|was\s+murdered|passed\s+away)\b", low):
+        return True
+    if re.search(rf"\bwhen\s+(?:{pat})\s+(?:died|passed\s+away|was\s+killed)\b", low):
+        return True
+    if re.search(rf"\b(?:following|upon)\s+(?:the\s+)?death\s+of\s+(?:{pat})\b", low):
+        return True
+    if re.search(rf"^(?:{pat})\s*:\s*after\s+", low):
+        return True
+    return False
+
+
+def _entity_object_only(text: str, entity: str) -> bool:
+    """Entity appears mainly as object (son of X / defeated X / imprisoned X), not as actor."""
+    if not text or not entity:
+        return False
+    low = " ".join(text.lower().split())
+    pat = _alias_pattern(entity)
+    objectish = re.search(
+        rf"\b(?:son of|daughter of|father of|mother of|defeated|imprisoned|killed|tortured|succeeded|successor of)\s+(?:{pat})\b",
+        low,
+    )
+    if not objectish:
+        return False
+    start = low[: max(0, objectish.start())]
+    if _mentions(start, entity) > 0:
+        return False
+    for other in _other_ruler_keys(entity):
+        if _mentions(start, other) > 0:
+            return True
+    if re.match(r"^(?:he|she|they)\b", low):
+        return True
+    return False
+
+
+def _looks_corrupt_sentence(text: str) -> bool:
+    """Drop smashed / OCR-corrupt fragments that invent wrong grammar."""
+    clean = re.sub(r"\s+", " ", text or "").strip()
+    if not clean:
+        return True
+    words = clean.split()
+    if len(words) < 5:
+        return True
+    if re.match(
+        r"^(?:[a-z]{1,3}|cting|i assembled|o power|eauty|rule in|was an|were \d|st famous|he Mughals)\b",
+        clean,
+    ):
+        return True
+    if re.search(
+        r"\b(?:relationship|between|history of)\b.*\band\s+[A-Z][A-Za-z].{0,40}\b(?:fought|defeated|conquered|imprisoned)\b",
+        clean,
+        re.I,
+    ):
+        return True
+    # "history of Akbar emerged" / glued name+verb after of
+    if re.search(
+        r"\b(?:history of|story of|life of)\s+[A-Z][A-Za-z]+(?:\s+(?:[IVX]{1,4}|[A-Z][A-Za-z]+))?\s+(emerged|was|were|became|launched|fought|declared|assumed|conquered|defeated|appointed|established|wrote|built)\b",
+        clean,
+    ):
+        return True
+    if re.search(r"do you know this", clean, re.I):
+        return True
+    if re.search(r"\bafter\s+[A-Z][A-Za-z][A-Za-z.\s]{0,24}died,\s+he\b", clean, re.I):
+        return True
+    if re.match(r"^[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s*:\s*", clean) and "after the death" in clean.lower():
+        return True
+    return False
+
+
 def entity_subject_score(text: str, entity: str) -> tuple[int, str]:
     from rag.engine.pack import dominant_ruler, ruler_counts
 
     if not text or not entity:
         return 0, "empty"
+    if _looks_corrupt_sentence(text):
+        return 0, "corrupt"
+    if _is_posthumous_bleed(text, entity):
+        return 0, "posthumous-bleed"
+    if _entity_object_only(text, entity):
+        return 0, "object-mention"
     mentions = _mentions(text, entity)
     if mentions <= 0:
         return 0, "no-mention"
@@ -242,16 +336,24 @@ def _entity_sentences(chunks: list[dict], entity: str) -> list[dict]:
                 continue
             for sent in re.split(r"(?<=[.!?])\s+", segment):
                 clean = re.sub(r"\s+", " ", sent).strip()
+                clean = re.sub(
+                    r"^(?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\s*:\s*",
+                    "",
+                    clean,
+                ).strip()
                 words = clean.split()
                 if len(words) < 5 or len(words) > 90:
                     continue
                 if words[-1].lower().strip(".,;:") in {"the", "of", "and", "to", "a", "an", "with", "for", "in"}:
                     continue
+                sent_score, sent_reason = entity_subject_score(clean, entity)
+                if sent_score < 3:
+                    continue
                 key = re.sub(r"[^a-z0-9]+", "", clean.lower())[:80]
                 if key in seen:
                     continue
                 seen.add(key)
-                rows.append({"text": clean, "page": page, "chunk": item, "reason": _reason})
+                rows.append({"text": clean, "page": page, "chunk": item, "reason": sent_reason})
     return rows
 
 
@@ -333,15 +435,27 @@ def entity_readable(groups: list) -> str:
     parts = []
     seen = set()
     for group in groups:
+        entity = None
+        if getattr(group, "key", None) and ":" in group.key:
+            entity = group.key.split(":", 1)[0]
         sentences = []
         for item in group.chunks:
             for sent in re.split(r"(?<=[.!?])\s+", item.get("text") or ""):
                 clean = re.sub(r"\s+", " ", sent).strip()
+                clean = re.sub(
+                    r"^(?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\s*:\s*",
+                    "",
+                    clean,
+                ).strip()
                 words = clean.split()
                 if len(words) < 5:
                     continue
                 if words[-1].lower().strip(".,;:") in dangling:
                     continue
+                if entity:
+                    score, _reason = entity_subject_score(clean, entity)
+                    if score < 3:
+                        continue
                 key = re.sub(r"[^a-z0-9]+", "", clean.lower())[:80]
                 if key in seen:
                     continue

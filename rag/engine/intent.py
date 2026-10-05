@@ -52,7 +52,7 @@ MCQ_REQUEST_RE = re.compile(
     re.I,
 )
 COUNT_RE = re.compile(
-    r"\b(\d+|ten|five|twenty|twelve|eight|six)\s+(?:mcqs?|multiple choice questions|questions)\b|"
+    r"\b(\d+|ten|five|twenty|twelve|eight|six)\s+(?:practice\s+)?(?:mcqs?|multiple choice questions|questions)\b|"
     r"\b(?:another|next)\s+(\d+|ten|five|twenty)\b",
     re.I,
 )

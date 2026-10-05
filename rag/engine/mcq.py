@@ -74,6 +74,62 @@ def _short(value: str, limit: int = 42) -> str:
     return value
 
 
+
+VACUOUS_STEMS = (
+    "who is the main person in the textbook account",
+    "which place is mentioned in the textbook section",
+    "which year is mentioned in the textbook section",
+    "which language is mentioned with",
+)
+
+
+def _is_vacuous_question(question: str) -> bool:
+    low = (question or "").lower().strip()
+    return any(stem in low for stem in VACUOUS_STEMS)
+
+
+def _stem_signature(question: str) -> str:
+    """Collapse near-duplicate stems (same fact asked two ways)."""
+    low = re.sub(r"[^a-z0-9]+", " ", (question or "").lower())
+    low = re.sub(r"\b(according to the textbook|in the textbook|of this kind)\b", " ", low)
+    low = re.sub(r"\s+", " ", low).strip()
+    if "language" in low and ("autobiography" in low or "wrote" in low or "write" in low):
+        return "lang-auto"
+    if "turkish" in low and "autobiography" in low:
+        return "lang-auto"
+    if "taj mahal" in low and ("memory" in low or ("built" in low and "who" in low)):
+        return "taj-builder-or-memory"
+    if "rohtas" in low or ("forts" in low and "construct" in low):
+        return "forts-construct"
+    return low[:72]
+
+
+def _topic_allowed_group(group, topics: set[str]) -> bool:
+    """Keep MCQ groups inside the asked topic family; no Sher bleed into Mughals."""
+    key = (group.key or "").split(":", 1)[0]
+    title = (group.title or "").lower()
+    if "sher" in key or "sher" in title:
+        return "sher" in topics
+    if topics & {"mughal"} and not (topics & {"maratha", "shivaji", "sambhaji", "bajirao"}):
+        mughal_ok = {
+            "mughal",
+            "babar",
+            "humayun",
+            "akbar",
+            "jahangir",
+            "shahjahan",
+            "aurangzeb",
+            "taj",
+            "din",
+            "mansab",
+            "administration",
+            "general",
+        }
+        if key and key not in mughal_ok and key in GROUP_TITLE:
+            return False
+    return True
+
+
 def _facts_from_group(group) -> list[McqFact]:
     title = group.title
     text = _group_text(group)
@@ -86,6 +142,13 @@ def _facts_from_group(group) -> list[McqFact]:
         answer = _short(answer)
         question = _clean(question)
         if not answer or not question or len(question) > 140:
+            return
+        if _is_vacuous_question(question):
+            return
+        if kind == "person" and answer.lower() == title.lower():
+            if "son of" in question.lower() or "daughter of" in question.lower():
+                return
+        if answer.lower() in {"this", "that", "these", "those", "king", "emperor", "ruler"}:
             return
         if any(item.question.lower() == question.lower() for item in facts):
             return
@@ -180,18 +243,16 @@ def _facts_from_group(group) -> list[McqFact]:
     match = re.search(r"title ([A-Z][A-Za-z]{3,20})", text)
     if match and match.group(1).lower() not in {"the", "this", "that"}:
         add(f"Which title is mentioned for {title} in the textbook?", match.group(1).strip(), "title")
-    for place in _places_in(text)[:2]:
-        add(f"Which place is mentioned in the textbook section on {title}?", place, "place")
     match = re.search(r"son of ([A-Z][A-Za-z. ]{2,32}?)(?:\.|\,| who| and)", text)
     if match:
-        add(f"According to the textbook, {title} was the son of whom?", match.group(1).strip(), "person")
+        parent = match.group(1).strip()
+        if parent.lower() != title.lower() and len(parent.split()) <= 5:
+            add(f"According to the textbook, {title} was the son of whom?", parent, "person")
     match = re.search(r"defeated ([A-Z][A-Za-z. ]{2,32}?)(?: in| at|\.|\,)", text)
     if match:
-        add(f"Whom did {title} defeat, according to the textbook?", match.group(1).strip(), "person")
-    years = YEAR_RE.findall(text)
-    if years:
-        add(f"Which year is mentioned in the textbook section on {title}?", years[0], "year")
-    add(f"Who is the main person in the textbook account of {title}?", title, "person")
+        foe = match.group(1).strip()
+        if foe.lower() != title.lower() and len(foe) <= 42:
+            add(f"Whom did {title} defeat, according to the textbook?", foe, "person")
     return facts
 
 
@@ -364,7 +425,11 @@ def mcqs_from_pack(
     previous_answer: str = "",
     previous_fingerprints: list[str] | None = None,
 ) -> tuple[str, list[str]]:
+    from rag.engine.classify import extract_topics
+
+    topics = extract_topics(question or "")
     plan = filter_plan(question, build_coverage_plan(chunks)) or build_coverage_plan(chunks)
+    plan = [group for group in plan if _topic_allowed_group(group, topics)]
     facts: list[McqFact] = []
     titles = []
     blob = ""
@@ -373,26 +438,38 @@ def mcqs_from_pack(
         titles.append(group.title)
         blob += " " + _group_text(group)
     scanned = _scan_pool(blob)
+    if topics & {"mughal"} and "sher" not in topics:
+        titles = [t for t in titles if "sher" not in t.lower()]
+        scanned["person"] = [p for p in scanned.get("person", []) if "sher" not in p.lower()]
     skip = set(previous_fingerprints or [])
     skip.update(fingerprints_from_answer(previous_answer))
     used_q = set()
+    used_sig = set()
     items = []
     for fact in _round_robin(facts):
         if len(items) >= count:
             break
+        if _is_vacuous_question(fact.question):
+            continue
         fp = fingerprint(fact.question, fact.answer)
         stem_key = re.sub(r"[^a-z0-9]+", "", fact.question.lower())
-        if fp in skip or fact.question.lower() in used_q or stem_key in used_q:
+        sig = _stem_signature(fact.question)
+        if fp in skip or fact.question.lower() in used_q or stem_key in used_q or sig in used_sig:
             continue
         distractors = _grounded_distractors(fact, facts, scanned, titles)
         options = _pad_options(fact.answer, distractors)
         if not options:
+            continue
+        if len({opt.strip().lower() for opt in options if opt and opt.strip()}) < 4:
+            continue
+        if any(not (opt or "").strip() for opt in options):
             continue
         rotate = len(items) % 4
         ordered = options[rotate:] + options[:rotate]
         if fact.answer not in ordered:
             continue
         letter = LETTERS[ordered.index(fact.answer)]
+        pages = [p for p in (fact.pages or []) if p is not None]
         items.append(
             {
                 "question": fact.question,
@@ -400,12 +477,13 @@ def mcqs_from_pack(
                 "answer_letter": letter,
                 "answer_text": fact.answer,
                 "fingerprint": fp,
-                "pages": fact.pages,
+                "pages": pages,
             }
         )
         skip.add(fp)
         used_q.add(fact.question.lower())
         used_q.add(stem_key)
+        used_sig.add(sig)
     fps = [item["fingerprint"] for item in items]
     if not items:
         if previous_fingerprints or previous_answer:
@@ -414,11 +492,15 @@ def mcqs_from_pack(
                 "of this kind without repeating earlier questions.",
                 [],
             )
-        return "", []
+        return (
+            "The prescribed textbook does not support enough unique practice questions "
+            "of this kind from the available evidence.",
+            [],
+        )
     body = format_mcqs(items)
     if len(items) < count:
         body += (
-            f"\n\nThe prescribed textbook supports {len(items)} unique practice questions of this kind. "
-            "No extra questions are added beyond the textbook."
+            f"\n\nThe prescribed textbook supports {len(items)} unique practice questions of this kind "
+            f"(requested {count}). No extra questions are added beyond the textbook."
         )
     return body, fps
