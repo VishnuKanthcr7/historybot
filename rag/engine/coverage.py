@@ -15,6 +15,7 @@ from rag.engine.topic_map import (
     dynasty_keys,
     looks_like_map_chunk,
 )
+from rag.engine.intent import wants_easy_english
 from rag.engine.validate import unsupported_named_items
 from rag.llm.client import LlmError, complete
 from rag.prompts.tutor import SYSTEM_PROMPT
@@ -210,6 +211,24 @@ def filter_plan(question: str, plan: list[CoverageGroup]) -> list[CoverageGroup]
     family = dynasty_keys(topics)
     bounded = [_bound_group(question, group) for group in plan]
     bounded = [group for group in bounded if group.chunks]
+    person_keys = {
+        "babar",
+        "akbar",
+        "shivaji",
+        "shahjahan",
+        "aurangzeb",
+        "bajirao",
+        "humayun",
+        "madhav",
+        "sher",
+        "balaji",
+    }
+    named = topics & person_keys
+    if len(named) == 1:
+        key = next(iter(named))
+        focused = [group for group in bounded if group.key == key]
+        if focused:
+            return focused
     if family == AHOM_FAMILY or "ahom" in topics:
         ahom_groups = [group for group in bounded if group.key == "ahom"]
         return ahom_groups or bounded
@@ -251,7 +270,7 @@ def coverage_score(answer: str, plan: list[CoverageGroup]) -> dict:
     }
 
 
-def readable_extract(chunks: list[dict], limit: int = 3) -> str:
+def readable_extract(chunks: list[dict], limit: int = 3, max_words: int = 42) -> str:
     sentences = []
     seen = set()
     for item in chunks:
@@ -260,7 +279,7 @@ def readable_extract(chunks: list[dict], limit: int = 3) -> str:
             continue
         for sent in re.split(r"(?<=[.!?])\s+", text):
             words = sent.split()
-            if len(words) < 8 or len(words) > 42:
+            if len(words) < 6 or len(words) > max_words:
                 continue
             key = sent[:60].lower()
             if key in seen:
@@ -274,31 +293,52 @@ def readable_extract(chunks: list[dict], limit: int = 3) -> str:
 
 def _focus_chunk_text(group: CoverageGroup, item: dict) -> str:
     text = item.get("text") or ""
-    if group.key == "aurangzeb":
-        match = re.search(r"aurangzeb", text, re.I)
-        if match and match.start() > 30:
-            text = text[match.start() :]
+    needles = [group.title] + [marker for marker in (group.markers or []) if len(marker) >= 4]
+    for needle in needles:
+        match = re.search(re.escape(needle), text, re.I)
+        if match and match.start() > 8:
+            return text[match.start() :]
     return text
 
 
-def generate_section(question: str, group: CoverageGroup, strict: bool = False) -> str:
+def generate_section(question: str, group: CoverageGroup, strict: bool = False, full_facts: bool = False) -> str:
+    chunk_limit = 8 if full_facts else 4
     blocks = []
-    for item in group.chunks[:4]:
+    for item in group.chunks[:chunk_limit]:
         page = _page(item)
-        text = " ".join(_focus_chunk_text(group, item).split())[:900]
+        text = " ".join(_focus_chunk_text(group, item).split())[:1100]
         blocks.append(f"[printed_page={page}]\n{text}")
     extra = " Use only names and dates that appear in the evidence." if strict else ""
+    if full_facts:
+        extra += (
+            " Use every distinct textbook fact in these passages. Write 6 to 12 short sentences. "
+            "Do not drop facts just to keep the answer short."
+        )
+        sentence_line = ""
+    else:
+        sentence_line = " 4 to 8 short sentences."
+    if wants_easy_english(question) or re.search(
+        r"easy english|simple english|explain simply|class 9 student", question or "", re.I
+    ):
+        extra += (
+            " Use very simple Class 9 English and short sentences. "
+            "Easy English is a style change only; keep the same facts."
+        )
     user = (
         f"Student question: {question}\n"
         f"Write a short Class 9 tutor section titled {group.title}. "
         f"Start with a natural sentence about {group.title}. "
+        f"Write only about {group.title}. "
+        f"Do not begin with a neighbouring person unless that person is needed to explain {group.title}. "
         "Do not write phrases such as 'according to the evidence', 'based on the retrieved evidence', "
         "'the evidence says', 'the chunks show', or 'here is a short section'. "
         "Do not mention RAG, retrieval, Chroma, chunks, models, or page numbers. "
-        f"Use ONLY the textbook passages below. 4 to 8 short sentences.{extra}\n"
+        f"Use ONLY the textbook passages below.{sentence_line}{extra}\n"
         "Do not mention people who are not in these passages.\n\n"
         f"Textbook passages:\n{chr(10).join(blocks)}"
     )
+    extract_limit = 10 if full_facts else 3
+    extract_words = 80 if full_facts else 42
     try:
         raw = complete(
             [
@@ -306,11 +346,11 @@ def generate_section(question: str, group: CoverageGroup, strict: bool = False) 
                 {"role": "user", "content": user},
             ],
             temperature=0.0 if strict else 0.1,
-            max_tokens=280,
+            max_tokens=520 if full_facts else 280,
             timeout=90,
         )
     except (LlmError, TimeoutError, OSError):
-        return readable_extract(group.chunks)
+        return readable_extract(group.chunks, limit=extract_limit, max_words=extract_words)
     text = (raw or "").strip()
     if unsupported_named_items(text, group.chunks):
         try:
@@ -320,15 +360,19 @@ def generate_section(question: str, group: CoverageGroup, strict: bool = False) 
                     {"role": "user", "content": user + "\nSTRICT: omit any name not in the evidence."},
                 ],
                 temperature=0.0,
-                max_tokens=240,
+                max_tokens=400 if full_facts else 240,
                 timeout=90,
             )
             text = (raw or "").strip()
         except (LlmError, TimeoutError, OSError):
             text = ""
         if not text or unsupported_named_items(text, group.chunks):
-            return readable_extract(group.chunks)
-    return _clean_student_text(text, group.title)
+            return readable_extract(group.chunks, limit=extract_limit, max_words=extract_words)
+    packed = readable_extract(group.chunks, limit=extract_limit, max_words=extract_words)
+    cleaned = _clean_student_text(text, group.title)
+    if full_facts and packed and len(cleaned.split()) < max(55, int(len(packed.split()) * 0.45)):
+        return packed
+    return cleaned
 
 
 def _clean_student_text(text: str, title: str | None = None) -> str:
@@ -346,6 +390,15 @@ def _clean_student_text(text: str, title: str | None = None) -> str:
     return cleaned.strip()
 
 
+def _page_label(pages: list) -> str:
+    values = sorted({int(page) for page in pages if page is not None})
+    if not values:
+        return ""
+    if len(values) == 1:
+        return f" [Page {values[0]}]"
+    return f" [Pages {', '.join(str(page) for page in values)}]"
+
+
 def combine_sections(question: str, sections: list[tuple[CoverageGroup, str]]) -> str:
     del question
     parts = []
@@ -353,6 +406,8 @@ def combine_sections(question: str, sections: list[tuple[CoverageGroup, str]]) -
         body = _clean_student_text(body, group.title)
         if not body:
             continue
+        if not re.search(r"\[Page", body):
+            body = f"{body}{_page_label(group.pages)}"
         parts.append(f"## {group.title}\n\n{body}")
     if not parts:
         return "The provided textbook does not give enough information to answer this fully."
@@ -371,11 +426,12 @@ def generate_from_plan(question: str, chunks: list[dict], question_type: str) ->
                 markers=[],
             )
         ]
+    rich = question_type == "EXPLANATION" and len(plan) <= 2
     sections: list[tuple[CoverageGroup, str]] = []
     used_extractive = False
     for group in plan:
-        body = generate_section(question, group)
-        if body == readable_extract(group.chunks):
+        body = generate_section(question, group, full_facts=rich)
+        if body == readable_extract(group.chunks, limit=8 if rich else 3):
             used_extractive = True
         sections.append((group, body))
     answer = combine_sections(question, sections)
@@ -387,7 +443,7 @@ def generate_from_plan(question: str, chunks: list[dict], question_type: str) ->
         rebuilt = []
         for group, body in sections:
             if group.key in score["missing"]:
-                extra = generate_section(question, group, strict=True)
+                extra = generate_section(question, group, strict=True, full_facts=rich)
                 if not group_covered(extra, group):
                     extra = readable_extract(group.chunks) or extra
                     used_extractive = True

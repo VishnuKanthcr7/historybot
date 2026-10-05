@@ -423,7 +423,7 @@ def build_evidence_pack(
         return pack
 
     if question_type == "EXPLANATION":
-        seed = select_evidence(question, retrieval_query, hits, max_keep=5)
+        seed = select_evidence(question, retrieval_query, hits, max_keep=8)
         same = retrieve_same_pages(retrieval_query, [_page(item) for item in seed if _page(item) is not None])
         same = [item for item in same if item.get("source_type") == "primary_textbook"]
         mapped = []
@@ -476,7 +476,7 @@ def build_evidence_pack(
             and not ahom_primary_chunk(item)
             and ((_page(item) or 99) > 1 or "ahom" in (item.get("topics") or []))
         ]
-        pack.chunks = diversify_by_page(combined, 10)
+        pack.chunks = diversify_by_page(combined, 12)
         pack.pages = _pages(pack.chunks)
         pack.reasons.append("explanation-section")
         return pack

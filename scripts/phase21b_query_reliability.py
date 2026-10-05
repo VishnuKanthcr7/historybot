@@ -188,7 +188,7 @@ def main() -> None:
             row["reasons"].append("missing-phrase")
             if row["verdict"] == "PASS":
                 row["verdict"] = "PARTIAL"
-        first_cache[case["id"]] = {"q": case["q"], "a": result.get("answer") or ""}
+        first_cache[case["id"]] = {"q": case["q"], "a": result.get("answer") or "", "task": result.get("task")}
         results[case["id"]] = row
         log(" " + row["verdict"] + " t=" + str(row["generation_time"]) + " " + str(row["reasons"]))
 
@@ -199,7 +199,12 @@ def main() -> None:
             continue
         log(case["id"] + " " + case["q"])
         start = time.perf_counter()
-        result = answer_question(case["q"], "en", history=history_pair(prev["q"], prev["a"]))
+        result = answer_question(
+            case["q"],
+            "en",
+            history=history_pair(prev["q"], prev["a"]),
+            task_state=prev.get("task"),
+        )
         row = grade(case, result, time.perf_counter() - start)
         results[case["id"]] = row
         log(" " + row["verdict"] + " t=" + str(row["generation_time"]) + " " + str(row["reasons"]))

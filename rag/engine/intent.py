@@ -43,7 +43,8 @@ EASY_ENGLISH_RE = re.compile(
 MORE_TASK_RE = re.compile(
     r"^(more|continue|go on|next|another one|anything else|tell me more|"
     r"give me more|more details|go deeper|more questions|more mcqs|"
-    r"more questions like these|another 10|another ten|give me more questions)\??$",
+    r"more questions like these|another 10|another ten|give me more questions|"
+    r"next 10|next ten|give me another set|another set)\??$",
     re.I,
 )
 MCQ_REQUEST_RE = re.compile(
@@ -51,7 +52,8 @@ MCQ_REQUEST_RE = re.compile(
     re.I,
 )
 COUNT_RE = re.compile(
-    r"\b(\d+|ten|five|twenty|twelve|eight|six)\s+(?:mcqs?|multiple choice questions|questions)\b",
+    r"\b(\d+|ten|five|twenty|twelve|eight|six)\s+(?:mcqs?|multiple choice questions|questions)\b|"
+    r"\b(?:another|next)\s+(\d+|ten|five|twenty)\b",
     re.I,
 )
 WORD_COUNTS = {
@@ -98,12 +100,12 @@ def requested_item_count(question: str, default: int = 10) -> int:
         if re.search(r"\bten\b", question or "", re.I) and looks_like_mcq_request(question or ""):
             return 10
         return default
-    raw = match.group(1).lower()
+    raw = (match.group(1) or match.group(2) or "").lower()
     if raw.isdigit():
         value = int(raw)
     else:
         value = WORD_COUNTS.get(raw, default)
-    return max(3, min(value, 12))
+    return max(3, min(value, 20))
 
 
 def previous_assistant(history: list[dict] | None) -> str:
@@ -113,12 +115,36 @@ def previous_assistant(history: list[dict] | None) -> str:
     return ""
 
 
-def infer_previous_task(history: list[dict] | None) -> str | None:
+def collect_task_state(history: list[dict] | None, incoming: dict | None = None) -> dict:
+    last = dict(incoming or {})
+    fingerprints: list[str] = list(last.get("fingerprints") or [])
+    for item in history or []:
+        payload = item.get("task_state") or {}
+        if not isinstance(payload, dict):
+            continue
+        for key in ("type", "topic", "entity", "count", "generation_index"):
+            if payload.get(key) not in (None, "", []):
+                last[key] = payload[key]
+        fingerprints.extend(payload.get("fingerprints") or [])
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in fingerprints:
+        if item and item not in seen:
+            seen.add(item)
+            unique.append(item)
+    last["fingerprints"] = unique
+    return last
+
+
+def infer_previous_task(history: list[dict] | None, task_state: dict | None = None) -> str | None:
+    collected = collect_task_state(history, task_state)
+    if collected.get("type") in {"MCQ", "EXPLAIN"}:
+        return collected["type"]
     previous = last_user_question(history)
     assistant = previous_assistant(history)
     if looks_like_mcq_request(previous) or looks_like_mcq_answer(assistant):
         return "MCQ"
-    if extract_topics(previous):
+    if extract_topics(previous) or collected.get("entity") or collected.get("topic"):
         return "EXPLAIN"
     return None
 

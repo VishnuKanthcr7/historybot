@@ -32,12 +32,14 @@ app = FastAPI(title="HistoryBot internal RAG", docs_url=None, redoc_url=None, op
 class HistoryItem(BaseModel):
     role: str
     content: str
+    task_state: dict | None = None
 
 
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     language: str = "en"
     conversation_history: list[HistoryItem] = Field(default_factory=list)
+    task_state: dict | None = None
 
 
 class EcontentRequest(BaseModel):
@@ -93,9 +95,16 @@ def health(x_internal_secret: str | None = Header(default=None)):
 def query(body: QueryRequest, x_internal_secret: str | None = Header(default=None)):
     _authorize(x_internal_secret)
     language = "kn" if body.language == "kn" else "en"
-    history = [{"role": item.role, "content": item.content} for item in body.conversation_history]
+    history = []
+    for item in body.conversation_history:
+        row = {"role": item.role, "content": item.content}
+        if item.task_state:
+            row["task_state"] = item.task_state
+        history.append(row)
     try:
-        result = answer_question(body.question, language=language, history=history)
+        result = answer_question(
+            body.question, language=language, history=history, task_state=body.task_state
+        )
     except Exception:
         raise HTTPException(status_code=502, detail="RAG engine failed.")
     return {
@@ -105,6 +114,7 @@ def query(body: QueryRequest, x_internal_secret: str | None = Header(default=Non
         "sources": _public_sources(result),
         "intent": result.get("intent"),
         "mode": result.get("mode"),
+        "task": result.get("task"),
     }
 
 

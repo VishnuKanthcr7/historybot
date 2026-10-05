@@ -33,6 +33,7 @@ export async function findVerifiedImages(question, answer) {
 }
 
 function namedPerson(text) {
+  if (/\bbaji\s*rao\b|\bbajirao\b/.test(text)) return "bajirao";
   if (/\bshivaji\b/.test(text)) return "shivaji";
   if (/\bbabur\b|\bbabar\b/.test(text)) return "babur";
   if (/\bakbar\b/.test(text)) return "akbar";
@@ -54,6 +55,10 @@ function matchesTopic(question, answer, blob, row) {
   if (person === "akbar" || topic.includes("akbar")) {
     if (asked && asked !== "akbar") return false;
     return /\bakbar\b/.test(asked ? question : answer) || (/\bmughals?\b/.test(question) && /\bakbar\b/.test(answer));
+  }
+  if (person === "bajirao" || topic.includes("baji")) {
+    if (asked && asked !== "bajirao") return false;
+    return /\bbaji\s*rao\b|\bbajirao\b/.test(asked ? question : blob);
   }
   if (person === "shivaji" || topic.includes("maratha")) {
     if (asked && asked !== "shivaji") return false;

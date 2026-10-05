@@ -18,6 +18,7 @@ from rag.engine.classify import (
 )
 from rag.engine.evidence import evidence_is_sufficient, evidence_matches_topic, overlap_count
 from rag.engine.intent import (
+    collect_task_state,
     entity_focus_query,
     infer_previous_task,
     is_more_followup,
@@ -80,6 +81,7 @@ def answer_question(
     question: str,
     language: str = "en",
     history: list[dict] | None = None,
+    task_state: dict | None = None,
 ) -> dict:
     language = "kn" if language == "kn" else "en"
     question = normalize_question(question)
@@ -125,14 +127,20 @@ def answer_question(
     if _asks_outside_textbook(rag_question):
         return _outside_textbook(language, rag_question)
     search_question = _strip_off_domain(rag_question) or rag_question
-    previous_task = infer_previous_task(history)
+    stored_task = collect_task_state(history, task_state)
+    previous_task = infer_previous_task(history, stored_task)
     more = is_more_followup(search_question) or is_more_followup(rag_question)
     if more and previous_task == "MCQ":
-        search_question = last_user_question(history) or search_question
+        previous = last_user_question(history)
+        search_question = previous or search_question
+        if not extract_topics(search_question):
+            if stored_task.get("entity") and stored_task["entity"] in TOPIC_ALIASES:
+                search_question = f"mcqs about {TOPIC_ALIASES[stored_task['entity']][0]}"
+            elif stored_task.get("topic"):
+                search_question = f"mcqs about {stored_task['topic']}"
         mode = "DETAILED"
         intent = "FOLLOW_UP"
         question_type = "EXAM"
-        previous = last_user_question(history)
         retrieval_query = entity_focus_query(
             detect_entity(extract_topics(search_question)),
             extract_topics(search_question),
@@ -141,10 +149,16 @@ def answer_question(
     elif more and previous_task == "EXPLAIN":
         previous = last_user_question(history)
         labels = [TOPIC_ALIASES[key][0] for key in extract_topics(previous) if key in TOPIC_ALIASES]
+        if not labels and stored_task.get("entity") and stored_task["entity"] in TOPIC_ALIASES:
+            labels = [TOPIC_ALIASES[stored_task["entity"]][0]]
+        elif not labels and stored_task.get("topic"):
+            labels = [str(stored_task["topic"])]
         search_question = f"tell me more about {' '.join(labels)}" if labels else search_question
         mode = classify_answer_mode(search_question)
         intent = "FOLLOW_UP"
         question_type = classify_question_type(search_question, None)
+        if detect_entity(extract_topics(search_question)):
+            question_type = "EXPLANATION"
         retrieval_query = entity_focus_query(
             detect_entity(extract_topics(search_question)),
             extract_topics(search_question),
@@ -204,12 +218,15 @@ def answer_question(
             more and previous_task == "MCQ"
         )
         if mcq_turn:
-            count = requested_item_count(search_question if looks_like_mcq_request(search_question) else rag_question)
-            exam = mcqs_from_pack(
+            count_source = rag_question if looks_like_mcq_request(rag_question) else search_question
+            default_count = int(stored_task.get("count") or 10) if more else 10
+            count = requested_item_count(count_source, default=default_count)
+            exam, fingerprints = mcqs_from_pack(
                 search_question,
                 selected,
                 count=count,
                 previous_answer=previous_assistant(history) if more else "",
+                previous_fingerprints=stored_task.get("fingerprints") if more else [],
             )
             if exam:
                 sources = _sources(supporting_evidence(exam, selected, min_overlap=2))
@@ -230,7 +247,14 @@ def answer_question(
                     fallback=False,
                     sources=sources,
                 )
-                result["task"] = "MCQ"
+                result["task"] = {
+                    "type": "MCQ",
+                    "topic": pack.entity or (pack.topics[0] if pack.topics else None),
+                    "entity": pack.entity,
+                    "count": count,
+                    "fingerprints": fingerprints,
+                    "generation_index": int(stored_task.get("generation_index") or 0) + len(fingerprints),
+                }
                 return result
             return _unavailable(language, retrieval_query, primary_hits, selected, intent=intent, mode=mode)
         exam = _exam_from_pack(search_question, selected)
@@ -292,8 +316,11 @@ def answer_question(
         sources = _sources(supporting_evidence(raw, selected, min_overlap=2))
         if not sources:
             sources = _sources(supporting_evidence(raw, selected, min_overlap=1))
-        answer = f"{raw}\n\n{_citation_block(sources)}"
-        return _payload(
+        if re.search(r"\[Page", raw):
+            answer = raw
+        else:
+            answer = f"{raw}\n\n{_citation_block(sources)}"
+        result = _payload(
             answer,
             language,
             retrieval_query,
@@ -309,6 +336,12 @@ def answer_question(
             coverage=coverage_info,
             sources=sources,
         )
+        result["task"] = {
+            "type": "EXPLAIN",
+            "topic": pack.entity or (pack.topics[0] if pack.topics else None),
+            "entity": pack.entity,
+        }
+        return result
 
     payload = _ask_llm(search_question, primary_selected, mode, strict=False, question_type=question_type)
     regenerations = 0
@@ -340,7 +373,7 @@ def answer_question(
             reason = f"{reason}+extractive_fallback"
             sources = _sources(supporting_evidence(raw, selected, min_overlap=1))
             answer = f"{_decorate_student_answer(rag_question, raw, off_labels)}\n\n{_citation_block(sources)}"
-            return _payload(
+            result = _payload(
                 answer,
                 language,
                 retrieval_query,
@@ -354,6 +387,12 @@ def answer_question(
                 pack,
                 fallback=True,
             )
+            result["task"] = {
+                "type": "EXPLAIN",
+                "topic": pack.entity or (pack.topics[0] if pack.topics else None),
+                "entity": pack.entity,
+            }
+            return result
         result = _unavailable(language, retrieval_query, primary_hits, selected, intent=intent, mode=mode)
         result["validation_reason"] = reason
         result["regeneration_count"] = regenerations
@@ -367,7 +406,7 @@ def answer_question(
     raw = _decorate_student_answer(rag_question, raw, off_labels)
     sources = _sources(supporting_evidence(raw, selected, min_overlap=1 if mode == "DETAILED" else 2))
     answer = f"{raw}\n\n{_citation_block(sources)}"
-    return _payload(
+    result = _payload(
         answer,
         language,
         retrieval_query,
@@ -377,10 +416,16 @@ def answer_question(
         intent,
         mode,
         regenerations,
-        [],
+        claims,
         pack,
         fallback=False,
     )
+    result["task"] = {
+        "type": "EXPLAIN",
+        "topic": pack.entity or (pack.topics[0] if pack.topics else None),
+        "entity": pack.entity,
+    }
+    return result
 
 
 def _looks_limited(question: str) -> bool:

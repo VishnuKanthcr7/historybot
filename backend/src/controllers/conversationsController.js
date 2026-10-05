@@ -139,7 +139,7 @@ export async function postMessage(req, res, next) {
       language,
     });
 
-    const history = await loadHistory(conversation.id, userId);
+    const { history, taskState } = await loadHistory(conversation.id, userId);
     if (!conversation.title || /^new chat$/i.test(conversation.title) || conversation.title === "ಹೊಸ ಚಾಟ್") {
       await pool.query("UPDATE conversations SET title = ?, updated_at = UTC_TIMESTAMP(3) WHERE id = ?", [
         body.message.slice(0, 80),
@@ -150,6 +150,7 @@ export async function postMessage(req, res, next) {
       question: body.message,
       language,
       conversationHistory: history,
+      taskState,
     });
 
     const assistantId = newId();
@@ -166,7 +167,7 @@ export async function postMessage(req, res, next) {
         rag.answer,
         rag.language,
         JSON.stringify(publicSourceList),
-        JSON.stringify(chunkIds),
+        encodeChunkIds(chunkIds, rag.task),
         rag.grounded ? 1 : 0,
       ]
     );
@@ -202,7 +203,7 @@ export async function postMessage(req, res, next) {
 
 async function loadHistory(conversationId, excludeUserId) {
   const [rows] = await pool.query(
-    `SELECT id, role, content FROM messages
+    `SELECT id, role, content, chunk_ids FROM messages
      WHERE conversation_id = ? AND id <> ?
      ORDER BY created_at DESC
      LIMIT 16`,
@@ -212,12 +213,84 @@ async function loadHistory(conversationId, excludeUserId) {
   const users = chronological.filter((row) => row.role === "user").slice(-4);
   const assistants = chronological.filter((row) => row.role === "assistant").slice(-4);
   const allowed = new Set([...users, ...assistants].map((row) => row.id));
-  return chronological
-    .filter((row) => allowed.has(row.id))
-    .map((row) => ({
+  const kept = chronological.filter((row) => allowed.has(row.id));
+  const taskState = collectTaskState(kept);
+  const history = kept.map((row) => {
+    const task = decodeTask(row.chunk_ids);
+    const raw = String(row.content || "");
+    return {
       role: row.role,
-      content: String(row.content || "").slice(0, 2000),
-    }));
+      content: task?.type === "MCQ" ? raw : raw.slice(0, 2000),
+      ...(task ? { task_state: task } : {}),
+    };
+  });
+  return { history, taskState };
+}
+
+function encodeChunkIds(ids, task) {
+  if (!task || typeof task !== "object") {
+    return JSON.stringify(ids || []);
+  }
+  return JSON.stringify({
+    historybot_task: true,
+    ids: ids || [],
+    type: task.type || null,
+    topic: task.topic || null,
+    entity: task.entity || null,
+    count: task.count ?? null,
+    fingerprints: Array.isArray(task.fingerprints) ? task.fingerprints.slice(0, 80) : [],
+    generation_index: task.generation_index ?? null,
+  });
+}
+
+function decodeTask(value) {
+  if (!value) {
+    return null;
+  }
+  let parsed = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || Array.isArray(parsed) || !parsed.historybot_task) {
+    return null;
+  }
+  return {
+    type: parsed.type || null,
+    topic: parsed.topic || null,
+    entity: parsed.entity || null,
+    count: parsed.count ?? null,
+    fingerprints: Array.isArray(parsed.fingerprints) ? parsed.fingerprints : [],
+    generation_index: parsed.generation_index ?? null,
+  };
+}
+
+function collectTaskState(rows) {
+  const fingerprints = [];
+  let last = null;
+  for (const row of rows) {
+    const task = decodeTask(row.chunk_ids);
+    if (!task) {
+      continue;
+    }
+    last = task;
+    fingerprints.push(...(task.fingerprints || []));
+  }
+  if (!last) {
+    return null;
+  }
+  const unique = [];
+  const seen = new Set();
+  for (const item of fingerprints) {
+    if (item && !seen.has(item)) {
+      seen.add(item);
+      unique.push(item);
+    }
+  }
+  return { ...last, fingerprints: unique };
 }
 
 function parseSources(value) {

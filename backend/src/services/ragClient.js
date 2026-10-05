@@ -38,13 +38,14 @@ async function ragFetch(path, body, timeoutMs) {
   }
 }
 
-export async function queryRag({ question, language, conversationHistory }) {
+export async function queryRag({ question, language, conversationHistory, taskState }) {
   const payload = await ragFetch(
     "/internal/query",
     {
       question,
       language,
       conversation_history: conversationHistory,
+      task_state: taskState || null,
     },
     config.rag.timeoutMs
   );
@@ -54,6 +55,7 @@ export async function queryRag({ question, language, conversationHistory }) {
     grounded: Boolean(payload.grounded),
     sources: Array.isArray(payload.sources) ? payload.sources : [],
     intent: payload.intent || null,
+    task: payload.task || null,
   };
 }
 

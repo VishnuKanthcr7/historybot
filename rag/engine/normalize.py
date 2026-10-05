@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from rag.engine.intent import looks_like_mcq_answer
 from rag.llm.client import complete
 from rag.llm.config import MAX_HISTORY_TURNS, MAX_MESSAGE_CHARS
 from rag.prompts.tutor import REWRITE_PROMPT
@@ -106,7 +107,11 @@ def trim_history(history: list[dict] | None) -> list[dict]:
         role = item.get("role")
         content = normalize_question(str(item.get("content") or ""))
         if role in {"user", "assistant"} and content:
-            cleaned.append({"role": role, "content": content[:MAX_MESSAGE_CHARS]})
+            keep = content if (role == "assistant" and looks_like_mcq_answer(content)) else content[:MAX_MESSAGE_CHARS]
+            row = {"role": role, "content": keep}
+            if item.get("task_state"):
+                row["task_state"] = item["task_state"]
+            cleaned.append(row)
     users = [item for item in cleaned if item["role"] == "user"][-MAX_HISTORY_TURNS:]
     assistants = [item for item in cleaned if item["role"] == "assistant"][-MAX_HISTORY_TURNS:]
     # keep chronological order of the last 8 related messages

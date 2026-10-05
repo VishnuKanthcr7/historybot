@@ -176,7 +176,8 @@ FOLLOW_SHORT_RE = re.compile(
     r"^(tell me more|explain more|give me more( details)?|what else|continue|"
     r"go deeper|more|why|how|and then|what happened after that|"
     r"more questions|more mcqs|go on|next|another one|anything else|"
-    r"another 10|another ten|give me more questions)\??$",
+    r"another 10|another ten|give me more questions|"
+    r"next 10|next ten|give me another set|another set)\??$",
     re.I,
 )
 OFF_DOMAIN_RE = re.compile(
@@ -301,7 +302,18 @@ def classify_question_type(question: str, intent: str | None = None) -> str:
         if dynasty_only:
             return "BROAD_TOPIC"
         if EXPLAIN_RE.search(text) or "tell me more" in lowered:
-            return "EXPLANATION" if has_admin or EXPLAIN_RE.search(text) else "BROAD_TOPIC"
+            person = topics & {
+                "babar",
+                "akbar",
+                "shivaji",
+                "shahjahan",
+                "aurangzeb",
+                "bajirao",
+                "humayun",
+                "madhav",
+                "sher",
+            }
+            return "EXPLANATION" if has_admin or EXPLAIN_RE.search(text) or person else "BROAD_TOPIC"
     if EXPLAIN_RE.search(text):
         return "EXPLANATION"
     return "DIRECT"

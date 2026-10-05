@@ -1,16 +1,16 @@
-"""Deterministic textbook-grounded MCQs from a final EvidencePack."""
+"""Textbook-grounded Class 9 MCQs with short options and fingerprints."""
 
 from __future__ import annotations
 
+import hashlib
 import re
+from collections import defaultdict
+from dataclasses import dataclass
 
-from rag.engine.coverage import build_coverage_plan, filter_plan, readable_extract
-from rag.engine.validate import unsupported_named_items
+from rag.engine.coverage import GROUP_TITLE, build_coverage_plan, filter_plan
 
 LETTERS = "ABCD"
-
-
-SKIP_SENTENCE = (
+SKIP = (
     "do you know",
     "mughals in india",
     "seven wonders",
@@ -18,46 +18,294 @@ SKIP_SENTENCE = (
     "exercises",
     "project work",
 )
+YEAR_RE = re.compile(r"\b(1[2-9]\d{2})\b")
+LANG_RE = re.compile(r"\b(Persian|Turkish|Arabic|Sanskrit|Hindi|Marathi|Kannada|Urdu)\b", re.I)
+BORN_RE = re.compile(r"born in ([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)")
 
 
-def _sentence(group) -> str:
-    extract = readable_extract(group.chunks)
-    for piece in re.split(r"(?<=[.!?])\s+", extract or ""):
-        cleaned = re.sub(r"\s+", " ", piece).strip(" .")
-        low = cleaned.lower()
-        if any(marker in low for marker in SKIP_SENTENCE):
+@dataclass
+class McqFact:
+    question: str
+    answer: str
+    kind: str
+    pages: list
+    title: str
+    group_key: str
+
+
+def fingerprint(question: str, answer: str = "") -> str:
+    blob = re.sub(r"[^a-z0-9]+", "", f"{question} {answer}".lower())
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def fingerprints_from_answer(answer: str) -> list[str]:
+    found = []
+    blocks = re.split(r"\n(?=\d+\.\s)", answer or "")
+    for block in blocks:
+        match = re.match(r"\d+\.\s+(.+?)(?:\nA\.|\Z)", block.strip(), re.S)
+        if not match:
             continue
-        if cleaned.count(",") >= 4 and len(cleaned.split()) < 18:
+        stem = match.group(1).strip()
+        ans = re.search(r"Answer:\s*([A-D])", block, re.I)
+        opt = {}
+        for letter, text in re.findall(r"^([A-D])\.\s+(.+)$", block, re.M):
+            opt[letter] = text.strip()
+        correct = opt.get((ans.group(1) if ans else "").upper(), "")
+        found.append(fingerprint(stem, correct))
+    return found
+
+
+def _clean(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _usable(text: str) -> bool:
+    return len((text or "").split()) >= 12
+
+
+def _group_text(group) -> str:
+    return _clean(" ".join(item.get("text") or "" for item in group.chunks))
+
+
+def _short(value: str, limit: int = 42) -> str:
+    value = _clean(value).strip(" ,.;:")
+    if len(value) > limit:
+        return ""
+    return value
+
+
+def _facts_from_group(group) -> list[McqFact]:
+    title = group.title
+    text = _group_text(group)
+    if not _usable(text) or len(text.split()) < 12:
+        return []
+    pages = list(group.pages or [])
+    facts: list[McqFact] = []
+
+    def add(question: str, answer: str, kind: str) -> None:
+        answer = _short(answer)
+        question = _clean(question)
+        if not answer or not question or len(question) > 140:
+            return
+        if any(item.question.lower() == question.lower() for item in facts):
+            return
+        facts.append(
+            McqFact(
+                question=question,
+                answer=answer,
+                kind=kind,
+                pages=pages,
+                title=title,
+                group_key=group.key,
+            )
+        )
+
+    match = re.search(r"autobiography in the ([A-Za-z]+) language", text, re.I)
+    if match:
+        add(f"In which language did {title} write an autobiography?", match.group(1).title(), "language")
+    match = LANG_RE.search(text)
+    if match and re.search(r"autobiography|wrote|written|translated|language", text, re.I):
+        add(f"Which language is mentioned with {title} in the textbook?", match.group(1).title(), "language")
+    match = BORN_RE.search(text)
+    if match:
+        add(f"Where was {title} born, according to the textbook?", match.group(1).strip(), "place")
+    match = re.search(r"appointed as (?:the )?([A-Za-z][A-Za-z ]{1,28}?)(?: when| at| in|\.|\,)", text, re.I)
+    if match:
+        add(f"What office was {title} appointed to?", match.group(1).strip(), "title")
+    match = re.search(r"(\d{1,2}) years old", text, re.I)
+    if match:
+        add(f"How old was {title} when this appointment is described?", f"{match.group(1)} years old", "age")
+    match = re.search(r"in memory of (?:his wife )?([A-Z][A-Za-z ]{2,36}?)(?: on|\.|\,)", text)
+    if match:
+        add("In whose memory was the Taj Mahal built?", match.group(1).strip(), "person")
+    match = re.search(r"\bbuilt (?:the )?([A-Z][A-Za-z][A-Za-z0-9 \-]{1,36}?)(?: in| on| at|\.|\,)", text)
+    if match:
+        work = match.group(1).strip()
+        if any(token in work.lower() for token in ("fort", "mahal", "road", "mosque", "temple", "city")):
+            add(f"What did {title} build, according to the textbook?", work, "work")
+    match = re.search(r"constructed new forts at ([A-Z][A-Za-z, ]{8,48}?)(?:\.|$)", text)
+    if match:
+        add(f"Where did {title} construct new forts?", match.group(1).split(",")[0].strip(), "place")
+        add("Who constructed new forts at Rohtas, according to the textbook?", title, "person")
+    if re.search(r"built the Taj Mahal", text, re.I):
+        add("Who built the Taj Mahal, according to the textbook?", title, "person")
+    if re.search(r"autobiography in the Turkish", text, re.I):
+        add("Who wrote an autobiography in the Turkish language?", title, "person")
+    if re.search(r"imprisoned his father", text, re.I):
+        add("Who imprisoned his father and seized power, according to the textbook?", title, "person")
+    if re.search(r"white marble", text, re.I):
+        add("The Taj Mahal is built using which material, according to the textbook?", "white marble", "term")
+    if re.search(r"muhtasibs", text, re.I):
+        add(f"Which officials did {title} appoint in important cities?", "muhtasibs", "term")
+    if re.search(r"\bAlamgir\b", text):
+        add(f"Which title did {title} earn, according to the textbook?", "Alamgir", "title")
+    match = re.search(r"established the ([A-Za-z][A-Za-z ]{2,36}?)(?: in|\.|\,)", text, re.I)
+    if match:
+        add(f"What did {title} establish?", match.group(1).strip(), "work")
+    if re.search(r"established Mughal", text, re.I):
+        add(f"What did {title} establish in India, according to the textbook?", "Mughal rule", "work")
+    match = re.search(r"First Battle of Panipat in (\d{4})", text, re.I)
+    if match:
+        add("In which year was the First Battle of Panipat fought?", match.group(1), "year")
+    match = re.search(r"began around (\d{4})", text, re.I)
+    if match:
+        add("Around which year did construction of the Taj Mahal begin?", match.group(1), "year")
+    match = re.search(r"completed around (\d{4})", text, re.I)
+    if match:
+        add("Around which year was the Taj Mahal completed?", match.group(1), "year")
+    for year_match in YEAR_RE.finditer(text):
+        start = max(0, year_match.start() - 48)
+        window = text[start : year_match.end() + 24]
+        if re.search(r"battle of panipat", window, re.I) and "first" in window.lower():
+            add("In which year was the First Battle of Panipat fought?", year_match.group(1), "year")
+        elif re.search(r"taj mahal", window, re.I) and re.search(r"began|started|construction", window, re.I):
+            add("Around which year did construction of the Taj Mahal begin?", year_match.group(1), "year")
+    if re.search(r"(guerrilla|guerilla) warfare", text, re.I):
+        add(f"What kind of warfare is {title} associated with in the textbook?", "guerrilla warfare", "term")
+    if re.search(r"Din-e-Ilahi|Din e Ilahi|Din-i-Ilahi", text, re.I):
+        add("Which ruler is associated with Din-e-Ilahi in the textbook?", title, "person")
+    match = re.search(r"After ([A-Z][A-Za-z. ]{2,32}?)[, ]+([A-Z][A-Za-z. ]{2,32}?) was appointed", text)
+    if match:
+        add(
+            f"Who was appointed after {match.group(1).strip()}?",
+            match.group(2).strip(),
+            "person",
+        )
+    match = re.search(r"capital (?:city )?at ([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)", text, re.I)
+    if match:
+        add(f"Which capital is mentioned in connection with {title}?", match.group(1).strip(), "place")
+    match = re.search(r"banks of the river ([A-Z][A-Za-z]+)", text)
+    if match:
+        add("On the banks of which river was the Taj Mahal built?", match.group(1).strip(), "place")
+    match = re.search(r"title ([A-Z][A-Za-z]{3,20})", text)
+    if match and match.group(1).lower() not in {"the", "this", "that"}:
+        add(f"Which title is mentioned for {title} in the textbook?", match.group(1).strip(), "title")
+    for place in _places_in(text)[:2]:
+        add(f"Which place is mentioned in the textbook section on {title}?", place, "place")
+    match = re.search(r"son of ([A-Z][A-Za-z. ]{2,32}?)(?:\.|\,| who| and)", text)
+    if match:
+        add(f"According to the textbook, {title} was the son of whom?", match.group(1).strip(), "person")
+    match = re.search(r"defeated ([A-Z][A-Za-z. ]{2,32}?)(?: in| at|\.|\,)", text)
+    if match:
+        add(f"Whom did {title} defeat, according to the textbook?", match.group(1).strip(), "person")
+    years = YEAR_RE.findall(text)
+    if years:
+        add(f"Which year is mentioned in the textbook section on {title}?", years[0], "year")
+    add(f"Who is the main person in the textbook account of {title}?", title, "person")
+    return facts
+
+
+def _places_in(text: str) -> list[str]:
+    found: list[str] = []
+    skip = {
+        "india",
+        "hindu",
+        "muslim",
+        "quran",
+        "this",
+        "that",
+        "these",
+        "their",
+        "mughal",
+        "maratha",
+        "persian",
+        "turkish",
+        "english",
+        "class",
+        "board",
+        "state",
+        "king",
+        "emperor",
+        "after",
+        "before",
+        "north",
+        "south",
+        "east",
+        "west",
+    }
+    for match in re.finditer(
+        r"\b(?:at|in|from|near|of)\s+([A-Z][A-Za-z]{3,}(?:\s+[A-Z][A-Za-z]{3,})?)",
+        text,
+    ):
+        value = match.group(1).strip()
+        if value.lower() in skip or value in found:
             continue
-        if 48 <= len(cleaned) <= 180 and cleaned[0].isupper():
-            return cleaned
-    return ""
+        if len(value) > 32:
+            continue
+        found.append(value)
+    return found
 
 
-def _stems_from_answer(previous: str) -> set[str]:
-    stems = set()
-    for match in re.finditer(r"^\d+\.\s+(.+)$", previous or "", re.M):
-        stems.add(match.group(1).strip().lower())
-    return stems
+def _scan_pool(text: str) -> dict[str, list[str]]:
+    pool: dict[str, list[str]] = defaultdict(list)
+
+    def push(kind: str, value: str) -> None:
+        value = _short(value)
+        if value and value not in pool[kind]:
+            pool[kind].append(value)
+
+    for match in LANG_RE.finditer(text):
+        push("language", match.group(1).title())
+    for match in YEAR_RE.finditer(text):
+        push("year", match.group(1))
+    for match in BORN_RE.finditer(text):
+        push("place", match.group(1))
+    for match in re.finditer(r"capital (?:city )?at ([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)", text, re.I):
+        push("place", match.group(1))
+    for match in re.finditer(r"banks of the river ([A-Z][A-Za-z]+)", text):
+        push("place", match.group(1))
+    for place in _places_in(text):
+        push("place", place)
+    for title in GROUP_TITLE.values():
+        if re.search(rf"\b{re.escape(title)}\b", text, re.I):
+            push("person", title)
+    if re.search(r"white marble", text, re.I):
+        push("term", "white marble")
+    if re.search(r"muhtasibs", text, re.I):
+        push("term", "muhtasibs")
+    if re.search(r"guerrilla|guerilla", text, re.I):
+        push("term", "guerrilla warfare")
+    if re.search(r"\bAlamgir\b", text):
+        push("title", "Alamgir")
+    return pool
+
+
+def _pad_options(correct: str, distractors: list[str]) -> list[str] | None:
+    options = [correct]
+    for item in distractors:
+        if item.lower() not in {opt.lower() for opt in options}:
+            options.append(item)
+        if len(options) == 4:
+            return options
+    return None
 
 
 def format_mcqs(items: list[dict]) -> str:
     blocks = []
     for index, item in enumerate(items, start=1):
-        options = item["options"]
         lines = [f"{index}. {item['question']}"]
-        for letter, option in zip(LETTERS, options):
+        for letter, option in zip(LETTERS, item["options"]):
             lines.append(f"{letter}. {option}")
         lines.append(f"Answer: {item['answer_letter']}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
 
-STEMS = (
-    "Which statement about {title} is given in the Class 9 textbook?",
-    "According to the prescribed textbook, what is said about {title}?",
-    "What does the Class 9 textbook say about {title}?",
-)
+def _round_robin(facts: list[McqFact]) -> list[McqFact]:
+    buckets: dict[str, list[McqFact]] = defaultdict(list)
+    for fact in facts:
+        buckets[fact.group_key or fact.title].append(fact)
+    ordered: list[McqFact] = []
+    keys = list(buckets.keys())
+    index = 0
+    while len(ordered) < len(facts):
+        key = keys[index % len(keys)]
+        if buckets[key]:
+            ordered.append(buckets[key].pop(0))
+        index += 1
+        if index > len(facts) * 8:
+            break
+    return ordered
 
 
 def mcqs_from_pack(
@@ -65,72 +313,68 @@ def mcqs_from_pack(
     chunks: list[dict],
     count: int = 10,
     previous_answer: str = "",
-) -> str:
+    previous_fingerprints: list[str] | None = None,
+) -> tuple[str, list[str]]:
     plan = filter_plan(question, build_coverage_plan(chunks)) or build_coverage_plan(chunks)
-    facts = []
-    seen = set()
+    facts: list[McqFact] = []
+    titles = []
+    blob = ""
     for group in plan:
-        sentence = _sentence(group)
-        if not sentence:
+        facts.extend(_facts_from_group(group))
+        titles.append(group.title)
+        blob += " " + _group_text(group)
+    scanned = _scan_pool(blob)
+    skip = set(previous_fingerprints or [])
+    skip.update(fingerprints_from_answer(previous_answer))
+    used_q = set()
+    items = []
+    for fact in _round_robin(facts):
+        if len(items) >= count:
+            break
+        fp = fingerprint(fact.question, fact.answer)
+        if fp in skip or fact.question.lower() in used_q:
             continue
-        key = sentence.lower()[:80]
-        if key in seen:
+        distractors = []
+        for other in facts:
+            if other.kind == fact.kind and other.answer.lower() != fact.answer.lower():
+                distractors.append(other.answer)
+        distractors.extend(item for item in scanned.get(fact.kind, []) if item.lower() != fact.answer.lower())
+        if fact.kind == "person":
+            distractors.extend(title for title in titles if title.lower() != fact.answer.lower())
+            distractors.extend(item for item in scanned.get("person", []) if item.lower() != fact.answer.lower())
+        options = _pad_options(fact.answer, distractors)
+        if not options:
             continue
-        seen.add(key)
-        facts.append({"title": group.title, "sentence": sentence, "pages": group.pages})
-    if len(facts) < 2:
-        return ""
-    skip = _stems_from_answer(previous_answer)
-    questions = []
-    used_stems = set()
-    rotate_base = 0
-    while len(questions) < count:
-        progressed = False
-        for fact in facts:
-            if len(questions) >= count:
-                break
-            stem_template = STEMS[(len(questions) + rotate_base) % len(STEMS)]
-            stem = stem_template.format(title=fact["title"])
-            if stem.lower() in skip or stem.lower() in used_stems:
-                continue
-            others = [item for item in facts if item["title"] != fact["title"]]
-            options = [fact["sentence"]]
-            for other in others:
-                if other["sentence"] not in options:
-                    options.append(other["sentence"])
-                if len(options) == 4:
-                    break
-            while len(options) < 4:
-                filler = f"The prescribed textbook does not give this extra detail about {fact['title']}."
-                if filler not in options:
-                    options.append(filler)
-                else:
-                    break
-            if len(options) < 4:
-                continue
-            rotate = len(questions) % 4
-            ordered = options[rotate:] + options[:rotate]
-            correct = fact["sentence"]
-            if correct not in ordered:
-                continue
-            letter = LETTERS[ordered.index(correct)]
-            blob = " ".join([stem, correct])
-            if unsupported_named_items(blob, chunks):
-                continue
-            questions.append(
-                {
-                    "question": stem,
-                    "options": ordered[:4],
-                    "answer_letter": letter,
-                    "answer_text": correct,
-                }
+        rotate = len(items) % 4
+        ordered = options[rotate:] + options[:rotate]
+        if fact.answer not in ordered:
+            continue
+        letter = LETTERS[ordered.index(fact.answer)]
+        items.append(
+            {
+                "question": fact.question,
+                "options": ordered,
+                "answer_letter": letter,
+                "answer_text": fact.answer,
+                "fingerprint": fp,
+                "pages": fact.pages,
+            }
+        )
+        skip.add(fp)
+        used_q.add(fact.question.lower())
+    fps = [item["fingerprint"] for item in items]
+    if not items:
+        if previous_fingerprints or previous_answer:
+            return (
+                "The prescribed textbook does not support additional unique practice questions "
+                "of this kind without repeating earlier questions.",
+                [],
             )
-            used_stems.add(stem.lower())
-            progressed = True
-        if not progressed:
-            rotate_base += 1
-            if rotate_base > len(STEMS) + 2:
-                break
-    if len(questions) < count:
-        return ""
-    return format_mcqs(questions[:count])
+        return "", []
+    body = format_mcqs(items)
+    if len(items) < count:
+        body += (
+            f"\n\nThe prescribed textbook supports {len(items)} unique practice questions of this kind. "
+            "No extra questions are added beyond the textbook."
+        )
+    return body, fps
