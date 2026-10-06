@@ -79,6 +79,22 @@ def main() -> int:
         if not good:
             print(" ", text[:220].replace("\n", " "))
             failed.append(case_id)
+
+    leads = [
+        ("Who was the father of Baji Rao I?", "Balaji Vishwanath", "15"),
+        ("Who was the son of Balaji Vishwanath?", "Baji Rao I", "15"),
+        ("Who was Babur's father?", "Umar Sheikh Mirza", "3"),
+        ("Who came after Shivaji?", "Sambhaji", "14"),
+    ]
+    for question, name, page in leads:
+        result = try_fact_answer(question, index=index)
+        answer = (result or {}).get("answer") or ""
+        first = answer.split("\n", 1)[0].strip().rstrip(".")
+        good = first == name and f"page {page}" in answer and (result or {}).get("fact_status") == "supported"
+        print(("PASS" if good else "FAIL"), "lead", question, repr(first))
+        if not good:
+            print(" ", answer[:300].replace("\n", " | "))
+            failed.append(question)
     print(f"\n{len(failed)} failed" if failed else "\nALL PASS")
     return 1 if failed else 0
 

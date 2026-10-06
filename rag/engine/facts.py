@@ -204,29 +204,146 @@ def _last_name(text: str) -> str | None:
     return names[-1][2] if names else None
 
 
-def _first_subject(sentence: str, previous: str | None) -> str | None:
-    """Name the main clause is about. A leading After/When name is not the subject."""
-    match = re.match(
-        r"(?:when|after|although|though|since|because|with|due to)\b[^,]{0,120},\s*",
-        sentence,
+_PRONOUN_WORDS = {"he", "she", "him", "his", "her"}
+_ROMAN = {"i", "ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii"}
+_GENERIC_ENTITY = _NAME_STOP | {
+    "battle", "fort", "kingdom", "dynasty", "glory", "fame", "agriculture",
+    "capital", "city", "province", "district", "village", "town", "port",
+    "state", "region", "chapter", "notes", "events", "event", "marble",
+    "throne", "highway", "highways", "monument", "system",
+}
+_LEADING_NAME = re.compile(
+    r"^((?:[Tt]he\s+)?[A-Z][A-Za-z''\-]+"
+    r"(?:\s+(?:[A-Z][A-Za-z''\-]+|rao|ul|ud|bin|ibn|van|da|di|al|I{1,3}|IV|VI{0,3}|IX|XI{0,3})){0,4})\b"
+)
+_PLACE_PREFIX = re.compile(
+    r"(?:battle|fort|city|capital|province|district|village|town|port|state|region|"
+    r"near|towards|toward)\s+(?:of\s+)?$|"
+    r"(?:sultan|king|emperor|city|capital|province|district|state|battle|fort)\s+of\s+$",
+    re.I,
+)
+_PLACE_SUBJECT = re.compile(
+    r"\bwas\s+(?:his|her|their|its|a|the)\s+"
+    r"(?:capital|city|fort|province|district|village|town|port|state|region)\b",
+    re.I,
+)
+
+
+def _is_heading_token(token: str) -> bool:
+    if token.lower() in _ROMAN:
+        return False
+    return len(token) > 1 and token.isupper()
+
+
+def _is_pronoun_ref(text: str | None) -> bool:
+    tokens = re.findall(r"[A-Za-z']+", text or "")
+    return bool(tokens) and all(token.lower() in _PRONOUN_WORDS for token in tokens)
+
+
+def _prepare_person(text: str) -> str:
+    value = re.sub(r"\s+", " ", (text or "")).strip(" ,;:.")
+    value = re.sub(r"^(?:Later|Then|Thus|Hence|Also|When|After|Although|Though|But|And)\s+", "", value)
+    value = re.sub(r"'s$", "", value, flags=re.I)
+    tokens = value.split()
+    collapsed: list[str] = []
+    for token in tokens:
+        if collapsed and collapsed[-1].lower() == token.lower():
+            continue
+        collapsed.append(token)
+    while collapsed and collapsed[-1].lower() in _FUNCTION:
+        collapsed.pop()
+    while collapsed and _is_heading_token(collapsed[0]):
+        collapsed.pop(0)
+    return " ".join(collapsed).strip()
+
+
+def _only_place_mention(name: str, sentence: str) -> bool:
+    if not name or not sentence:
+        return False
+    hits = list(re.finditer(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])", sentence))
+    if not hits:
+        return False
+    return all(_PLACE_PREFIX.search(sentence[max(0, match.start() - 40) : match.start()]) for match in hits)
+
+
+def _person_ok(name: str, sentence: str) -> bool:
+    """A person slot must be a clean name that this sentence actually supports."""
+    if not name or _is_pronoun_ref(name):
+        return False
+    if "?" in name or re.search(r"do you know", name, re.I):
+        return False
+    tokens = name.split()
+    if not tokens:
+        return False
+    if any(token.lower() in _PRONOUN_WORDS or token.lower() == "of" for token in tokens):
+        return False
+    if any(_is_heading_token(token) for token in tokens):
+        return False
+    content = [token.lower() for token in tokens if token.lower() not in _FUNCTION]
+    if not content or any(token in {"battle", "fort", "chapter", "notes"} for token in content):
+        return False
+    if all(token in _GENERIC_ENTITY for token in content):
+        return False
+    if _only_place_mention(name, sentence):
+        return False
+    if re.search(rf"(?<![A-Za-z]){re.escape(name)}\s+{_PLACE_SUBJECT.pattern}", sentence, re.I):
+        return False
+    sentence_norm = norm_text(sentence)
+    long = [norm_text(token) for token in content if len(norm_text(token)) >= 4]
+    if long:
+        return all(token in sentence_norm for token in long)
+    return norm_text(name) in sentence_norm
+
+
+def _clause_subject(sentence: str) -> str | None:
+    """Grammatical person subject of this sentence. Not a nearby name."""
+    text = re.sub(r"^(?:but|and|later|then|thus|hence|also)\b,?\s*", "", sentence.strip(), flags=re.I)
+    headed = re.match(r"^([^:]{2,80}):\s+\S", text)
+    if headed:
+        candidate = _prepare_person(headed.group(1))
+        if _person_ok(candidate, text):
+            return candidate
+    lead = re.match(
+        r"(?:when|after|although|though|since|because|with|due to|as)\b[^,]{0,180},\s*",
+        text,
         re.I,
     )
-    appos = re.search(
-        r",\s*([A-Z][A-Za-z''\-]+(?:\s+[A-Z][A-Za-z''\-]+){0,3})\s*,\s+was\b",
-        sentence,
-    )
-    if appos:
-        return appos.group(1)
-    body = sentence[match.end() :] if match else sentence
+    body = text[lead.end() :] if lead else text
     body = re.sub(r"^(?:but|and|later|then|thus|hence|also)\b,?\s*", "", body, flags=re.I)
-    if re.match(r"^(?:he|she|his|her)\b", body, re.I):
-        head = sentence[: match.end()] if match else ""
-        head_names = _names(head)
-        return head_names[-1][2] if head_names else previous
-    names = _names(body)
-    if names:
-        return names[0][2]
-    return previous
+    if re.match(r"^(?:he|she|it|they)\b", body, re.I):
+        return None
+    match = _LEADING_NAME.match(body)
+    if not match:
+        return None
+    candidate = _prepare_person(match.group(1))
+    if not _person_ok(candidate, text):
+        return None
+    return candidate
+
+
+def _antecedent_before_pronoun(sentence: str) -> str | None:
+    """A name before a pronoun in the same sentence, except the subject of an object pronoun."""
+    pronoun = re.search(r"\b(?:he|she|him|his|her)\b", sentence, re.I)
+    if not pronoun or pronoun.group(0).lower() in {"him", "her"}:
+        return None
+    subject = _clause_subject(sentence)
+    if not subject:
+        return None
+    before = sentence[: pronoun.start()]
+    if re.search(rf"(?<![A-Za-z]){re.escape(subject)}(?![A-Za-z])", before):
+        return subject
+    return None
+
+
+def _content_object(text: str) -> Span | None:
+    surface = re.sub(r"\s+", " ", (text or "")).strip(" ,;:.")
+    if not surface or surface.lower().startswith("by "):
+        return None
+    if "?" in surface or re.search(r"do you know", surface, re.I):
+        return None
+    if any(_is_heading_token(token) for token in surface.split()):
+        return None
+    return _span(surface, "monument")
 
 
 class _Builder:
@@ -242,10 +359,12 @@ class _Builder:
         self.source_type = str(chunk.get("source_type") or "primary_textbook")
         self.facts: list[Fact] = []
         self._n = 0
-        self.current: str | None = None
+        self.previous_subject: str | None = None
         self.pending_father: str | None = None
         self.pending_sentence: str | None = None
         self.previous_sentence: str = ""
+        self._sentence_text: str = ""
+        self._expand_citation = False
 
     def add(
         self,
@@ -262,6 +381,10 @@ class _Builder:
         kept = {key: value for key, value in roles.items() if value is not None}
         if not kept or not sentence:
             return
+        if self._expand_citation and self.previous_sentence:
+            joined = f"{self.previous_sentence} {sentence}"
+            if joined.lower() in self.prepared.lower():
+                sentence = joined
         blob = self.prepared
         probe = re.sub(r"\s+", " ", span or sentence).strip()
         if probe and probe.lower() not in blob.lower() and sentence.lower() not in blob.lower():
@@ -290,10 +413,32 @@ class _Builder:
             )
         )
 
-    def person(self, text: str | None) -> Span | None:
-        if not text or text.lower() in {"he", "she", "him", "his", "her"}:
-            text = self.current
-        return _span(text or "", "person")
+    def person(self, text: str | None, sentence: str | None = None) -> Span | None:
+        """Accept a person only when this sentence, or its immediate pronoun antecedent, supports it."""
+        sentence = sentence or self._sentence_text
+        cleaned = _prepare_person(text or "")
+        if cleaned and not _is_pronoun_ref(text) and _person_ok(cleaned, sentence):
+            return _span(cleaned, "person")
+        if not _is_pronoun_ref(text):
+            return None
+        local = _antecedent_before_pronoun(sentence)
+        if local:
+            return _span(local, "person")
+        previous = self.previous_subject
+        if not previous or not self.previous_sentence:
+            return None
+        joined = f"{self.previous_sentence} {sentence}"
+        if joined.lower() not in self.prepared.lower() or not _person_ok(previous, self.previous_sentence):
+            return None
+        self._expand_citation = True
+        return _span(previous, "person")
+
+    def _actor(self, subject: str | None, sentence: str) -> str | None:
+        if subject:
+            return subject
+        if re.search(r"\b(?:he|she)\b", sentence, re.I):
+            return "he"
+        return None
 
     def extract(self) -> list[Fact]:
         if not self.prepared or looks_like_exercise_chunk(self.chunk):
@@ -302,10 +447,11 @@ class _Builder:
         for sentence in sentences:
             if re.search(r"_{3,}", sentence):
                 continue
-            subject = _first_subject(sentence, self.current)
+            self._sentence_text = sentence
+            self._expand_citation = False
+            subject = _clause_subject(sentence)
             self._sentence(sentence, subject)
-            if subject and subject.lower() not in {"he", "she"}:
-                self.current = subject
+            self.previous_subject = subject
             self.previous_sentence = sentence
         return self.facts
 
@@ -329,12 +475,12 @@ class _Builder:
     def _kinship(self, sentence: str, subject: str | None) -> None:
         match = re.search(
             r"(?:his|her)\s+(?:eldest\s+|elder\s+|younger\s+|second\s+|first\s+)?(father|mother|son|daughter),\s*"
-            r"([A-Z][A-Za-z''\-]+(?:\s+[A-Z][A-Za-z''\-]+){0,4})",
+            r"([A-Z][A-Za-z''\-]+(?:\s+[A-Z][A-Za-z''\-]+){0,4}(?:\s+I\b)?)",
             sentence,
         )
         if match:
             kin, name = match.group(1).lower(), match.group(2)
-            owner = subject
+            owner = subject or ("his" if re.search(r"\b(?:his|her)\b", sentence, re.I) else None)
             death = re.search(r"death of ([A-Z][A-Za-z''\-]+(?:\s+[A-Z][A-Za-z''\-]+){0,4})", sentence)
             if death:
                 owner = death.group(1)
@@ -361,11 +507,17 @@ class _Builder:
             r"\b([A-Z][A-Za-z''\-]+(?:\s+[A-Z][A-Za-z''\-]+){0,3})\s+was (?:his|her) (father|mother)\b",
             sentence,
         )
-        previous = self.current
-        if match and previous and norm_text(match.group(1)) != norm_text(previous):
+        previous = self.previous_subject
+        if (
+            match
+            and previous
+            and self.previous_sentence
+            and norm_text(match.group(1)) != norm_text(previous)
+            and _person_ok(previous, self.previous_sentence)
+        ):
             joined = sentence
-            candidate = f"{self.previous_sentence} {sentence}" if self.previous_sentence and previous not in sentence else sentence
-            if candidate.lower() in self.prepared.lower():
+            candidate = f"{self.previous_sentence} {sentence}"
+            if previous not in sentence and candidate.lower() in self.prepared.lower():
                 joined = candidate
             self._emit_kin(match.group(1), previous, match.group(2), joined)
         intro = re.search(
@@ -387,8 +539,8 @@ class _Builder:
             self.pending_sentence = sentence
 
     def _emit_kin(self, parent: str | None, child: str | None, kin: str, sentence: str) -> None:
-        parent_span = self.person(parent)
-        child_span = self.person(child)
+        parent_span = self.person(parent, sentence)
+        child_span = self.person(child, sentence)
         kin_span = _span(kin, "unspecified")
         if not parent_span or not child_span or parent_span.norm == child_span.norm:
             return
@@ -456,30 +608,36 @@ class _Builder:
             sentence,
         )
         if match:
-            earlier = self.current if match.group(2).lower() in {"him", "her"} else match.group(2)
-            self.add(
-                "relationship",
-                "succeeded",
-                "succeeded",
-                {"later": self.person(match.group(1)), "earlier": self.person(earlier)},
-                sentence,
-                match.group(0),
-            )
+            later_name = re.sub(r"^(?:Later|Then|Thus|Hence|Also)\s+", "", match.group(1))
+            later = self.person(later_name)
+            earlier = self.person(match.group(2))
+            if later and earlier:
+                self.add(
+                    "relationship",
+                    "succeeded",
+                    "succeeded",
+                    {"later": later, "earlier": earlier},
+                    sentence,
+                    match.group(0),
+                )
         match = re.search(
-            r"\b([A-Z][A-Za-z''\-]+(?:\s+[A-Za-z''\-]+){0,3})\b[^.]{0,80}\bbecame the successor\b",
+            r"\b([A-Z][A-Za-z''\-]+(?:\s+[A-Z][A-Za-z''\-]+){0,3}(?:\s+I\b)?)\b(?:\s+[a-z']+){0,6}\s+became the successor\b",
             sentence,
         )
         death = re.search(r"death of ([A-Z][A-Za-z''\-]+(?:\s+[A-Za-z''\-]+){0,3})", sentence)
         if match and death:
-            self.add(
-                "chronology",
-                "succeeded",
-                "successor",
-                {"later": self.person(match.group(1)), "earlier": self.person(death.group(1))},
-                sentence,
-                sentence,
-                order_key="after",
-            )
+            later = self.person(match.group(1))
+            earlier = self.person(death.group(1))
+            if later and earlier:
+                self.add(
+                    "chronology",
+                    "succeeded",
+                    "successor",
+                    {"later": later, "earlier": earlier},
+                    sentence,
+                    sentence,
+                    order_key="after",
+                )
 
     def _conflict(self, sentence: str, subject: str | None) -> None:
         match = re.search(
@@ -488,14 +646,17 @@ class _Builder:
             sentence,
         )
         if match:
-            self.add(
-                "event",
-                "defeated",
-                "defeated",
-                {"agent": self.person(match.group(1)), "patient": self.person(match.group(2))},
-                sentence,
-                match.group(0),
-            )
+            agent = self.person(match.group(1))
+            patient = self.person(match.group(2))
+            if agent and patient:
+                self.add(
+                    "event",
+                    "defeated",
+                    "defeated",
+                    {"agent": agent, "patient": patient},
+                    sentence,
+                    match.group(0),
+                )
         match = re.search(
             r"\b([A-Z][A-Za-z''\-]+(?:\s+[A-Z][A-Za-z''\-]+){0,4}|[Hh]e|[Ss]he)\s+was defeated by\s+"
             r"(the\s+[A-Z][a-z]+s?|[A-Z][A-Za-z''\-]+(?:\s+[A-Z][A-Za-z''\-]+){0,3})",
@@ -503,14 +664,17 @@ class _Builder:
             re.I,
         )
         if match:
-            self.add(
-                "event",
-                "defeated",
-                "was defeated by",
-                {"patient": self.person(match.group(1)), "agent": self.person(match.group(2))},
-                sentence,
-                match.group(0),
-            )
+            patient = self.person(match.group(1))
+            agent = self.person(match.group(2))
+            if agent and patient:
+                self.add(
+                    "event",
+                    "defeated",
+                    "was defeated by",
+                    {"patient": patient, "agent": agent},
+                    sentence,
+                    match.group(0),
+                )
         match = re.search(
             r"\b([A-Z][A-Za-z''\-]+(?:\s+[A-Z][A-Za-z''\-]+){0,4}|[Hh]e|[Ss]he)\s+lost to\s+"
             r"(the\s+[A-Z][a-z]+s?|[A-Z][A-Za-z''\-]+(?:\s+[A-Z][A-Za-z''\-]+){0,3})"
@@ -522,18 +686,21 @@ class _Builder:
             if not place:
                 near = re.search(r"\bnear\s+([A-Z][A-Za-z''\-]+)", sentence, re.I)
                 place = near.group(1) if near else None
-            self.add(
-                "event",
-                "lost_to",
-                "lost to",
-                {
-                    "patient": self.person(match.group(1)),
-                    "agent": self.person(match.group(2)),
-                    "location": _span(place, "place") if place else None,
-                },
-                sentence,
-                match.group(0),
-            )
+            patient = self.person(match.group(1))
+            agent = self.person(match.group(2))
+            if agent and patient:
+                self.add(
+                    "event",
+                    "lost_to",
+                    "lost to",
+                    {
+                        "patient": patient,
+                        "agent": agent,
+                        "location": _span(place, "place") if place else None,
+                    },
+                    sentence,
+                    match.group(0),
+                )
 
     def _motion(self, sentence: str, subject: str | None) -> None:
         match = re.search(
@@ -541,30 +708,37 @@ class _Builder:
             sentence,
             re.I,
         )
-        if match and subject:
-            self.add(
-                "event",
-                "moved_toward",
-                match.group(1),
-                {"agent": self.person(subject), "destination": _span(match.group(2), "place")},
-                sentence,
-                match.group(0),
-            )
+        actor = self._actor(subject, sentence)
+        if match and actor:
+            agent = self.person(actor)
+            if agent:
+                self.add(
+                    "event",
+                    "moved_toward",
+                    match.group(1),
+                    {"agent": agent, "destination": _span(match.group(2), "place")},
+                    sentence,
+                    match.group(0),
+                )
 
     def _assist(self, sentence: str, subject: str | None) -> None:
         match = re.search(
             r"(?:assisting|assisted|assist)\s+(the\s+[A-Z][a-z]+s?|[A-Z][A-Za-z''\-]+(?:\s+[A-Za-z''\-]+){0,3})",
             sentence,
         )
-        if match:
-            self.add(
-                "relationship",
-                "assisted",
-                "assisted",
-                {"agent": self.person(subject), "patient": self.person(match.group(1))},
-                sentence,
-                match.group(0),
-            )
+        actor = self._actor(subject, sentence)
+        if match and actor:
+            agent = self.person(actor)
+            patient = self.person(match.group(1))
+            if agent and patient:
+                self.add(
+                    "relationship",
+                    "assisted",
+                    "assisted",
+                    {"agent": agent, "patient": patient},
+                    sentence,
+                    match.group(0),
+                )
 
     def _creation(self, sentence: str, subject: str | None) -> None:
         match = re.search(
@@ -572,35 +746,47 @@ class _Builder:
             sentence,
             re.I,
         )
-        if match and subject:
-            self.add(
-                "relationship",
-                "built" if match.group(1).lower() in {"built", "constructed"} else "established",
-                match.group(1).lower(),
-                {"agent": self.person(subject), "object": _span(match.group(2), "monument")},
-                sentence,
-                match.group(0),
-            )
+        actor = self._actor(subject, sentence)
+        if match and actor:
+            agent = self.person(actor)
+            obj = _content_object(match.group(2))
+            if agent and obj:
+                self.add(
+                    "relationship",
+                    "built" if match.group(1).lower() in {"built", "constructed"} else "established",
+                    match.group(1).lower(),
+                    {"agent": agent, "object": obj},
+                    sentence,
+                    match.group(0),
+                )
         match = re.search(r"\babolished\s+([A-Z][A-Za-z''\-]+)", sentence)
-        if match and subject:
-            self.add(
-                "event",
-                "abolished",
-                "abolished",
-                {"agent": self.person(subject), "object": _span(match.group(1), "term")},
-                sentence,
-                match.group(0),
-            )
+        actor = self._actor(subject, sentence)
+        if match and actor:
+            agent = self.person(actor)
+            obj = _content_object(match.group(1))
+            if agent and obj:
+                self.add(
+                    "event",
+                    "abolished",
+                    "abolished",
+                    {"agent": agent, "object": obj},
+                    sentence,
+                    match.group(0),
+                )
         match = re.search(r"\bwrote\s+([^.,;]{2,60})", sentence, re.I)
-        if match and subject:
-            self.add(
-                "event",
-                "wrote",
-                "wrote",
-                {"agent": self.person(subject), "object": _span(match.group(1), "term")},
-                sentence,
-                match.group(0),
-            )
+        actor = self._actor(subject, sentence)
+        if match and actor:
+            agent = self.person(actor)
+            obj = _content_object(match.group(1))
+            if agent and obj:
+                self.add(
+                    "event",
+                    "wrote",
+                    "wrote",
+                    {"agent": agent, "object": obj},
+                    sentence,
+                    match.group(0),
+                )
 
     def _age(self, sentence: str, subject: str | None) -> None:
         match = re.search(r"at the age of\s+(\d+)\s*(years?)?", sentence, re.I)
@@ -608,7 +794,7 @@ class _Builder:
             match = re.search(r"\b(?:was\s+only\s+)?(\d+)\s+years?\s+old\b", sentence, re.I)
         if not match:
             return
-        who = subject
+        who = subject or self._actor(None, sentence)
         named = re.search(
             r"\b([A-Z][A-Za-z''\-]+(?:\s+[A-Za-z''\-]+){0,3})\b[^.]{0,40}(?:assumed power|ascend|throne|came to power)",
             sentence,
@@ -616,14 +802,16 @@ class _Builder:
         if named:
             who = named.group(1)
         value = _span(match.group(1), "number")
-        self.add(
-            "attribute",
-            "age",
-            "age",
-            {"subject": self.person(who), "value": value},
-            sentence,
-            match.group(0),
-        )
+        subject_span = self.person(who)
+        if subject_span and value:
+            self.add(
+                "attribute",
+                "age",
+                "age",
+                {"subject": subject_span, "value": value},
+                sentence,
+                match.group(0),
+            )
 
     def _birth(self, sentence: str, subject: str | None) -> None:
         match = re.search(
@@ -633,14 +821,17 @@ class _Builder:
         if not match:
             match = re.search(r",\s*([A-Z][A-Za-z''\-]+),\s+was born\s+(?:in|at)\s+([A-Z][^.,;]{1,40})", sentence)
         if match:
-            self.add(
-                "attribute",
-                "birthplace",
-                "born",
-                {"subject": self.person(match.group(1)), "value": _span(match.group(2), "place")},
-                sentence,
-                match.group(0),
-            )
+            subject_span = self.person(match.group(1))
+            value = _span(match.group(2), "place")
+            if subject_span and value:
+                self.add(
+                    "attribute",
+                    "birthplace",
+                    "born",
+                    {"subject": subject_span, "value": value},
+                    sentence,
+                    match.group(0),
+                )
 
     def _quantity(self, sentence: str, subject: str | None) -> None:
         match = re.search(
@@ -727,7 +918,7 @@ class _Builder:
             re.I,
         )
         if match:
-            owner = self.current if re.search(r"\bassist\s+(?:him|her)\b", sentence, re.I) else subject
+            owner = "him" if re.search(r"\bassist\s+(?:him|her)\b", sentence, re.I) else subject
             self._emit_list(owner, match.group(1), match.group(2), sentence)
 
     def _emit_list(self, owner: str | None, context: str, raw: str, sentence: str) -> None:
@@ -769,25 +960,18 @@ class _Builder:
             re.I,
         )
         if match and subject and norm_text(subject) != norm_text(match.group(1)):
-            self.add(
-                "chronology",
-                "after",
-                "after the death of",
-                {"earlier": self.person(match.group(1)), "later": self.person(subject)},
-                sentence,
-                match.group(0),
-                order_key="after",
-            )
-        if re.match(r"later\b", sentence, re.I) and subject and self.current and norm_text(subject) != norm_text(self.current):
-            self.add(
-                "chronology",
-                "after",
-                "later",
-                {"earlier": self.person(self.current), "later": self.person(subject)},
-                sentence,
-                sentence,
-                order_key="later",
-            )
+            earlier = self.person(match.group(1))
+            later = self.person(subject)
+            if earlier and later:
+                self.add(
+                    "chronology",
+                    "after",
+                    "after the death of",
+                    {"earlier": earlier, "later": later},
+                    sentence,
+                    match.group(0),
+                    order_key="after",
+                )
 
     def _identity(self, sentence: str, subject: str | None) -> None:
         match = re.search(
@@ -803,11 +987,14 @@ class _Builder:
         tokens = set(norm_text(complement).split())
         if tokens & _TYPE_WORDS:
             category = next(iter(tokens & _TYPE_WORDS))
+        subject_span = self.person(match.group(1))
+        if not subject_span:
+            return
         self.add(
             "identity",
             "identity",
             "was",
-            {"subject": self.person(match.group(1)), "complement": _span(complement, category)},
+            {"subject": subject_span, "complement": _span(complement, category)},
             sentence,
             match.group(0),
         )
@@ -817,7 +1004,7 @@ class _Builder:
                 "relationship",
                 "ruler_of",
                 "ruler of",
-                {"agent": self.person(match.group(1)), "place": _span(place.group(1), "place") if place else None},
+                {"agent": subject_span, "place": _span(place.group(1), "place") if place else None},
                 sentence,
                 match.group(0),
             )
@@ -838,14 +1025,17 @@ class _Builder:
         )
         if not match:
             return
-        self.add(
-            "relationship",
-            match.group(2).lower(),
-            match.group(2).lower(),
-            {"agent": self.person(match.group(1)), "patient": self.person(match.group(3))},
-            sentence,
-            match.group(0),
-        )
+        agent = self.person(match.group(1))
+        patient = self.person(match.group(3))
+        if agent and patient:
+            self.add(
+                "relationship",
+                match.group(2).lower(),
+                match.group(2).lower(),
+                {"agent": agent, "patient": patient},
+                sentence,
+                match.group(0),
+            )
 
 
 def index_chunks(chunks: list[dict]) -> FactIndex:
@@ -1040,9 +1230,73 @@ def compile_question(question: str, history: list[dict] | None = None) -> FactQu
     return _compile_yesno(yes.group("aux").lower(), yes.group("body"))
 
 
+# Yes/no relationship words. The stored kin label stays father/mother; son/daughter
+# only swap which side of the existing directed fact is the subject.
+_RELATION_PROPOSITION = {
+    "father": ("parent", "child", "father"),
+    "mother": ("parent", "child", "mother"),
+    "parent": ("parent", "child", None),
+    "son": ("child", "parent", "father"),
+    "daughter": ("child", "parent", "mother"),
+}
+
+
 def _compile_yesno(aux: str, body: str) -> FactQuery | None:
     body = body.strip()
     polarity = "negated" if _NEG_RE.search(body) else "asserted"
+    match = re.match(
+        r"^(.+?)\s+the\s+(father|mother|parent|son|daughter)\s+of\s+(.+)$",
+        body,
+        re.I,
+    )
+    if match and aux in {"was", "were", "is", "are"}:
+        subject_role, object_role, kin = _RELATION_PROPOSITION[match.group(2).lower()]
+        binds = {
+            subject_role: norm_text(_clean_slot(match.group(1))),
+            object_role: norm_text(_clean_slot(match.group(3))),
+        }
+        if kin:
+            binds["kin"] = kin
+        return FactQuery("yesno", "parent", binds, None, polarity, match.group(2).lower())
+    match = re.match(
+        r"^(.+?)\s+the\s+(successor|predecessor)\s+of\s+(.+)$",
+        body,
+        re.I,
+    )
+    if match and aux in {"was", "were", "is", "are"}:
+        subject = norm_text(_clean_slot(match.group(1)))
+        other = norm_text(_clean_slot(match.group(3)))
+        if match.group(2).lower() == "successor":
+            binds = {"later": subject, "earlier": other}
+        else:
+            binds = {"earlier": subject, "later": other}
+        return FactQuery("yesno", "succeeded", binds, None, polarity, match.group(2).lower())
+    match = re.match(r"^(.+?)\s+succeed(?:ed)?\s+(.+)$", body, re.I)
+    if match:
+        return FactQuery(
+            "yesno",
+            "succeeded",
+            {
+                "later": norm_text(_clean_slot(match.group(1))),
+                "earlier": norm_text(_clean_slot(match.group(2))),
+            },
+            None,
+            polarity,
+            "succeeded",
+        )
+    match = re.match(r"^(.+?)\s+appointed\s+as\s+(?:the\s+)?(.+)$", body, re.I)
+    if match and aux in {"was", "were", "is", "are"}:
+        return FactQuery(
+            "yesno",
+            "appointed_as",
+            {
+                "patient": norm_text(_clean_slot(match.group(1))),
+                "office": norm_text(_clean_slot(match.group(2))),
+            },
+            None,
+            polarity,
+            "appointed",
+        )
     match = re.search(
         r"^(.+?)\s+(appoint|appointed)\s+(.+)$",
         body,
@@ -1196,25 +1450,69 @@ def _conflicts(fact: Fact, query: FactQuery) -> bool:
         if asked and asked <= stored:
             return False
         return bool(asked_types and stored_types and asked_types != stored_types)
+    if query.predicate == "parent":
+        asked_parent = query.binds.get("parent", "")
+        asked_child = query.binds.get("child", "")
+        stored_parent = fact.roles.get("parent")
+        stored_child = fact.roles.get("child")
+        kin = query.binds.get("kin")
+        if not asked_parent or not asked_child or stored_parent is None or stored_child is None:
+            return False
+        if kin and not _role_ok(fact, "kin", kin):
+            return False
+        return _same(stored_parent.norm, asked_child) and _same(stored_child.norm, asked_parent)
+    if query.predicate in {"after", "succeeded"}:
+        asked_earlier = query.binds.get("earlier", "")
+        asked_later = query.binds.get("later", "")
+        stored_earlier = fact.roles.get("earlier")
+        stored_later = fact.roles.get("later")
+        if not asked_earlier or not asked_later or stored_earlier is None or stored_later is None:
+            return False
+        return _same(stored_earlier.norm, asked_later) and _same(stored_later.norm, asked_earlier)
     if query.predicate in {"lost_to", "defeated"}:
         place = query.binds.get("location")
         if place and not _role_ok(fact, "location", place):
             return False
-        for role in ("patient", "agent"):
-            wanted = query.binds.get(role)
-            if not wanted:
-                continue
-            span = fact.roles.get(role)
-            if not span:
-                continue
-            if _same(span.norm, wanted):
-                continue
-            if _specific(span.norm) and _specific(wanted):
-                return True
+        asked_agent = query.binds.get("agent")
+        asked_patient = query.binds.get("patient")
+        stored_agent = fact.roles.get("agent")
+        stored_patient = fact.roles.get("patient")
+        swapped = (
+            asked_agent
+            and asked_patient
+            and stored_agent is not None
+            and stored_patient is not None
+            and _same(stored_agent.norm, asked_patient)
+            and _same(stored_patient.norm, asked_agent)
+        )
+        if swapped:
+            return True
+        winner_asked_as_loser = (
+            asked_patient
+            and not asked_agent
+            and stored_agent is not None
+            and _specific(stored_agent.norm)
+            and _same(stored_agent.norm, asked_patient)
+        )
+        if winner_asked_as_loser:
+            return True
+        if place and asked_patient and stored_patient is not None:
+            return _specific(stored_patient.norm) and _specific(asked_patient) and not _same(stored_patient.norm, asked_patient)
         return False
     if query.predicate == "appointed_as":
         patient = query.binds.get("patient")
         agent = query.binds.get("agent")
+        stored_agent = fact.roles.get("agent")
+        stored_patient = fact.roles.get("patient")
+        if (
+            agent
+            and patient
+            and stored_agent is not None
+            and stored_patient is not None
+            and _same(stored_agent.norm, patient)
+            and _same(stored_patient.norm, agent)
+        ):
+            return True
         if patient and not _role_ok(fact, "patient", patient):
             return False
         stored_agent = fact.roles.get("agent")
@@ -1259,11 +1557,15 @@ def _content_tokens(text: str) -> set[str]:
     return {token for token in norm_text(text).split() if len(token) >= 4}
 
 
-def _sentences(facts: list[Fact], limit: int = 3) -> list[str]:
+def _sentence_text(fact: Fact) -> str:
+    return re.sub(r"\s+", " ", fact.sentence).strip()
+
+
+def _sentences(facts: list[Fact], limit: int = 3, must_cover: list[str] | None = None) -> list[str]:
     out = []
     seen = set()
     for fact in facts:
-        text = re.sub(r"\s+", " ", fact.sentence).strip()
+        text = _sentence_text(fact)
         key = norm_text(text)
         if not text or key in seen:
             continue
@@ -1276,6 +1578,23 @@ def _sentences(facts: list[Fact], limit: int = 3) -> list[str]:
         out.append(text)
         if len(out) >= limit:
             break
+    needed = [norm for norm in (must_cover or []) if norm]
+    if not needed:
+        return out
+    covered = norm_text(" ".join(out))
+    for fact in facts:
+        missing = [norm for norm in needed if norm not in covered]
+        if not missing:
+            break
+        text = _sentence_text(fact)
+        key = norm_text(text)
+        if not text or key in seen:
+            continue
+        if not any(norm in key for norm in missing):
+            continue
+        seen.add(key)
+        out.append(text)
+        covered = norm_text(" ".join(out))
     return out
 
 
@@ -1320,10 +1639,45 @@ def _citation(facts: list[Fact]) -> str:
     return f"Source: {label}, pages " + ", ".join(str(page) for page in pages)
 
 
-def render_answer(status: str, facts: list[Fact]) -> str:
-    lines = _sentences(facts)
+def _lead_values(query: FactQuery | None, facts: list[Fact]) -> list[str]:
+    """The open role of a who-question, when that role is a person in a directed relation."""
+    if query is None or query.act != "wh" or not query.open_role:
+        return []
+    if query.predicate not in {"parent", "after", "succeeded"}:
+        return []
+    found: list[str] = []
+    seen: set[str] = set()
+    for fact in facts:
+        span = fact.roles.get(query.open_role)
+        if span is None or not span.text:
+            continue
+        text = span.text.strip(" ,;:.")
+        if not text or span.norm in seen:
+            continue
+        seen.add(span.norm)
+        found.append(text)
+    return found
+
+
+def render_answer(status: str, facts: list[Fact], query: FactQuery | None = None) -> str:
+    must_cover = []
+    if query is not None and query.act == "wh" and query.open_role:
+        must_cover = [
+            fact.roles[query.open_role].norm
+            for fact in facts
+            if fact.roles.get(query.open_role) is not None and fact.roles[query.open_role].norm
+        ]
+    lines = _sentences(facts, must_cover=must_cover)
     if status == "supported":
-        body = " ".join(lines)
+        evidence = " ".join(lines)
+        leads = _lead_values(query, facts)
+        if leads:
+            lead = ". ".join(leads)
+            if not lead.endswith("."):
+                lead += "."
+            body = f"{lead}\n\n{evidence}" if evidence else lead
+        else:
+            body = evidence
     elif status == "contradicted":
         correction = " ".join(lines)
         body = NOT_STATED if not correction else f"{NOT_STATED} The textbook states: {correction}"
@@ -1343,7 +1697,7 @@ def try_fact_answer(question: str, history: list[dict] | None = None, index: Fac
     status, facts = lookup(fact_index, query)
     if status == "fallback":
         return None
-    answer = render_answer(status, facts)
+    answer = render_answer(status, facts, query)
     sources = _sources(facts) if status != "not_stated" else []
     return {
         "answer": answer,
