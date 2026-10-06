@@ -31,6 +31,7 @@ class McqFact:
     pages: list
     title: str
     group_key: str
+    source: str = ""
 
 
 def fingerprint(question: str, answer: str = "") -> str:
@@ -493,11 +494,16 @@ def _facts_from_group(group) -> list[McqFact]:
     if re.search(r"Chatrapati|Chhatrapati", text, re.I):
         add(f"Which title is mentioned for {title} in the textbook?", "Chatrapati", "title")
     # Extra age / tax / monument / minister seeds from primary text.
-    age_only = re.search(r"(?:Although he was|he was) only (\d{1,2}) years old", text, re.I)
+    # Age only when the textbook ties it to a concrete appointment (no invented "became prominent").
+    age_only = re.search(
+        r"appointed as (?:the )?([A-Z][A-Za-z]+)\.?\s+(?:Although|Though|When|As)?\s*he was only (\d{1,2}) years old",
+        text,
+        re.I,
+    )
     if age_only:
         add(
-            f"How old was {title} when he became prominent, according to the textbook?",
-            f"{age_only.group(1)} years old",
+            f"How old was {title} when he was appointed {age_only.group(1)}, according to the textbook?",
+            f"{age_only.group(2)} years old",
             "age",
         )
     if re.search(r"Chauth", text):
@@ -764,17 +770,8 @@ def _scan_pool(text: str) -> dict[str, list[str]]:
             continue
         push("place", place)
     for title in GROUP_TITLE.values():
-        if title.lower() in {
-            "taj mahal",
-            "din-e-ilahi",
-            "guerrilla warfare",
-            "mansabdari system",
-            "mughal rule",
-            "the marathas",
-            "the ahom dynasty",
-            "administration",
-            "the peshwas",
-        }:
+        # Only real people may be person distractors (never events such as "Battle near Bhopal").
+        if title not in _person_titles():
             continue
         if re.search(rf"\b{re.escape(title)}\b", blob, re.I):
             push("person", title)
@@ -788,13 +785,195 @@ def _scan_pool(text: str) -> dict[str, list[str]]:
     return pool
 
 
+def _person_titles() -> set[str]:
+    from rag.engine.topic_map import RULER_KEYS
+
+    names = {GROUP_TITLE[key] for key in RULER_KEYS if key in GROUP_TITLE}
+    for table in CURRICULUM_PERSON.values():
+        names.update(table)
+    names.update({"Umar Sheikh", "Bairam Khan", "Mumtaz Mahal", "Dadoji Kondadeo", "Nizam-ul-Mulk",
+                  "Balaji Vishwanath", "Sambhaji", "Tulsidas", "Surdas"})
+    return names
+
+
+STEM_GENERIC = {
+    "which", "what", "whom", "place", "region", "according", "textbook", "mentioned", "connection",
+    "with", "from", "does", "when", "where", "became", "become", "person", "answer", "following",
+    "these", "this", "that", "into", "under", "about", "there", "their", "have", "were",
+}
+
+
+def _sentences(text: str) -> list[str]:
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", " ".join((text or "").split())) if s.strip()]
+
+
+def _has_value(sentence: str, value: str) -> bool:
+    return bool(re.search(rf"(?<![A-Za-z]){re.escape(value)}(?![A-Za-z])", sentence or "", re.I))
+
+
+def _stem_keys(question: str, title: str) -> set[str]:
+    title_tokens = set(re.findall(r"[a-z]{4,}", (title or "").lower()))
+    out = set()
+    for token in re.findall(r"[a-z]{4,}", (question or "").lower()):
+        if token in STEM_GENERIC or token in title_tokens:
+            continue
+        out.add(token[:6])
+    return out
+
+
+def _support_sentence(text: str, fact: McqFact) -> str:
+    """Textbook sentence that supports the correct answer ('' when unsupported)."""
+    keys = _stem_keys(fact.question, fact.title)
+    title_hit = fact.kind == "person" and fact.answer.lower() == (fact.title or "").lower()
+    best, best_score = "", -1
+    for sentence in _sentences(text):
+        if not title_hit and not _has_value(sentence, fact.answer):
+            continue
+        low = sentence.lower()
+        score = sum(1 for key in keys if key in low)
+        if title_hit and score == 0:
+            continue
+        if score > best_score:
+            best, best_score = sentence, score
+    return best
+
+
+def _mentions_topic(text: str, keys: set[str]) -> bool:
+    from rag.engine.classify import TOPIC_ALIASES
+
+    low = (text or "").lower()
+    for key in keys:
+        names = [alias.lower() for alias in TOPIC_ALIASES.get(key, (key,)) if alias.isascii()]
+        title = GROUP_TITLE.get(key)
+        if title and title in _person_titles():
+            names.append(title.lower())
+            head = re.split(r"[\s\-]+", title.lower())[0]
+            if "-" in title and len(head) >= 4:
+                names.append(head)
+        if any(re.search(rf"(?<![a-z]){re.escape(name)}(?![a-z])", low) for name in names if name):
+            return True
+    return False
+
+
+CLOZE_LEAD_RE = re.compile(
+    r"^((?:But|And|Hence|Thus|Although|However,|In addition to this,|After this,)\s+)?(he|she)\b", re.I
+)
+CLOZE_HEADING_RE = re.compile(r"^[A-Z][A-Za-z\- ]{2,30}\s:\s+")
+
+
+def _sentence_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", CLOZE_HEADING_RE.sub("", (text or "").strip()).lower())
+
+
+def _cloze_spans(sentence: str) -> list[tuple[str, str]]:
+    """Answer spans of types the generator already recognises (year, age, place, lexicon term, person)."""
+    found: list[tuple[str, str]] = []
+
+    def add(pattern: str, kind: str) -> None:
+        match = re.search(rf"(?<![A-Za-z]){pattern}(?![A-Za-z])", sentence)
+        if match and not any(match.group(0).lower() in v.lower() or v.lower() in match.group(0).lower() for v, _ in found):
+            found.append((match.group(0), kind))
+
+    for value in YEAR_RE.findall(sentence):
+        add(re.escape(value), "year")
+    for value in re.findall(r"\b(\d{1,2}) years? old", sentence):
+        add(re.escape(value) + r" years? old", "age")
+    for place in _places_in(sentence):
+        add(re.escape(place), "river" if place.lower() in {"yamuna", "narmada", "chambal"} else "place")
+    for kind, values in LEXICON.items():
+        for value in values:
+            add(re.escape(value), kind)
+    for name in sorted(_person_titles(), key=len, reverse=True):
+        add(re.escape(name), "person")
+    return sorted(found, key=lambda item: sentence.find(item[0]))
+
+
+def _cloze_facts(group, asked: set[str]) -> list[McqFact]:
+    """Fallback: a verbatim textbook sentence about the topic with one recognised span blanked out."""
+    from rag.engine.entity import _resolve_subject
+    from rag.engine.topic_map import RULER_KEYS
+
+    facts: list[McqFact] = []
+    seen: set[str] = set()
+    sentences = [CLOZE_HEADING_RE.sub("", s) for s in _sentences(_group_text(group))]
+    for index, sentence in enumerate(sentences):
+        key = _sentence_key(sentence)
+        words = sentence.lower().split()
+        grams = [" ".join(words[i : i + 4]) for i in range(len(words) - 3)]
+        duplicate = key in seen or len(grams) != len(set(grams))  # repeated / garbled chunk text
+        seen.add(key)
+        if duplicate or not 8 <= len(words) <= 40:
+            continue
+        text, inserted = sentence, ""
+        lead = CLOZE_LEAD_RE.match(sentence)
+        if lead:  # a leading pronoun is kept only when the previous sentence's subject is the topic
+            subject = _resolve_subject(sentences[index - 1], None)[0] if index else None
+            if subject not in asked or subject not in RULER_KEYS or not GROUP_TITLE.get(subject):
+                continue
+            inserted = GROUP_TITLE[subject]
+            text = sentence[: lead.start(2)] + inserted + sentence[lead.end(2) :]
+        elif not _mentions_topic(sentence, asked):
+            continue
+        page = next(
+            (
+                item.get("printed_page_number") or item.get("textbook_page_number")
+                for item in group.chunks
+                if key[:60] in re.sub(r"[^a-z0-9]", "", (item.get("text") or "").lower())
+            ),
+            None,
+        )
+        for value, kind in _cloze_spans(text):
+            if inserted and value.lower() in inserted.lower():
+                continue  # never ask for a name the textbook sentence does not contain
+            start = text.find(value)
+            facts.append(
+                McqFact(
+                    question=f'Fill in the blank (textbook): "{text[:start]}______{text[start + len(value):]}"',
+                    answer=value,
+                    kind=kind,
+                    pages=[page] if page is not None else list(group.pages or []),
+                    title=group.title,
+                    group_key=group.key,
+                    source=sentence,
+                )
+            )
+    return facts
+
+
+def _cloze_distractors(fact: McqFact, facts, scanned, titles, topics, sentences: list[str]) -> list[str]:
+    """Grounded same-category options; drop any that another textbook sentence makes correct."""
+
+    def stems(value: str) -> set[str]:
+        return {w[:6] for w in re.findall(r"[a-z]{4,}", value.lower()) if w not in STEM_GENERIC}
+
+    base = stems(fact.source.replace(fact.answer, " "))
+    out = []
+    for value in _grounded_distractors(fact, facts, scanned, titles, topics, support=fact.source):
+        head = next((w for w in value.split() if w[:1].isupper()), value)
+        if value.lower() in fact.answer.lower() or fact.answer.lower() in value.lower() or _has_value(fact.question, head):
+            continue
+        if any(
+            _sentence_key(s) != _sentence_key(fact.source)
+            and _has_value(s, value)
+            and len(base & stems(s)) >= max(3, int(0.6 * len(base)))
+            for s in sentences
+        ):
+            continue
+        out.append(value)
+    return out
+
+
 def _grounded_distractors(
     fact: McqFact, facts: list[McqFact], scanned: dict[str, list[str]], titles: list[str], topics: set[str] | None = None,
+    support: str = "", context: str = "",
 ) -> list[str]:
     """Same-category distractors only; never cross-fill from other semantic types."""
     out: list[str] = []
     seen = {fact.answer.lower()}
     kind = _classify_answer_kind(fact.answer, fact.kind)
+    stem_keys = _stem_keys(fact.question, fact.title)
+    context_sentences = _sentences(context)
+    people = _person_titles()
 
     def push(value: str) -> None:
         value = _short(value)
@@ -803,12 +982,22 @@ def _grounded_distractors(
         key = value.lower()
         if key in seen:
             return
-        # Reject options that merely echo the stem (except person names).
-        if key in fact.question.lower() and kind != "person":
+        # Reject options that echo the stem (e.g. the subject offered as his own father).
+        if _has_value(fact.question, value):
             return
         # Enforce same semantic bucket only.
         cand_kind = _classify_answer_kind(value, kind)
         if _bucket(cand_kind) != _bucket(kind):
+            return
+        if _bucket(kind) == "person" and value not in people and value not in {f.answer for f in facts}:
+            return
+        # Reject a distractor that the textbook itself makes a correct answer.
+        if support and _has_value(support, value):
+            return
+        if stem_keys and any(
+            _has_value(sentence, value) and any(k in sentence.lower() for k in stem_keys)
+            for sentence in context_sentences
+        ):
             return
         seen.add(key)
         out.append(value)
@@ -829,16 +1018,7 @@ def _grounded_distractors(
     # 3) Person questions may use other ruler names from the allowed topic titles
     if kind == "person":
         for title in titles:
-            if title.lower() in {
-                "taj mahal",
-                "administration",
-                "mughal rule",
-                "the marathas",
-                "the peshwas",
-                "guerrilla warfare",
-                "mansabdari system",
-                "din-e-ilahi",
-            }:
+            if title not in people:
                 continue
             push(title)
         for item in scanned.get("person", []):
@@ -906,10 +1086,17 @@ def mcqs_from_pack(
     facts: list[McqFact] = []
     titles = []
     blob = ""
+    group_text: dict[str, str] = {}
     for group in plan:
         facts.extend(_facts_from_group(group))
         titles.append(group.title)
-        blob += " " + _group_text(group)
+        text = _group_text(group)
+        group_text[group.key] = group_text.get(group.key, "") + " " + text
+        blob += " " + text
+    from rag.engine.pack import PLACE_EVENT_KEYS
+    from rag.engine.topic_map import RULER_KEYS
+
+    asked = {key for key in topics if key in RULER_KEYS or key in PLACE_EVENT_KEYS}
     # Broader distractor pool from family-allowed groups (still no Sher into Mughals).
     scan_blob = blob
     for group in plan_full:
@@ -925,28 +1112,24 @@ def mcqs_from_pack(
     used_q = set()
     used_sig = set()
     items = []
-    for fact in _round_robin(facts):
-        if len(items) >= count:
-            break
-        if _is_vacuous_question(fact.question):
-            continue
+
+    def admit(fact: McqFact, distractors: list[str]) -> bool:
         fp = fingerprint(fact.question, fact.answer)
         stem_key = re.sub(r"[^a-z0-9]+", "", fact.question.lower())
         sig = _stem_signature(fact.question)
-        if fp in skip or fact.question.lower() in used_q or stem_key in used_q or sig in used_sig:
-            continue
-        distractors = _grounded_distractors(fact, facts, scanned, titles, topics)
+        if _is_vacuous_question(fact.question) or fp in skip or fact.question.lower() in used_q:
+            return False
+        if stem_key in used_q or sig in used_sig:
+            return False
         options = _pad_options(fact.answer, distractors)
-        if not options:
-            continue
-        if len({opt.strip().lower() for opt in options if opt and opt.strip()}) < 4:
-            continue
+        if not options or len({opt.strip().lower() for opt in options if opt and opt.strip()}) < 4:
+            return False
         if any(not (opt or "").strip() for opt in options):
-            continue
+            return False
         rotate = len(items) % 4
         ordered = options[rotate:] + options[:rotate]
         if fact.answer not in ordered:
-            continue
+            return False
         letter = LETTERS[ordered.index(fact.answer)]
         pages = [p for p in (fact.pages or []) if p is not None]
         items.append(
@@ -963,23 +1146,58 @@ def mcqs_from_pack(
         used_q.add(fact.question.lower())
         used_q.add(stem_key)
         used_sig.add(sig)
+        return True
+
+    used_answers: dict[str, set[str]] = {}
+    for fact in _round_robin(facts):
+        if len(items) >= count:
+            break
+        # Every question must test the requested topic.
+        base = (fact.group_key or "").split(":")[0]
+        if asked and base not in asked and not _mentions_topic(f"{fact.question} {fact.answer}", asked):
+            continue
+        support = _support_sentence(group_text.get(fact.group_key, blob), fact) or _support_sentence(blob, fact)
+        if not support:
+            continue
+        distractors = _grounded_distractors(
+            fact, facts, scanned, titles, topics, support=support, context=scan_blob or blob
+        )
+        if fingerprint(fact.question, fact.answer) in skip or admit(fact, distractors):
+            used_answers.setdefault(_sentence_key(support), set()).add(fact.answer.lower())
+    # Fill-in-the-blank fallback only when the fixed patterns fall short; never forced to the requested count.
+    if len(items) < count and asked:
+        sentences = _sentences(scan_blob or blob)
+        done: set[str] = set()
+        topic_answer_used = False
+        for group in plan:
+            for fact in _cloze_facts(group, asked):
+                key = _sentence_key(fact.source)
+                if len(items) >= count or key in done or fact.answer.lower() in used_answers.get(key, set()):
+                    continue
+                is_topic = _mentions_topic(fact.answer, asked)
+                if is_topic and topic_answer_used:
+                    continue
+                if admit(fact, _cloze_distractors(fact, facts, scanned, titles, topics, sentences)):
+                    done.add(key)
+                    topic_answer_used = topic_answer_used or is_topic
     fps = [item["fingerprint"] for item in items]
     if not items:
         if previous_fingerprints or previous_answer:
             return (
-                "The prescribed textbook does not support additional unique practice questions "
-                "of this kind without repeating earlier questions.",
+                "No further questions could be generated reliably from the textbook passages for this topic "
+                "without repeating earlier questions. No questions are added beyond the textbook.",
                 [],
             )
         return (
-            "The prescribed textbook does not support enough unique practice questions "
-            "of this kind from the available evidence.",
+            "No questions could be generated reliably from the textbook passages for this topic "
+            f"(requested {count}). No questions are added beyond the textbook.",
             [],
         )
     body = format_mcqs(items)
     if len(items) < count:
+        noun = "question" if len(items) == 1 else "questions"
         body += (
-            f"\n\nThe prescribed textbook supports {len(items)} unique practice questions of this kind "
-            f"(requested {count}). No extra questions are added beyond the textbook."
+            f"\n\nOnly {len(items)} {noun} could be generated reliably from the textbook passages for this topic "
+            f"(requested {count}). No questions are added beyond the textbook."
         )
     return body, fps

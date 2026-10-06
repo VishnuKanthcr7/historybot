@@ -544,3 +544,254 @@ def entity_readable(groups: list) -> str:
             continue
         parts.append(" ".join(sentences[:12]))
     return "\n\n".join(parts)
+
+
+# --- Subject-resolved evidence for single-person identity questions --------------
+# Multi-person textbook passages ("After Shivaji died, he imprisoned Sambhaji...") must not
+# hand another person's actions to the asked person. Each sentence's grammatical subject is
+# resolved (explicit name, or a pronoun carried from the previous subject / heading) and
+# only sentences whose subject is the focus person (or that describe "his ..." while the
+# focus person is the current subject) are kept.
+
+FOCUS_LEAD_RE = re.compile(
+    r"^(?:but|and|thus|hence|therefore|so|then|later|also|however|moreover|"
+    r"in this manner|in this way|at this juncture|as a result)\b,?\s*",
+    re.I,
+)
+FOCUS_SUBORDINATE_RE = re.compile(
+    r"^(?:when|after|since|as|although|though|while|because|before|once|with|due to|"
+    r"in addition to|on|during|following)\b",
+    re.I,
+)
+FOCUS_PRONOUN_RE = re.compile(r"^(?:he|she)\b", re.I)
+FOCUS_NEUTRAL = {
+    "the", "a", "an", "in", "his", "her", "their", "this", "these", "that", "those", "it",
+    "there", "its", "such", "at", "by", "for", "of", "from", "to",
+}
+FOCUS_NOISE_RE = re.compile(r"@?KTBS\s*NOT\s+TO\s+BE\s+REPUBLISHED|@KTBS|Do you know this\?", re.I)
+FOCUS_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(])")
+# Chunk-overlap smash: "...expanding the Thus he established..." / "...areas near He launched..."
+FOCUS_SMASH_RE = re.compile(
+    r"\b(the|a|an|of|to|near|and|in|with|for|by|including|from|at)\s+"
+    r"(?=(?:Thus|He|She|They|This|These|Hence|But|When|After|Although|In addition|Due to)\b)"
+)
+FOCUS_DANGLING_RE = re.compile(
+    r"\b(?:the|a|an|of|to|near|and|in|with|for|by|including|from|at|as|his|her|their)[.!?]?$", re.I
+)
+
+
+def _focus_alias_table() -> list[tuple[str, str]]:
+    rows = []
+    for key in RULER_KEYS:
+        names = {alias.lower() for alias in _aliases(key)}
+        title = _titles().get(key)
+        if title:
+            names.add(title.lower())
+            if "-" in title:
+                head = re.split(r"[\s\-]+", title.lower())[0]
+                if len(head) >= 4:
+                    names.add(head)
+        for name in names:
+            rows.append((key, name))
+    rows.sort(key=lambda item: len(item[1]), reverse=True)
+    return rows
+
+
+def _person_spans(text: str) -> list[tuple[int, int, str]]:
+    lowered = (text or "").lower()
+    titles = _titles()
+    spans: list[tuple[int, int, str]] = []
+    taken: list[tuple[int, int]] = []
+    for key, name in _focus_alias_table():
+        others_first = []
+        for other, title in titles.items():
+            if other != key and title:
+                first = title.split()[0].lower()
+                if first not in ARTICLE_WORDS and not name.startswith(first):
+                    others_first.append(first)
+        for match in re.finditer(r"(?<![a-z])" + re.escape(name) + r"(?![a-z])", lowered):
+            if any(a < match.end() and match.start() < b for a, b in taken):
+                continue
+            prefix = lowered[max(0, match.start() - 16) : match.start()].rstrip()
+            if any(prefix.endswith(first) for first in others_first):
+                continue
+            spans.append((match.start(), match.end(), key))
+            taken.append((match.start(), match.end()))
+    spans.sort()
+    return spans
+
+
+def _resolve_subject(sentence: str, current: str | None) -> tuple[str | None, str, int]:
+    """Return (subject key | 'OTHER' | None, how, pronoun_offset)."""
+    text = sentence.strip()
+    spans = _person_spans(text)
+    off = 0
+    lead = FOCUS_LEAD_RE.match(text)
+    if lead:
+        off = lead.end()
+    head_keys: list[str] = []
+    rest = text[off:]
+    sub = FOCUS_SUBORDINATE_RE.match(rest)
+    if sub:
+        comma = rest.find(",")
+        if comma > 0:
+            head_keys = [key for (a, _b, key) in spans if off <= a < off + comma]
+            off = off + comma + 1
+        else:
+            off = off + sub.end()
+    while off < len(text) and text[off] in " ,;:":
+        off += 1
+    lead = FOCUS_LEAD_RE.match(text[off:])
+    if lead:
+        off += lead.end()
+    tail = text[off:]
+    if FOCUS_PRONOUN_RE.match(tail):
+        if head_keys and not _is_posthumous_bleed(text, head_keys[-1]):
+            return head_keys[-1], "pronoun-head", off
+        return current, "pronoun", off
+    for a, b, key in spans:
+        if a == off:
+            if text[b : b + 2] in ("'s", "\u2019s"):
+                return "OTHER", "possessive", -1
+            return key, "name", -1
+    first = re.match(r"[A-Za-z][A-Za-z'\-]*", tail)
+    word = first.group(0) if first else ""
+    if word and word[0].isupper() and word.lower() not in FOCUS_NEUTRAL:
+        return "OTHER", "other-name", -1
+    later = [key for (a, _b, key) in spans if a >= off]
+    if later:
+        return later[0], "name-later", -1
+    if re.search(r"\b(?:he|she)\b", tail, re.I):
+        return current, "pronoun-inner", -1
+    return None, "neutral", -1
+
+
+# A sentence that only makes sense after the one before it ("Due to this, ... came to Baji Rao").
+FOCUS_ANAPHOR_RE = re.compile(
+    r"^(?:due to this|because of this|as a result|thus|hence|therefore|in addition to this|so)\b,?\s*", re.I
+)
+FOCUS_HEADING_RE = re.compile(
+    r"(?:^|(?<=[.!?])\s+)([A-Z][A-Za-z'\u2019\-]+(?:\s+[A-Za-z'\u2019\-]+){0,3})\s*:\s*"
+)
+
+
+def _focus_segments(text: str) -> list[tuple[str | None, str]]:
+    """(heading, body) pairs; a heading only counts at text start or right after a sentence end."""
+    blob = " ".join((text or "").split())
+    out: list[tuple[str | None, str]] = []
+    last = 0
+    heading = None
+    for match in FOCUS_HEADING_RE.finditer(blob):
+        if re.match(r"(?:He|She|They|It|There|This)\b", match.group(1)):
+            continue
+        out.append((heading, blob[last:match.start()]))
+        heading = match.group(1)
+        last = match.end()
+    out.append((heading, blob[last:]))
+    return [(h, b.strip()) for h, b in out if b.strip()]
+
+
+def _collapse_repeats(text: str) -> str:
+    """Remove chunk-overlap duplicates: a run of words immediately repeated ("X Y Z X Y Z")."""
+    words = (text or "").split()
+    changed = True
+    while changed:
+        changed = False
+        for size in range(min(60, len(words) // 2), 1, -1):
+            for i in range(0, len(words) - 2 * size + 1):
+                if words[i : i + size] == words[i + size : i + 2 * size]:
+                    del words[i + size : i + 2 * size]
+                    changed = True
+                    break
+            if changed:
+                break
+    return " ".join(words)
+
+
+def entity_focus_evidence(chunks: list[dict], entity: str | None) -> list[dict]:
+    """Keep only sentences whose resolved subject is the asked person (page-preserving)."""
+    if not entity or entity not in RULER_KEYS or not chunks:
+        return []
+    title = _titles().get(entity) or entity
+    focus_names = sorted({alias.lower() for alias in _aliases(entity)} | {title.lower()}, key=len, reverse=True)
+    possessive = re.compile(
+        r"(?<![a-z])(?:" + "|".join(re.escape(n) for n in focus_names) + r")(?:'s|\u2019s)", re.I
+    )
+    ordered = sorted(
+        enumerate(chunks),
+        key=lambda pair: ((_page(pair[1]) or 9999), str(pair[1].get("chunk_id") or ""), pair[0]),
+    )
+    out: list[dict] = []
+    seen: set[str] = set()
+    current: str | None = None
+    last_page: int | None = None
+    prev_sentence: tuple[str, bool] | None = None  # (pronoun-resolved text, kept?)
+    for _idx, item in ordered:
+        page = _page(item)
+        if last_page is None or page is None or page - last_page > 1:
+            current = None
+            prev_sentence = None
+        last_page = page
+        kept: list[str] = []
+        clean = _collapse_repeats(FOCUS_NOISE_RE.sub(" ", item.get("text") or ""))
+        clean = FOCUS_SMASH_RE.sub(lambda m: m.group(1) + ". ", clean)
+        # Inserted box/caption title: "...Mughal Babarnama - (Tuzuk-e-Babari) Babar wrote..." -> drop the title fragment
+        clean = re.sub(r"[^.!?]*\([^()]{0,60}\)\s+(?=[A-Z][a-z]+\s+[a-z])", " ", clean)
+        for heading, body in _focus_segments(clean):
+            if heading:
+                # "Akbar's Hindu policy :" -> Akbar; "Din-e-Ilahi :" -> the term (not a person)
+                people = [key for (_a, _b, key) in _person_spans(heading)]
+                current = people[0] if people else heading_entity_key(heading + " :")
+            for sentence in FOCUS_SENT_SPLIT.split(body):
+                sentence = " ".join(sentence.split())
+                if len(sentence.split()) < 3 or FOCUS_DANGLING_RE.search(sentence):
+                    continue
+                before = current
+                subject, how, pron = _resolve_subject(sentence, current)
+                keep = False
+                if subject == entity:
+                    keep = True
+                elif before == entity and subject in (None, "OTHER"):
+                    keep = bool(re.search(r"\b(?:his|him)\b", sentence, re.I) or possessive.search(sentence))
+                elif before == entity and subject in RULER_KEYS:
+                    keep = bool(re.search(r"\b(?:was|is)\s+(?:his|her)\b", sentence, re.I))
+                elif subject in ("OTHER", None) and possessive.search(sentence):
+                    keep = True
+                if subject in RULER_KEYS:
+                    current = subject
+                elif subject == "OTHER" and not keep:
+                    current = None
+                resolved_text = sentence
+                if subject in RULER_KEYS and pron >= 0 and how.startswith("pronoun"):
+                    name = _titles().get(subject) or subject
+                    resolved_text = sentence[:pron] + name + sentence[pron + 2 :]
+                    resolved_text = resolved_text[0].upper() + resolved_text[1:]
+                previous = prev_sentence
+                prev_sentence = (resolved_text, keep)
+                if not keep:
+                    continue
+                if FOCUS_ANAPHOR_RE.match(sentence):
+                    if previous and not previous[1]:
+                        # keep the dropped antecedent as context so "this" is not re-attached to the wrong fact
+                        ctx = previous[0]
+                        ctx_norm = re.sub(r"[^a-z0-9]+", " ", ctx.lower()).strip()
+                        if ctx_norm not in seen:
+                            seen.add(ctx_norm)
+                            kept.append(ctx)
+                    elif not previous:
+                        sentence = FOCUS_ANAPHOR_RE.sub("", sentence)
+                        sentence = sentence[0].upper() + sentence[1:]
+                if subject == entity and pron >= 0 and how.startswith("pronoun"):
+                    sentence = sentence[:pron] + title + sentence[pron + 2 :]
+                    sentence = sentence[0].upper() + sentence[1:]
+                elif subject != entity and re.match(r"^His\b", sentence):
+                    # "His father, X, was ..." -> "<Focus>'s father, X, was ..." (no subject confusion)
+                    sentence = title + "'s" + sentence[3:]
+                norm = re.sub(r"[^a-z0-9]+", " ", sentence.lower()).strip()
+                if norm in seen:
+                    continue
+                seen.add(norm)
+                kept.append(sentence)
+        if kept:
+            out.append({**item, "text": " ".join(kept), "focus_filtered": True})
+    return out

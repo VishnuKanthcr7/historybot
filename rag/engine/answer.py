@@ -52,7 +52,7 @@ from rag.engine.depth import (
     prefer_unused_chunks,
 )
 from rag.engine.sanitize import sanitize_student_text
-from rag.engine.validate import is_refusal, unsupported_named_items, validate_answer
+from rag.engine.validate import enforce_evidence_support, is_refusal, unsupported_named_items, validate_answer
 from rag.llm.client import complete
 from rag.llm.config import RAG_TOP_K
 from rag.prompts.tutor import KANNADA_UNAVAILABLE, SYSTEM_PROMPT, refusal_text
@@ -226,6 +226,14 @@ def answer_question(
     elif mode == "DETAILED":
         top_k = max(top_k, 14)
     top_k = max(RAG_TOP_K, top_k)
+    if not more and not looks_like_mcq_request(search_question) and not looks_like_mcq_request(rag_question):
+        from rag.engine.facts import try_fact_answer
+
+        fact_result = try_fact_answer(search_question, history)
+        if fact_result is not None:
+            timings["T8_total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            fact_result["timings"] = timings
+            return fact_result
     t_retrieve = time.perf_counter()
     primary_hits = retrieve_primary(retrieval_query, top_k=top_k, language="en")
     timings["T1_retrieve_ms"] = round((time.perf_counter() - t_retrieve) * 1000, 1)
@@ -286,7 +294,7 @@ def answer_question(
                 previous_fingerprints=stored_task.get("fingerprints") if more else [],
             )
             if exam:
-                sources = _sources(supporting_evidence(exam, selected, min_overlap=2))
+                sources = _sources(supporting_evidence(_mcq_attribution_text(exam), selected, min_overlap=2))
                 answer = _decorate_student_answer(rag_question, exam, off_labels)
                 answer = f"{answer}\n\n{_citation_block(sources)}"
                 result = _payload(
@@ -446,7 +454,8 @@ def answer_question(
         result["timings"] = timings
         return result
 
-    payload = _ask_llm(search_question, primary_selected, mode, strict=False, question_type=question_type, depth_profile=depth_profile, entity=pack.entity)
+    llm_evidence = _identity_focus_evidence(search_question, primary_selected, question_type, pack.entity)
+    payload = _ask_llm(search_question, llm_evidence, mode, strict=False, question_type=question_type, depth_profile=depth_profile, entity=pack.entity)
     regenerations = 0
     ok, reason = validate_answer(
         payload["raw"],
@@ -459,7 +468,7 @@ def answer_question(
     )
     if not ok:
         regenerations = 1
-        payload = _ask_llm(search_question, primary_selected, mode, strict=True, question_type=question_type, depth_profile=depth_profile, entity=pack.entity)
+        payload = _ask_llm(search_question, llm_evidence, mode, strict=True, question_type=question_type, depth_profile=depth_profile, entity=pack.entity)
         ok, reason = validate_answer(
             payload["raw"],
             "en",
@@ -472,9 +481,9 @@ def answer_question(
     claims = unsupported_named_items(payload.get("raw") or "", selected)
     if not ok or is_refusal(payload["raw"], "en"):
         if evidence_is_sufficient(selected) and not looks_like_injection(rag_question):
-            raw = _safe_from_evidence(selected, search_question)
+            raw = _safe_from_evidence(llm_evidence, search_question)
             reason = f"{reason}+extractive_fallback"
-            sources = _sources(supporting_evidence(raw, selected, min_overlap=1))
+            sources = _sources(supporting_evidence(raw, llm_evidence, min_overlap=1))
             answer = f"{_decorate_student_answer(rag_question, raw, off_labels)}\n\n{_citation_block(sources)}"
             result = _payload(
                 answer,
@@ -510,10 +519,16 @@ def answer_question(
         return result
 
     raw = _strip_invented_pages(payload["raw"])
+    if question_type == "DIRECT":
+        from rag.engine.coverage import GROUP_TITLE
+        from rag.engine.topic_map import RULER_KEYS
+
+        title = GROUP_TITLE.get(pack.entity) if pack.entity in RULER_KEYS else None
+        raw = enforce_evidence_support(raw, llm_evidence, title)
     raw = _apply_partial_refusals(rag_question, raw, selected)
     raw = _apply_why_motive_note(rag_question, raw, selected, pack.entity, depth_profile.depth)
     raw = _decorate_student_answer(rag_question, raw, off_labels)
-    sources = _sources(supporting_evidence(raw, selected, min_overlap=1 if mode == "DETAILED" else 2))
+    sources = _sources(supporting_evidence(raw, llm_evidence, min_overlap=1 if mode == "DETAILED" else 2))
     answer = f"{raw}\n\n{_citation_block(sources)}"
     result = _payload(
         answer,
@@ -792,6 +807,36 @@ def _payload(
         "fallback_used": fallback,
         **extra,
     }
+
+
+def _identity_focus_evidence(question: str, primary: list[dict], question_type: str, entity: str | None) -> list[dict]:
+    """For a single-person DIRECT question, give the LLM only sentences whose subject is that person."""
+    from rag.engine.entity import entity_focus_evidence
+    from rag.engine.topic_map import RULER_KEYS
+
+    if question_type != "DIRECT" or not entity or entity not in RULER_KEYS:
+        return primary
+    people = {key for key in extract_topics(question or "") if key in RULER_KEYS}
+    if people != {entity}:
+        return primary
+    focused = entity_focus_evidence(primary, entity)
+    if not focused or sum(len((item.get("text") or "").split()) for item in focused) < 25:
+        return primary
+    return focused
+
+
+def _mcq_attribution_text(exam: str) -> str:
+    """Only stems + correct options decide MCQ citation pages (distractors are not claims)."""
+    lines = []
+    for block in re.split(r"\n\s*\n", exam or ""):
+        stem = re.match(r"\s*\d+\.\s+(.+)", block)
+        if not stem:
+            continue
+        options = dict(re.findall(r"^([A-D])\.\s+(.+)$", block, re.M))
+        letter = re.search(r"Answer:\s*([A-D])", block)
+        correct = options.get(letter.group(1), "") if letter else ""
+        lines.append(f"{stem.group(1).splitlines()[0].rstrip('?')} - {correct}.")
+    return "\n".join(lines) or exam
 
 
 def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, question_type: str = "DIRECT", depth_profile=None, entity: str | None = None) -> dict:
