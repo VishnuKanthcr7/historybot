@@ -501,7 +501,7 @@ def _drop_empty_headings(text: str) -> str:
 def _filter_entity_sentences(text: str, entity: str | None) -> str:
     if not entity or not text:
         return text
-    from rag.engine.entity import entity_subject_score
+    from rag.engine.entity import entity_subject_score, keep_term_antecedents
 
     parts: list[str] = []
     for block in re.split(r"(\n\s*\n)", text):
@@ -523,17 +523,16 @@ def _filter_entity_sentences(text: str, entity: str | None) -> str:
             if bullet:
                 prefix = bullet.group(1)
                 body = line[len(prefix) :]
-            kept: list[str] = []
-            for sent in re.split(r"(?<=[.!?])\s+", body):
-                sent = sent.strip()
-                if not sent:
-                    continue
+            sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", body) if s.strip()]
+            flags: list[bool] = []
+            for sent in sents:
                 if re.search(r"\[Pages?\s+", sent, re.I):
-                    kept.append(sent)
+                    flags.append(True)
                     continue
                 score, _reason = entity_subject_score(sent, entity)
-                if score >= 3:
-                    kept.append(sent)
+                flags.append(score >= 3)
+            flags = keep_term_antecedents(sents, flags, entity)
+            kept: list[str] = [sent for sent, keep in zip(sents, flags) if keep]
             if kept:
                 lines.append(prefix + " ".join(kept))
         parts.append("\n".join(lines))
@@ -589,7 +588,10 @@ def generate_entity_explanation(question: str, chunks: list[dict], entity: str |
     score = coverage_score(text, plan)
     draft_score = coverage_score(draft, plan)
     regenerated = False
-    thin = len(text.split()) < max(70, int(len(draft.split()) * 0.55))
+    draft_words = len(draft.split())
+    # Short textbook drafts (single terms) must not force padding past the evidence.
+    thin_floor = max(min(70, int(draft_words * 0.8)), int(draft_words * 0.55))
+    thin = len(text.split()) < thin_floor
     if score["missing"] or thin:
         missing_groups = [group for group in plan if group.key in score["missing"]] or plan
         regen_user = (
@@ -612,7 +614,7 @@ def generate_entity_explanation(question: str, chunks: list[dict], entity: str |
                 text = extra_text
                 regenerated = True
                 score = coverage_score(text, plan)
-                thin = len(text.split()) < max(70, int(len(draft.split()) * 0.55))
+                thin = len(text.split()) < thin_floor
         except (LlmError, TimeoutError, OSError):
             pass
         if score["missing"] or thin:

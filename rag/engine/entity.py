@@ -66,6 +66,33 @@ STOP_MARKERS = {
 }
 
 
+ARTICLE_WORDS = {"the", "a", "an"}
+
+# Textbook term introduction that refers back: "<context>. These were called 'Mansabs' ..."
+TERM_BACKREF_RE = re.compile(
+    r"^(?:these|this|those|such)(?:\s+[a-z]+)?\s+(?:were|was|are|is)\s+(?:called|known|named|termed)\b",
+    re.I,
+)
+
+
+def keep_term_antecedents(sentences: list[str], keep: list[bool], entity: str | None) -> list[bool]:
+    """For non-person term entities, also keep the sentence a kept term introduction refers back to."""
+    out = list(keep)
+    if not entity or entity in RULER_KEYS:
+        return out
+    for idx in range(1, len(sentences)):
+        prev = (sentences[idx - 1] or "").strip()
+        if (
+            keep[idx]
+            and not keep[idx - 1]
+            and TERM_BACKREF_RE.match((sentences[idx] or "").strip())
+            and len(prev.split()) >= 5
+            and not _looks_corrupt_sentence(prev)
+        ):
+            out[idx - 1] = True
+    return out
+
+
 def _page(item: dict) -> int | None:
     value = item.get("printed_page_number") or item.get("textbook_page_number")
     try:
@@ -83,7 +110,11 @@ def _mentions(text: str, entity: str) -> int:
     others_first = []
     for key, title in _titles().items():
         if key != entity and title:
-            others_first.append(title.split()[0].lower())
+            first = title.split()[0].lower()
+            # "The Peshwas"/"The Marathas" must not make "the Mansabdari system" a non-mention.
+            if first in ARTICLE_WORDS:
+                continue
+            others_first.append(first)
     total = 0
     for alias in _aliases(entity):
         for match in re.finditer(re.escape(alias), lowered):
@@ -223,6 +254,9 @@ def _looks_corrupt_sentence(text: str) -> bool:
         return True
     if re.search(r"do you know this", clean, re.I):
         return True
+    # Chunk-overlap smash: "...achievements of These were called 'Mansabs'..."
+    if re.search(r"\b(?:of|to|and|in|with|for|by|the|a|an)\s+(?:These|This|Those)\s+(?:were|was|is|are)\b", clean):
+        return True
     if re.search(r"\bafter\s+[A-Z][A-Za-z][A-Za-z.\s]{0,24}died,\s+he\b", clean, re.I):
         return True
     if re.match(r"^[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s*:\s*", clean) and "after the death" in clean.lower():
@@ -361,6 +395,9 @@ def _entity_sentences(chunks: list[dict], entity: str) -> list[dict]:
             score, _reason = entity_subject_score(segment, entity)
             if score < 3:
                 continue
+            cleaned = []
+            flags = []
+            reasons = []
             for sent in re.split(r"(?<=[.!?])\s+", segment):
                 clean = re.sub(r"\s+", " ", sent).strip()
                 clean = re.sub(
@@ -369,18 +406,29 @@ def _entity_sentences(chunks: list[dict], entity: str) -> list[dict]:
                     clean,
                 ).strip()
                 words = clean.split()
-                if len(words) < 5 or len(words) > 90:
+                ok = 5 <= len(words) <= 90 and words[-1].lower().strip(".,;:") not in {
+                    "the", "of", "and", "to", "a", "an", "with", "for", "in"
+                }
+                sent_score, sent_reason = entity_subject_score(clean, entity) if ok else (0, "skip")
+                cleaned.append(clean)
+                flags.append(ok and sent_score >= 3)
+                reasons.append(sent_reason)
+            final = keep_term_antecedents(cleaned, flags, entity)
+            pending = ""
+            for idx, clean in enumerate(cleaned):
+                if not final[idx]:
                     continue
-                if words[-1].lower().strip(".,;:") in {"the", "of", "and", "to", "a", "an", "with", "for", "in"}:
+                if not flags[idx]:
+                    # Antecedent of a term introduction: attach to the following kept sentence.
+                    pending = clean
                     continue
-                sent_score, sent_reason = entity_subject_score(clean, entity)
-                if sent_score < 3:
-                    continue
+                text = f"{pending} {clean}".strip() if pending else clean
+                pending = ""
                 key = re.sub(r"[^a-z0-9]+", "", clean.lower())[:80]
                 if key in seen:
                     continue
                 seen.add(key)
-                rows.append({"text": clean, "page": page, "chunk": item, "reason": sent_reason})
+                rows.append({"text": text, "page": page, "chunk": item, "reason": reasons[idx]})
     return rows
 
 
@@ -467,6 +515,8 @@ def entity_readable(groups: list) -> str:
             entity = group.key.split(":", 1)[0]
         sentences = []
         for item in group.chunks:
+            cleaned = []
+            flags = []
             for sent in re.split(r"(?<=[.!?])\s+", item.get("text") or ""):
                 clean = re.sub(r"\s+", " ", sent).strip()
                 clean = re.sub(
@@ -475,14 +525,16 @@ def entity_readable(groups: list) -> str:
                     clean,
                 ).strip()
                 words = clean.split()
-                if len(words) < 5:
-                    continue
-                if words[-1].lower().strip(".,;:") in dangling:
-                    continue
-                if entity:
+                ok = len(words) >= 5 and words[-1].lower().strip(".,;:") not in dangling
+                if ok and entity:
                     score, _reason = entity_subject_score(clean, entity)
-                    if score < 3:
-                        continue
+                    ok = score >= 3
+                cleaned.append(clean)
+                flags.append(ok)
+            final = keep_term_antecedents(cleaned, flags, entity) if entity else flags
+            for clean, keep in zip(cleaned, final):
+                if not keep:
+                    continue
                 key = re.sub(r"[^a-z0-9]+", "", clean.lower())[:80]
                 if key in seen:
                     continue
