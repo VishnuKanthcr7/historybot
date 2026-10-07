@@ -29,7 +29,7 @@ CASES = [
     ("chronology", "Who came after Shivaji?", "supported", ["sambhaji"]),
     ("rephrase", "Who was the father of Humayun?", "supported", ["babur"]),
     ("false-not-stated", "Did Akbar appoint Baji Rao?", "not_stated", ["does not state"]),
-    ("false-contradict", "Did Baji Rao lose near Bhopal?", "contradicted", ["does not state", "bhopal"]),
+    ("false-contradict", "Did Baji Rao lose near Bhopal?", "contradicted", ["no.", "bhopal"]),
     ("unknown", "Who was the father of Zorblatt?", "not_stated", ["does not state"]),
     ("march", "Who tried to march towards Delhi?", "supported", ["nizam", "delhi"]),
 ]

@@ -496,6 +496,22 @@ def _relation_evidence(ev_sents: list[str], focus: str | None) -> list[tuple[str
 
 def relation_conflict(sentence: str, ev_triples: list, focus: str | None) -> str | None:
     """Reason when a relation is reversed in the evidence, or a father/mother/ruler relation names a different party."""
+    # "Humayun, the eldest son of Babur, was his father" keeps the son-of fact and then
+    # asserts the son is the father. A person who the evidence only records as the child
+    # cannot be stated as the father or mother.
+    claimed_parent = re.search(
+        r"\b([A-Z][\w''\-]+(?:\s+[A-Z][\w''\-]+){0,3})\b(?:[^.]{0,80}?)?\bwas\s+(?:his|her|their)\s+(father|mother)\b",
+        sentence,
+    )
+    if claimed_parent:
+        who = _rel_key(claimed_parent.group(1))
+        is_child = any(
+            rel == "parent" and _rel_same(who, child) and not _rel_same(who, parent)
+            for parent, rel, child, _kind in ev_triples
+        )
+        is_parent = any(rel == "parent" and _rel_same(who, parent) for parent, rel, child, _kind in ev_triples)
+        if is_child and not is_parent:
+            return f"reversed parent: {who} is the child"
     for agent, rel, obj, kind in relation_triples(sentence, focus):
         same = [t for t in ev_triples if t[1] == rel]
         if any(_rel_same(agent, a) and _rel_same(obj, o) for a, _r, o, _k in same):
@@ -596,7 +612,7 @@ def enforce_evidence_support(answer: str, evidence: list[dict], title: str | Non
         if not s:
             return None
         if relation_conflict(s, ev_triples, focus):
-            return None
+            return replacement(s)
         tokens = _support_stems(s)
         unsupported = [t for t in tokens if t not in ev_stems]
         nums = [n for n in re.findall(r"\b\d+\b", s) if n not in ev_nums]

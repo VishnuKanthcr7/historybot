@@ -61,7 +61,7 @@ def detect_facet(question: str) -> str | None:
     lowered = (question or "").lower()
     if "prime minister" in lowered:
         lowered = re.sub(r"\bcurrent prime minister\b|\bprime minister\b", " ", lowered)
-    if any(word in lowered for word in ("administration", "administrative")):
+    if any(word in lowered for word in ("administration", "administrative", "administer")):
         return "administration"
     if re.search(r"\bministers?\b", lowered) and "prime minister" not in (question or "").lower():
         return "administration"
@@ -100,13 +100,22 @@ def detect_entity(topic_keys: set[str]) -> str | None:
 
 
 def ruler_counts(text: str) -> dict[str, int]:
+    from rag.engine.entity import _alias_pattern, _later_regnal
+
     lowered = (text or "").lower()
     counts = {}
     for key in RULER_KEYS:
         total = 0
         for alias in TOPIC_ALIASES.get(key, ()):
-            if alias.isascii():
-                total += lowered.count(alias)
+            if not alias.isascii():
+                continue
+            for match in re.finditer(_alias_pattern(alias), lowered):
+                name_end = match.end()
+                if match.group(0).endswith("s") and not alias.lower().endswith("s"):
+                    name_end -= 1
+                if _later_regnal(lowered, name_end):
+                    continue
+                total += 1
         if total:
             counts[key] = total
     return counts
@@ -150,10 +159,17 @@ def entity_has_agency(text: str, entity: str) -> bool:
     if not text or not entity:
         return False
     lowered = text.lower()
+    from rag.engine.entity import _alias_pattern, _later_regnal
+
     aliases = [alias for alias in TOPIC_ALIASES.get(entity, (entity,)) if alias.isascii()]
     for alias in aliases:
-        for match in re.finditer(re.escape(alias), lowered):
-            window = lowered[max(0, match.start() - 36) : match.end() + 100]
+        for match in re.finditer(_alias_pattern(alias), lowered):
+            name_end = match.end()
+            if match.group(0).endswith("s") and not alias.lower().endswith("s"):
+                name_end -= 1
+            if _later_regnal(lowered, name_end):
+                continue
+            window = lowered[max(0, match.start() - 36) : name_end + 100]
             if any(cue in window for cue in AGENCY_CUES):
                 return True
     return False
@@ -415,6 +431,108 @@ def add_same_page_continuations(selected: list[dict], entity: str | None, facet:
     return merged
 
 
+def _who_subject_phrase(question: str) -> str | None:
+    """The person asked about in 'who was Name', when that name is not already a topic."""
+    match = re.search(
+        r"\bwho\s+(?:was|is|were|are)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b",
+        question or "",
+        re.I,
+    )
+    if not match:
+        return None
+    lowered = match.group(1).strip().lower()
+    if len(lowered) < 5:
+        return None
+    for aliases in TOPIC_ALIASES.values():
+        if lowered in {alias.lower() for alias in aliases if alias.isascii()}:
+            return None
+    return lowered
+
+
+def _compact_has(phrase: str, text: str) -> bool:
+    lowered = (text or "").lower()
+    if phrase and phrase in lowered:
+        return True
+    compact = re.sub(r"[\s'’\-]+", "", phrase or "")
+    if len(compact) < 8:
+        return False
+    return compact in re.sub(r"[\s'’\-]+", "", lowered)
+
+
+def _focused_sentences(text: str, phrase: str) -> str:
+    parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text or "") if part.strip()]
+    kept = []
+    seen = set()
+    for index, part in enumerate(parts):
+        if not _compact_has(phrase, part):
+            continue
+        window = []
+        if index > 0 and re.match(r"^(?:since|his|her|he|she)\b", part, re.I):
+            previous = parts[index - 1]
+            if len(previous.split()) <= 30 and re.search(
+                r"\b(power|minor|age|because|father|mother|son|daughter)\b",
+                previous,
+                re.I,
+            ):
+                window.append(previous)
+        window.append(part)
+        for sentence in window:
+            cleaned = re.sub(r"\s+", " ", sentence).strip()
+            key = cleaned.lower()
+            if cleaned and key not in seen:
+                seen.add(key)
+                kept.append(cleaned)
+    return " ".join(kept)
+
+
+def _focused_person_chunks(question: str, hits: list[dict]) -> list[dict]:
+    """Keep sentences about the asked person, ahead of a broad topic section."""
+    phrase = _who_subject_phrase(question)
+    if not phrase:
+        return []
+    from rag.engine.classify import explicit_name_phrases
+
+    others = [name for name in explicit_name_phrases(question) if name != phrase]
+    pool = []
+    seen = set()
+    for item in list(hits) + list(load_primary_chunks()):
+        chunk_id = item.get("chunk_id")
+        if not chunk_id or chunk_id in seen or looks_like_exercise_chunk(item):
+            continue
+        text = item.get("text") or ""
+        if not _compact_has(phrase, text):
+            continue
+        trimmed = _focused_sentences(text, phrase)
+        if not trimmed:
+            continue
+        seen.add(chunk_id)
+        copy = dict(item)
+        copy["text"] = trimmed
+        pool.append(copy)
+
+    def _rank(item: dict) -> tuple[int, int]:
+        text = item.get("text") or ""
+        lowered = text.lower()
+        role = any(
+            cue in lowered
+            for cue in (
+                "tutor",
+                "guardian",
+                "administered",
+                "behalf",
+                "minister",
+                "representative",
+                "assistance",
+                "assisted",
+            )
+        )
+        other = any(_compact_has(name, text) for name in others)
+        return (1 if role else 0, 1 if other else 0)
+
+    pool.sort(key=_rank, reverse=True)
+    return pool[:4]
+
+
 def build_evidence_pack(
     question: str,
     retrieval_query: str,
@@ -424,6 +542,13 @@ def build_evidence_pack(
 ) -> EvidencePack:
     del history
     topics = extract_topics(f"{question} {retrieval_query}")
+    from rag.engine.entity import epithet_only_rulers
+
+    # A later-regnal epithet in the question ("called Shivaji II") must not
+    # become the subject just because retrieval repeated the bare name.
+    epithets = epithet_only_rulers(question)
+    if topics - epithets:
+        topics -= epithets
     entity = detect_entity(topics)
     facet = detect_facet(f"{question} {retrieval_query}")
     hits = list(raw_hits or retrieve_primary(retrieval_query, top_k=12, language="en"))
@@ -435,6 +560,14 @@ def build_evidence_pack(
         raw_hits=hits,
         retrieved_pages=_pages(hits),
     )
+    focused = _focused_person_chunks(question, hits)
+    if focused:
+        pack.chunks = focused
+        pack.pages = _pages(focused)
+        pack.entity = None
+        pack.reasons.append("focused-person")
+        pack.reasons.append(f"kept:{len(focused)}")
+        return pack
 
     if question_type == "FOLLOW_UP" and entity and not facet:
         question_type = "EXPLANATION"
@@ -504,6 +637,29 @@ def build_evidence_pack(
 
     if question_type == "EXPLANATION":
         seed = select_evidence(question, retrieval_query, hits, max_keep=8)
+        rulers = [key for key in RULER_KEYS if key in topics]
+        if len(rulers) >= 2:
+            from rag.engine.entity import collect_entity_chunks
+
+            merged = []
+            seen = set()
+            for ruler in rulers:
+                kept, _excluded = collect_entity_chunks(ruler, extra=_merge(seed, hits))
+                added = 0
+                for item in kept:
+                    chunk_id = item.get("chunk_id")
+                    if chunk_id in seen:
+                        continue
+                    seen.add(chunk_id)
+                    merged.append(item)
+                    added += 1
+                    if added >= 7:
+                        break
+            pack.chunks = merged
+            pack.pages = _pages(pack.chunks)
+            pack.reasons.append("multi-entity-pack")
+            pack.reasons.append(f"kept:{len(pack.chunks)}")
+            return pack
         if entity:
             from rag.engine.entity import collect_entity_chunks
 
@@ -566,12 +722,20 @@ def build_evidence_pack(
             combined = _merge(seed, mapped)
             if facet == "administration":
                 combined = add_same_page_continuations(combined, entity, facet)
-            combined = filter_entity_chunks(combined, entity, facet)
-            combined = [
-                item
-                for item in combined
-                if chunk_group_key(item) == entity or dominant_ruler(item.get("text") or "") == entity
-            ]
+            rulers = [key for key in RULER_KEYS if key in topics]
+            if len(rulers) >= 2:
+                combined = [
+                    item
+                    for item in combined
+                    if chunk_group_key(item) in rulers or dominant_ruler(item.get("text") or "") in rulers
+                ]
+            else:
+                combined = filter_entity_chunks(combined, entity, facet)
+                combined = [
+                    item
+                    for item in combined
+                    if chunk_group_key(item) == entity or dominant_ruler(item.get("text") or "") == entity
+                ]
         else:
             combined = mapped or seed
             combined = [item for item in combined if not primarily_other_dynasty(item, dynasty_keys(topics or {"mughal"}))]
@@ -637,7 +801,29 @@ def build_evidence_pack(
         if entity:
             combined = [item for item in combined if (_page(item) or 99) > 1]
     cap = 8 if question_type == "FOLLOW_UP" else 6
-    pack.chunks = _order(combined)[:cap]
+    phrases = []
+    if not entity:
+        from rag.engine.classify import explicit_name_phrases
+
+        phrases = explicit_name_phrases(question)
+    if phrases:
+        def _has_asked_name(item: dict) -> bool:
+            lowered = (item.get("text") or "").lower()
+            return any(phrase in lowered for phrase in phrases)
+
+        named = [item for item in hits if _has_asked_name(item) and not looks_like_exercise_chunk(item)]
+        ordered = []
+        seen = set()
+        for item in named:
+            chunk_id = item.get("chunk_id")
+            if not chunk_id or chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            ordered.append(item)
+        pack.chunks = ordered[:cap] if ordered else _order(combined)[:cap]
+        pack.reasons.append("asked-name-kept")
+    else:
+        pack.chunks = _order(combined)[:cap]
     pack.pages = _pages(pack.chunks)
     pack.reasons.append("direct-or-followup")
     return pack

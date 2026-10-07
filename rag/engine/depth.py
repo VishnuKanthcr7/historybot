@@ -22,7 +22,7 @@ DEFINE_RE = re.compile(
 )
 LIST_RE = re.compile(
     r"\b(list|name (the|some|all)|what are the|enumerate|key points|important points|"
-    r"main (events|points|features)|bullet)\b",
+    r"main (events|points|features)|bullet|achievements?|accomplishments?|places?|chronolog\w*)\b",
     re.I,
 )
 COMPARE_RE = re.compile(
@@ -290,6 +290,26 @@ def classify_depth(question: str, *, more_followup: bool = False) -> DepthProfil
 
 
 
+def _explicit_naming_reason(rows: list[str], aliases: list[str]) -> bool:
+    """A 'hence/therefore he was called' sentence states the reason in the sentence before it."""
+    from rag.engine.classify import _alias_present
+
+    link = re.compile(r"\b(?:hence|therefore|thus)\b", re.I)
+    naming = re.compile(r"\b(?:called|known as|named)\b", re.I)
+    for text in rows:
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
+        for index, sentence in enumerate(sentences):
+            if not naming.search(sentence):
+                continue
+            previous = sentences[index - 1] if index else ""
+            window = f"{previous} {sentence}".lower()
+            if aliases and not any(_alias_present(window, alias) for alias in aliases):
+                continue
+            if link.search(sentence) or link.search(previous):
+                return True
+    return False
+
+
 MOTIVE_CUES = (
     "because",
     "intention",
@@ -304,6 +324,9 @@ MOTIVE_CUES = (
     "to help",
     "to stop",
     "to establish",
+    "in memory of",
+    "in honour of",
+    "in honor of",
 )
 
 
@@ -322,7 +345,6 @@ def evidence_states_motive(
     rows = [item.get("text") or "" for item in (chunks or []) if item.get("text")]
     if not rows:
         return False
-    blob = " ".join(rows).lower()
     from rag.engine.classify import TOPIC_ALIASES
     from rag.engine.topic_map import RULER_KEYS
     from rag.engine.evidence import content_tokens
@@ -330,6 +352,9 @@ def evidence_states_motive(
     aliases = []
     if entity:
         aliases = [a for a in TOPIC_ALIASES.get(entity, (entity,)) if isinstance(a, str) and a.isascii()]
+    if _explicit_naming_reason(rows, aliases):
+        return True
+    blob = " ".join(rows).lower()
     q_tokens = content_tokens(question or "")
     # Drop ultra-generic tokens that appear in every Maratha passage.
     q_tokens -= {"mughal", "maratha", "kingdom", "empire", "peshwa"}
@@ -404,22 +429,18 @@ def depth_prompt_extra(profile: DepthProfile, chunks: list[dict] | None = None, 
         )
     elif profile.depth == "compare":
         bits.append(
-            "Compare only using facts present in the evidence for each side. "
-            "If one side lacks evidence, say the textbook does not provide that comparison point."
+            "Write a focused comparison from the textbook passages. "
+            "You may combine facts about each side. "
+            "If a well-established point is needed and is not in the passages, "
+            "put it after a line that starts with Additional historical context:."
         )
     elif profile.depth == "why":
-        if chunks is not None and not evidence_states_motive(chunks, entity, question):
-            bits.append(
-                "The evidence states an action or event but does not state an explicit motive or reason. "
-                "Say that the textbook does not give the motive, then only add surrounding supported context. "
-                "Do not invent or imply motives."
-            )
-        else:
-            bits.append(
-                "Focus on causes/reasons explicitly stated in the evidence for the asked person or event. "
-                "If the textbook states an action but does not state a motive or reason, say that clearly "
-                "and only add surrounding supported context. Do not invent or imply motives beyond the evidence."
-            )
+        bits.append(
+            "Answer why or how by combining roles, duties, events, and consequences in the passages. "
+            "Do not require the passages to contain the word because. "
+            "Do not say the textbook lacks a reason when the passages already show the role or result. "
+            "Stay on the person or event asked about."
+        )
     elif profile.depth == "how":
         bits.append(
             "Explain the process or method using only steps/facts in the evidence."

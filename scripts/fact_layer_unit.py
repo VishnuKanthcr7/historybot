@@ -269,6 +269,28 @@ def main() -> int:
         result = try_fact_answer(question, index=synthetic if index is None else index)
         return "fallback" if result is None else str(result.get("fact_status") or "")
 
+    check(
+        "similar-name-not-collapsed",
+        status_of(
+            "Who was the father of Alpha Beta Gamma?",
+            index_chunks(
+                [
+                    {
+                        "chunk_id": "similar",
+                        "source_id": "synthetic",
+                        "source_type": "primary_textbook",
+                        "printed_page_number": 9,
+                        "citation_label": "Synthetic textbook",
+                        "text": (
+                            "Alpha Beta was the father of Gamma Delta. "
+                            "Alpha Beta Gamma was the father of Epsilon Zeta."
+                        ),
+                    }
+                ]
+            ),
+        )
+        == "not_stated",
+    )
     check("yesno-father-supported", status_of("Was PersonB the father of PersonA?") == "supported")
     check("yesno-son-supported", status_of("Was PersonA the son of PersonB?") == "supported")
     check("yesno-father-contradicted", status_of("Was PersonA the father of PersonB?") == "contradicted")
@@ -278,6 +300,37 @@ def main() -> int:
     check("yesno-defeat-not-stated", status_of("Did PersonZ defeat PersonB?") == "not_stated")
     check("yesno-office-supported", status_of("Was PersonA appointed as OfficeD?") == "supported")
     check("yesno-office-not-stated", status_of("Was PersonZ appointed as OfficeD?") == "not_stated")
+
+    def answer_of(question: str, index=None) -> str:
+        result = try_fact_answer(question, index=synthetic if index is None else index)
+        return "" if result is None else (result.get("answer") or "")
+
+    office_held = answer_of("What office did PersonA hold?").lower()
+    check("office-held", "officed" in office_held and not office_held.startswith("the prescribed textbook does not state"))
+
+    son_yes = answer_of("Was PersonA the son of PersonB?")
+    son_yes_norm = son_yes.lower()
+    check(
+        "yesno-render-supported",
+        son_yes.startswith("Yes.")
+        and "persona was the son of personb." in son_yes_norm
+        and "personb was the father of persona." in son_yes_norm
+        and "page 4" in son_yes_norm,
+    )
+    father_no = answer_of("Was PersonA the father of PersonB?").lower()
+    check(
+        "yesno-render-contradicted",
+        father_no.startswith("no.")
+        and "personb was the father of persona." in father_no
+        and "page 4" in father_no,
+    )
+    missing = answer_of("Was PersonZ the father of PersonA?")
+    check("yesno-render-not-stated", missing == "The prescribed textbook does not state that.")
+    check("who-answer-not-yes", not answer_of("Who was the father of PersonA?").startswith("Yes."))
+    check(
+        "yesno-build-not-stated",
+        answer_of("Did PersonZ build MonumentZ?") == "The prescribed textbook does not state that.",
+    )
 
     directed = index_chunks(
         [
@@ -305,6 +358,44 @@ def main() -> int:
     check("yesno-appoint-supported", directed_status("Did PersonE appoint PersonA?") == "supported")
     check("yesno-appoint-contradicted", directed_status("Did PersonA appoint PersonE?") == "contradicted")
 
+    successor_yes = answer_of("Was PersonA the successor of PersonB?", directed).lower()
+    check(
+        "yesno-render-successor",
+        successor_yes.startswith("yes.")
+        and "persona was the successor of personb." in successor_yes
+        and "persona succeeded personb." in successor_yes
+        and "page 2" in successor_yes,
+    )
+    successor_no = answer_of("Was PersonB the successor of PersonA?", directed).lower()
+    check(
+        "yesno-render-successor-no",
+        successor_no.startswith("no.") and "persona was the successor of personb." in successor_no,
+    )
+    defeat_yes = answer_of("Did PersonC defeat PersonD?", directed).lower()
+    check(
+        "yesno-render-defeat",
+        defeat_yes.startswith("yes.")
+        and "personc defeated persond." in defeat_yes
+        and "page 2" in defeat_yes,
+    )
+    defeat_no = answer_of("Did PersonD defeat PersonC?", directed).lower()
+    check(
+        "yesno-render-defeat-no",
+        defeat_no.startswith("no.") and "personc defeated persond." in defeat_no,
+    )
+    appoint_yes = answer_of("Was PersonA appointed as OfficeD?", directed).lower()
+    check(
+        "yesno-render-appointed",
+        appoint_yes.startswith("yes.")
+        and "persona was appointed as officed." in appoint_yes
+        and "page 2" in appoint_yes,
+    )
+    appoint_no = answer_of("Did PersonA appoint PersonE?", directed).lower()
+    check(
+        "yesno-render-appointed-no",
+        appoint_no.startswith("no.") and "persone appointed persona" in appoint_no,
+    )
+
     def usable(span) -> bool:
         return span is not None and span.text and 1 <= len(span.text.split()) <= 6 and "?" not in span.text
 
@@ -321,6 +412,16 @@ def main() -> int:
         return False
 
     corpus = corpus_index()
+    for question in (
+        "Did Shah Jahan build Diwan-i-Khas?",
+        "Did Shah Jahan construct Diwan-i-Khas?",
+    ):
+        built_answer = try_fact_answer(question, index=corpus) or {}
+        check(
+            "yesno-build-supported" if "build " in question else "yesno-construct-supported",
+            built_answer.get("fact_status") == "supported"
+            and (built_answer.get("answer") or "").startswith("Yes. Shah Jahan built Diwan-i-Khas."),
+        )
     parent_fact = next(
         (
             fact

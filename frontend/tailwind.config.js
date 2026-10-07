@@ -4,17 +4,18 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: "#1c1917",
-        paper: "#f6f1e8",
-        cream: "#fffdf8",
-        navy: "#1e3a5f",
-        navydeep: "#152a46",
-        brass: "#9a6b2f",
-        rule: "#ddd4c4",
+        ink: "#252525",
+        paper: "#F7F4EE",
+        cream: "#FFFDF8",
+        navy: "#7A3E2B",
+        navydeep: "#5C2E20",
+        brass: "#B88A44",
+        rule: "#E7DED0",
+        muted: "#6F6A63",
       },
       fontFamily: {
-        serif: ['"Palatino Linotype"', "Palatino", "Georgia", "serif"],
-        sans: ['"Segoe UI"', '"Noto Sans"', '"Noto Sans Kannada"', "sans-serif"],
+        serif: ['"Playfair Display"', "Georgia", "serif"],
+        sans: ["Inter", '"Noto Sans Kannada"', '"Segoe UI"', "sans-serif"],
       },
       screens: {
         xs: "375px",

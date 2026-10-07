@@ -1,7 +1,6 @@
 # Environment and secrets
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
 
 # Node.js / React / Vite
@@ -43,6 +42,9 @@ data/textbooks/**
 # Extracted textbook text (regenerate with scripts/ingest_chapter5.py)
 data/extracted/**
 !data/extracted/.gitkeep
+
+# Local browser-test screenshots
+.historybot-browser-test/
 
 # Generated PDFs and temp output
 data/generated/

@@ -82,6 +82,37 @@ def is_more_followup(question: str) -> bool:
     return bool(MORE_TASK_RE.match(_folded(question or "")))
 
 
+# A follow-up that revises the question set already on screen ("make the questions
+# harder", "strictly from the textbook") without naming a new topic.
+QUESTION_SET_RE = re.compile(
+    r"\b(?:the|these|those)\s+(?:questions|mcqs|quiz)\b",
+    re.I,
+)
+QUESTION_DIFFICULTY_RE = re.compile(
+    r"\b(?:difficult|harder|tougher|easier|simpler|stricter|strictly|textbook)\b",
+    re.I,
+)
+
+
+def revises_current_questions(question: str) -> bool:
+    text = question or ""
+    if extract_topics(text):
+        return False
+    return bool(QUESTION_SET_RE.search(text) and QUESTION_DIFFICULTY_RE.search(text))
+
+
+def last_mcq_request(history: list[dict] | None) -> str:
+    """Latest earlier request that actually asked for multiple-choice questions."""
+    found = ""
+    for item in history or []:
+        if item.get("role") != "user":
+            continue
+        content = str(item.get("content") or "")
+        if looks_like_mcq_request(content):
+            found = content
+    return found
+
+
 def looks_like_mcq_request(question: str) -> bool:
     text = question or ""
     if MCQ_REQUEST_RE.search(text):
@@ -163,6 +194,13 @@ def infer_previous_task(history: list[dict] | None, task_state: dict | None = No
 
 
 def entity_focus_query(entity: str | None, topics: set[str], question_type: str) -> str | None:
+    from rag.engine.topic_map import RULER_KEYS
+
+    rulers = [key for key in RULER_KEYS if key in topics]
+    if len(rulers) >= 2:
+        names = [TOPIC_ALIASES[key][0] for key in rulers if TOPIC_ALIASES.get(key)]
+        if len(names) >= 2:
+            return " ".join(names)
     if question_type == "BROAD_TOPIC" and "mughal" in topics and not (topics & {"shivaji", "maratha"}):
         return "Mughal Babur Humayun Akbar Shah Jahan Aurangzeb"
     if question_type == "BROAD_TOPIC" and (topics & {"maratha", "shivaji"}) and "akbar" not in topics:

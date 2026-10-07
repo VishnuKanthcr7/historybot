@@ -162,8 +162,19 @@ def _trim_incomplete_tail(text: str) -> str:
     return (text + page).strip()
 
 
+# A chunk boundary can leave a lowercase scrap in front of a real sentence.
+_TRUNCATED_START = re.compile(
+    r"^(?:st famous|he Mughals|cting|i assembled|o power|eauty)\b"
+)
+_CALLOUT = re.compile(r"(?:\s+and)?\s+Do you know this\??", re.I)
+_REPRINT_BANNER = re.compile(r"@?KTBS\s*NOT\s+TO\s+BE\s+REPUBLISHED|@KTBS", re.I)
+_GLUED_NAME = re.compile(r"^([A-Z][A-Za-z'\-]+)\s+(The\b.+)$")
+
+
 def _trim_leading_fragment(text: str) -> str:
     text = (text or "").lstrip()
+    if _TRUNCATED_START.match(text):
+        return text
     text = _LEADING_FRAGMENT.sub("", text).lstrip(" ,;:-")
     # Drop a leading lowercase run before the first capital/markdown marker.
     if text and text[0].islower() and not text.startswith("http"):
@@ -224,6 +235,99 @@ def _drop_corrupt_student_sentences(text: str) -> str:
     return " ".join(kept)
 
 
+def _strip_callouts(text: str) -> str:
+    """Remove a textbook box heading that was read into the sentence."""
+    cleaned = _CALLOUT.sub("", text or "")
+    cleaned = _REPRINT_BANNER.sub("", cleaned)
+    cleaned = _MULTI_SPACE.sub(" ", cleaned).strip()
+    cleaned = re.sub(r"\s+([.!?])", r"\1", cleaned)
+    if cleaned and cleaned[-1] not in ".!?":
+        cleaned += "."
+    return cleaned
+
+
+def _drop_glued_name(sentence: str) -> str:
+    """'Akbar The most famous ... Akbar ...' keeps the sentence that already names him."""
+    match = _GLUED_NAME.match(sentence or "")
+    if not match:
+        return sentence
+    name, rest = match.group(1), match.group(2).strip()
+    if re.search(rf"\b{re.escape(name)}\b", rest):
+        return rest
+    return sentence
+
+
+def _sentence_words(sentence: str) -> list[str]:
+    return re.sub(r"[^a-z0-9]+", " ", sentence.lower()).split()
+
+
+def _already_said(words: list[str], earlier: list[list[str]]) -> bool:
+    if len(words) < 6:
+        return False
+    for prev in earlier:
+        if words == prev:
+            return True
+        if len(words) > len(prev):
+            continue
+        span = len(words)
+        for index in range(len(prev) - span + 1):
+            if prev[index : index + span] == words:
+                return True
+    return False
+
+
+def _polish_presentation(text: str) -> str:
+    """Drop display scraps. Leave the historical sentence that is already there."""
+    blocks = re.split(r"(\n\s*\n)", text or "")
+    seen: list[list[str]] = []
+    kept_blocks: list[str] = []
+    for block in blocks:
+        if not block.strip() or re.fullmatch(r"\n\s*\n", block):
+            kept_blocks.append(block)
+            continue
+        lines: list[str] = []
+        for line in block.splitlines():
+            stripped = line.strip()
+            if (
+                stripped.startswith("#")
+                or stripped.startswith("Source:")
+                or stripped.startswith("Additional historical context")
+                or re.match(r"^[A-D]\.\s+\S", stripped)
+                or re.match(r"^Answer:\s*[A-D]\s*$", stripped, re.I)
+            ):
+                lines.append(line)
+                continue
+            body = _strip_callouts(line)
+            sentences = [
+                part.strip()
+                for part in re.split(r"(?<=[.!?])\s+", body)
+                if part.strip() and re.search(r"[A-Za-z]", part)
+            ]
+            usable = [part for part in sentences if not _TRUNCATED_START.match(part)]
+            chosen = usable or sentences
+            kept: list[str] = []
+            for sentence in chosen:
+                if usable and _TRUNCATED_START.match(sentence):
+                    continue
+                sentence = _DUP_WORD.sub(r"\1", sentence)
+                sentence = _drop_glued_name(sentence)
+                words = _sentence_words(sentence)
+                if _already_said(words, seen):
+                    continue
+                if words:
+                    seen.append(words)
+                kept.append(sentence)
+            if kept:
+                lines.append(" ".join(kept))
+        if any(line.strip() for line in lines):
+            kept_blocks.append("\n".join(lines))
+        elif kept_blocks and re.fullmatch(r"\n\s*\n", kept_blocks[-1]):
+            kept_blocks.pop()
+    polished = "".join(kept_blocks)
+    polished = re.sub(r"\n{3,}", "\n\n", polished)
+    return polished.strip()
+
+
 def sanitize_student_text(text: str) -> str:
     """Clean splices, OCR spacing, and duplicated overlaps for student display."""
     if not text or not text.strip():
@@ -249,7 +353,7 @@ def sanitize_student_text(text: str) -> str:
                 continue
             prefix = ""
             body = raw
-            bullet = re.match(r"^(\s*(?:[-*]\s+|\d+\.\s+|\*\*[^*]+\*\*\s*))", raw)
+            bullet = re.match(r"^(\s*(?:[-*]\s+|\d+\.\s+))", raw)
             if bullet:
                 prefix = bullet.group(1)
                 body = raw[len(prefix) :]
@@ -267,7 +371,7 @@ def sanitize_student_text(text: str) -> str:
         cleaned_blocks.append("\n".join(out_lines))
     result = "".join(cleaned_blocks)
     result = re.sub(r"\n{3,}", "\n\n", result)
-    return result.strip()
+    return _polish_presentation(result.strip())
 
 
 def sanitize_structured(value):

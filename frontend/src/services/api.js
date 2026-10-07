@@ -1,7 +1,8 @@
-const BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api/v1").replace(
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:3000").replace(
   /\/$/,
   ""
 );
+const BASE = API_BASE_URL.endsWith("/api/v1") ? API_BASE_URL : `${API_BASE_URL}/api/v1`;
 
 export class ApiError extends Error {
   constructor(code, message, status) {
@@ -142,4 +143,4 @@ export function checkHealth() {
   return request("/health");
 }
 
-export { BASE as API_BASE };
+export { API_BASE_URL, BASE as API_BASE };

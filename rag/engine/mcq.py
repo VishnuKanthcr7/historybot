@@ -84,14 +84,20 @@ def _group_text(group) -> str:
     if key not in person_keys:
         return raw
     try:
-        from rag.engine.entity import _is_posthumous_bleed, _looks_corrupt_sentence, _mentions, split_entity_segments
+        from rag.engine.entity import (
+            _is_posthumous_bleed,
+            _looks_corrupt_sentence,
+            _mentions,
+            repair_leading_stub,
+            split_entity_segments,
+        )
         from rag.engine.pack import dominant_ruler
     except Exception:
         return raw
     kept: list[str] = []
     for segment in split_entity_segments(raw):
         for sent in re.split(r"(?<=[.!?])\s+", segment):
-            clean = _clean(sent)
+            clean = repair_leading_stub(_clean(sent))
             if len(clean.split()) < 5:
                 continue
             if _looks_corrupt_sentence(clean):
@@ -288,8 +294,23 @@ def _facts_from_group(group) -> list[McqFact]:
         add("Who built the Taj Mahal, according to the textbook?", title, "person")
     if re.search(r"autobiography in the Turkish", text, re.I):
         add("Who wrote an autobiography in the Turkish language?", title, "person")
-    if re.search(r"imprisoned his father", text, re.I):
-        add("Who imprisoned his father and seized power, according to the textbook?", title, "person")
+    imprisoned = re.search(
+        r"imprisoned his father(?:,\s*([A-Z][A-Za-z]+(?:\s+[IVX]+)?(?:\s+[A-Z][A-Za-z]+){0,2}))?",
+        text,
+        re.I,
+    )
+    if imprisoned:
+        # "He imprisoned his father, Shah Jahan" names the victim, not the actor.
+        victim = (imprisoned.group(1) or "").strip(" ,.")
+        before = text[: imprisoned.start()]
+        actors = [
+            name
+            for name in re.findall(r"\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b", before[-160:])
+            if name.lower() not in {"he", "his", "she", "her", "they", "the", "in", "but", "and"}
+        ]
+        actor = actors[-1] if actors else ""
+        if actor and actor.lower() == title.lower() and victim.lower() != title.lower():
+            add("Who imprisoned his father and seized power, according to the textbook?", title, "person")
     if re.search(r"white marble", text, re.I):
         add("The Taj Mahal is built using which material, according to the textbook?", "white marble", "material")
     if re.search(r"muhtasibs", text, re.I):
@@ -1070,12 +1091,28 @@ def _round_robin(facts: list[McqFact]) -> list[McqFact]:
     return ordered
 
 
+def _fact_specificity(fact: McqFact) -> int:
+    """Higher means a more specific textbook check (year, material, place) than a bare identity."""
+    kind = (fact.kind or "").lower()
+    score = 0
+    if kind in {"year", "age", "material"}:
+        score += 3
+    elif kind in {"place", "river", "official", "monument", "warfare", "language"}:
+        score += 2
+    if re.search(r"\d", fact.answer or ""):
+        score += 2
+    if re.match(r"who (?:was|is|built)\b", fact.question or "", re.I):
+        score -= 2
+    return score
+
+
 def mcqs_from_pack(
     question: str,
     chunks: list[dict],
     count: int = 10,
     previous_answer: str = "",
     previous_fingerprints: list[str] | None = None,
+    prefer_specific: bool = False,
 ) -> tuple[str, list[str]]:
     from rag.engine.classify import extract_topics
 
@@ -1149,6 +1186,8 @@ def mcqs_from_pack(
         return True
 
     used_answers: dict[str, set[str]] = {}
+    if prefer_specific:
+        facts.sort(key=_fact_specificity, reverse=True)
     for fact in _round_robin(facts):
         if len(items) >= count:
             break

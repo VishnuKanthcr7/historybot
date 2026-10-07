@@ -34,10 +34,6 @@ TOPIC_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
-STANDALONE_START = re.compile(
-    r"^(what|who|where|when|why|how|tell|explain|describe|list)\b",
-    re.I,
-)
 PRONOUN_RE = re.compile(
     r"\b(he|she|it|his|her|him|they|their|them|this|that|these|those)\b",
     re.I,
@@ -151,6 +147,22 @@ def casual_reply(kind: str, language: str) -> str:
     return "Please ask a question about the History textbook."
 
 
+def _alias_present(haystack: str, alias: str) -> bool:
+    """True when alias names that person, not a later regnal or epithet (Name II)."""
+    if not alias.isascii():
+        return alias in haystack
+    from rag.engine.entity import _alias_pattern, _later_regnal
+
+    for match in re.finditer(_alias_pattern(alias), haystack):
+        name_end = match.end()
+        if match.group(0).endswith("s") and not alias.lower().endswith("s"):
+            name_end -= 1
+        if _later_regnal(haystack, name_end):
+            continue
+        return True
+    return False
+
+
 def extract_topics(text: str) -> set[str]:
     blob = text or ""
     lowered = blob.lower()
@@ -159,13 +171,9 @@ def extract_topics(text: str) -> set[str]:
     for key, aliases in TOPIC_ALIASES.items():
         for alias in aliases:
             haystacks = (lowered, collapsed) if alias.isascii() else (blob,)
-            for haystack in haystacks:
-                if alias in haystack:
-                    found.add(key)
-                    break
-            else:
-                continue
-            break
+            if any(_alias_present(haystack, alias) for haystack in haystacks):
+                found.add(key)
+                break
     return found
 
 
@@ -186,9 +194,53 @@ FOLLOW_SHORT_RE = re.compile(
 )
 OFF_DOMAIN_RE = re.compile(
     r"\b(python|ronaldo|cristiano|joke|jokes|weather|prime minister|world cup|"
-    r"world war|ncert|wikipedia|chatgpt|openai)\b|capital of karnataka",
+    r"world war|ncert|wikipedia|chatgpt|openai)\b|capital of (?!the\b)",
     re.I,
 )
+_QUESTION_WORDS = {
+    "who",
+    "what",
+    "where",
+    "when",
+    "why",
+    "how",
+    "which",
+    "whose",
+    "the",
+    "his",
+    "her",
+    "their",
+    "this",
+    "that",
+    "tell",
+    "explain",
+    "describe",
+    "compare",
+    "list",
+    "give",
+    "make",
+    "show",
+    "please",
+    "now",
+}
+
+
+def explicit_name_phrases(question: str) -> list[str]:
+    """Capitalized names in the question, lowercased, skipping question words and commands."""
+    phrases = []
+    for match in re.finditer(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b", question or ""):
+        tokens = [token for token in match.group(1).split() if token.lower() not in _QUESTION_WORDS]
+        if not tokens:
+            continue
+        phrase = " ".join(token.lower() for token in tokens)
+        if len(phrase) >= 5:
+            phrases.append(phrase)
+    return phrases
+
+
+def _names_a_new_person(question: str) -> bool:
+    """A capitalized name in the question is a new subject, even if it is not a known topic alias."""
+    return bool(explicit_name_phrases(question))
 
 
 def classify_intent(question: str, history: list[dict] | None) -> str:
@@ -213,12 +265,13 @@ def classify_intent(question: str, history: list[dict] | None) -> str:
     if current_topics and not previous_topics:
         return "STANDALONE"
     if not current_topics and previous_topics:
+        if _names_a_new_person(question):
+            return "NEW_TOPIC"
         if FOLLOW_SHORT_RE.match(folded) or has_pronoun:
             return "FOLLOW_UP"
-        if STANDALONE_START.match((question or "").strip()) and not has_pronoun and len((question or "").split()) > 8:
-            return "NEW_TOPIC"
-        if len((question or "").split()) <= 10:
-            return "FOLLOW_UP"
+        # A self-contained question is a new topic. Short length is not a
+        # follow-up, and the previous turn's topic does not make it one.
+        return "NEW_TOPIC"
     return "STANDALONE"
 
 

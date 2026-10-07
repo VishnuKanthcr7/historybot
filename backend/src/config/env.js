@@ -31,7 +31,7 @@ function parseCorsOrigin(raw) {
 export const config = {
   env: process.env.NODE_ENV || "development",
   port: Number(process.env.PORT || process.env.APP_PORT || 3000),
-  corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
+  corsOrigin: parseCorsOrigin(process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN),
   mysql: {
     host: process.env.MYSQL_HOST || "localhost",
     port: Number(process.env.MYSQL_PORT || 3306),

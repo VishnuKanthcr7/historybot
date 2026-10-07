@@ -22,9 +22,56 @@ SEGMENT_SPLIT = re.compile(
 GROUP_RULES = (
     ("identity", ("born", "son of", "appointed", "years old", "came to power", "ascended", "became")),
     ("actions", ("conquer", "campaign", "battle", "war", "defeated", "declared", "marched", "attack", "fought")),
-    ("administration", ("tax", "chauth", "sardeshmukhi", "ruled", "efficiency", "minister", "administration", "official")),
+    (
+        "administration",
+        (
+            "tax",
+            "chauth",
+            "sardeshmukhi",
+            "ruled",
+            "efficiency",
+            "minister",
+            "administration",
+            "administrative",
+            "official",
+            "revenue",
+            "ryotwari",
+            "judicial",
+            "justice",
+            "province",
+            "subha",
+            "mansab",
+            "pargana",
+            "hierarchy",
+            "hierarchies",
+            "governor",
+            "executive",
+            "judiciary",
+        ),
+    ),
     ("achievements", ("glory", "fame", "called", "established", "re-established", "image")),
 )
+# "Name II" / "Name, the second" is a later person or epithet.
+# "Name, the second emperor/king" is an appositive about that same person.
+# "Name I" still matches the unnumbered name.
+_LATER_REGNAL_RE = re.compile(
+    r"(?:"
+    r"\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii)\b"
+    r"|"
+    r"\s*,\s*the\s+(?:second|third|fourth|fifth)\b"
+    r"(?!\s+(?:[a-z]+\s+){0,2}(?:emperor|king|ruler|sultan|monarch|peshwa|shah)\b)"
+    r")",
+    re.I,
+)
+# Chunk overlap glues a short leftover ("yun") onto the next sentence.
+# A real function word ("he", "the") is not that leftover.
+_LEADING_STUB_RE = re.compile(r"^([a-z]{1,4})\s+(?=[A-Z][a-z])")
+_STUB_WORDS = {
+    "he", "she", "it", "his", "her", "the", "and", "but", "for", "was", "were",
+    "who", "its", "our", "may", "not", "had", "has", "did", "one", "two", "all",
+    "any", "this", "that", "they", "them", "with", "from", "into", "over", "such",
+    "when", "then", "also", "only", "after", "before", "while", "their", "there",
+}
 
 GROUP_HEADINGS = {
     "identity": "Who was this person?",
@@ -70,14 +117,18 @@ ARTICLE_WORDS = {"the", "a", "an"}
 
 # Textbook term introduction that refers back: "<context>. These were called 'Mansabs' ..."
 TERM_BACKREF_RE = re.compile(
-    r"^(?:these|this|those|such)(?:\s+[a-z]+)?\s+(?:were|was|are|is)\s+(?:called|known|named|termed)\b",
+    r"^(?:these|this|those|such|they)(?:\s+[a-z]+)?\s+(?:were|was|are|is)\s+(?:called|known|named|termed)\b",
     re.I,
 )
 
 
 def keep_term_antecedents(sentences: list[str], keep: list[bool], entity: str | None) -> list[bool]:
-    """For non-person term entities, also keep the sentence a kept term introduction refers back to."""
+    """Keep a short 'these/they were called' definition with the sentence it continues."""
     out = list(keep)
+    for idx in range(1, len(sentences)):
+        current = (sentences[idx] or "").strip()
+        if out[idx - 1] and not out[idx] and TERM_BACKREF_RE.match(current):
+            out[idx] = True
     if not entity or entity in RULER_KEYS:
         return out
     for idx in range(1, len(sentences)):
@@ -105,6 +156,57 @@ def _aliases(entity: str) -> tuple[str, ...]:
     return tuple(alias for alias in TOPIC_ALIASES.get(entity, (entity,)) if alias.isascii())
 
 
+def repair_leading_stub(text: str) -> str:
+    """Drop a chunk-overlap fragment glued onto a complete sentence.
+
+    The fragment and the sentence share one full stop, so discarding the line
+    as corrupt also discards the identity it states.
+    """
+    clean = re.sub(r"\s+", " ", text or "").strip()
+    match = _LEADING_STUB_RE.match(clean)
+    if not match or match.group(1) in _STUB_WORDS:
+        return clean
+    rest = clean[match.end() :].strip()
+    if len(rest.split()) < 5:
+        return clean
+    return rest
+
+
+def _later_regnal(lowered: str, end: int) -> bool:
+    """True when the matched name is followed by a later regnal number (II, III, ...)."""
+    return bool(_LATER_REGNAL_RE.match(lowered[end:]))
+
+
+def epithet_only_rulers(text: str) -> set[str]:
+    """Rulers who appear in text only as a later-regnal epithet.
+
+    "called Shivaji II" names an epithet. It is not a question about Shivaji.
+    A bare mention of that same name anywhere in the text still counts as the person.
+    """
+    lowered = (text or "").lower()
+    epithets: set[str] = set()
+    for key in RULER_KEYS:
+        bare = 0
+        later = 0
+        for alias in _aliases(key):
+            for match in re.finditer(_alias_pattern(alias), lowered):
+                name_end = match.end()
+                if match.group(0).endswith("s") and not alias.lower().endswith("s"):
+                    name_end -= 1
+                if _later_regnal(lowered, name_end):
+                    later += 1
+                else:
+                    bare += 1
+        if later and not bare:
+            epithets.add(key)
+    return epithets
+
+
+def _alias_pattern(alias: str) -> str:
+    # Optional plural s, but not a letter that continues a different word.
+    return r"(?<![a-z])" + re.escape(alias.lower()) + r"s?(?![a-z])"
+
+
 def _mentions(text: str, entity: str) -> int:
     lowered = (text or "").lower()
     others_first = []
@@ -117,7 +219,12 @@ def _mentions(text: str, entity: str) -> int:
             others_first.append(first)
     total = 0
     for alias in _aliases(entity):
-        for match in re.finditer(re.escape(alias), lowered):
+        for match in re.finditer(_alias_pattern(alias), lowered):
+            name_end = match.end()
+            if match.group(0).endswith("s") and not alias.lower().endswith("s"):
+                name_end -= 1
+            if _later_regnal(lowered, name_end):
+                continue
             prefix = lowered[max(0, match.start() - 16) : match.start()].rstrip()
             if any(prefix.endswith(first) for first in others_first):
                 continue
@@ -229,7 +336,7 @@ def _entity_object_only(text: str, entity: str) -> bool:
 
 def _looks_corrupt_sentence(text: str) -> bool:
     """Drop smashed / OCR-corrupt fragments that invent wrong grammar."""
-    clean = re.sub(r"\s+", " ", text or "").strip()
+    clean = repair_leading_stub(text)
     if not clean:
         return True
     words = clean.split()
@@ -266,9 +373,42 @@ def _looks_corrupt_sentence(text: str) -> bool:
         return True
     if re.search(r",\s+With\s+(?:an\s+intention|the\s+intention|a\s+view)\b", clean):
         return True
+    # Overlap smash: "...Jaisingh called With an intention to stop..."
+    if re.search(r"\b[a-z]+\s+With\s+(?:an|the)\s+intention\b", clean):
+        return True
+    # Heading glued onto the next clause: "Shivaji In addition to defeating..."
+    if re.search(r"\b[A-Za-z]+\s+In addition to\b", clean):
+        return True
+    # A participial continuation whose subject was the previous sentence's person.
+    # The following purpose clause ("To achieve this, he ...") must not inherit that person;
+    # the caller records this skip as a broken antecedent.
+    if re.match(r"^In addition to\b", clean):
+        return True
     if re.search(r"\bWhen\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2}\s+protested against this,\s*With\b", clean):
         return True
     return False
+
+
+def other_time_owner(sentence: str) -> str | None:
+    """The ruler a sentence itself assigns its time to, such as "During Shah Jahan's time"."""
+    text = " ".join((sentence or "").split())
+    match = re.match(
+        r"^(?:during|in)\s+(?:the\s+)?(?:time|reign|rule|period|era)\s+of\s+"
+        r"([A-Z][A-Za-z'\u2019\-]+(?:\s+[A-Z][A-Za-z'\u2019\-]+){0,3})",
+        text,
+    )
+    if not match:
+        match = re.match(
+            r"^(?:during|in)\s+([A-Z][A-Za-z'\u2019\-]+(?:\s+[A-Z][A-Za-z'\u2019\-]+){0,3})"
+            r"(?:'s|\u2019s)\s+(?:time|reign|rule|period|era)\b",
+            text,
+        )
+    if not match:
+        return None
+    spans = _person_spans(match.group(1))
+    if spans:
+        return spans[0][2]
+    return None
 
 
 def entity_subject_score(text: str, entity: str) -> tuple[int, str]:
@@ -282,6 +422,9 @@ def entity_subject_score(text: str, entity: str) -> tuple[int, str]:
         return 0, "posthumous-bleed"
     if _entity_object_only(text, entity):
         return 0, "object-mention"
+    owner = other_time_owner(text)
+    if owner and owner != entity:
+        return 0, "other-time"
     mentions = _mentions(text, entity)
     if mentions <= 0:
         return 0, "no-mention"
@@ -292,6 +435,12 @@ def entity_subject_score(text: str, entity: str) -> tuple[int, str]:
         return 5 + min(mentions, 3), "heading-subject"
     if heading and heading in RULER_KEYS and heading != entity and entity in RULER_KEYS:
         return 0, "other-heading"
+    # The passage opens with this person. A parent or rival named inside that
+    # sentence must not make the whole passage an incidental mention.
+    opening = repair_leading_stub(text)
+    first = re.split(r"(?<=[.!?])\s+", " ".join(opening.split()), maxsplit=1)[0]
+    if _resolve_subject(first, None)[0] == entity:
+        return 4, "opening-subject"
     # Place/event focus keys: a single clear mention is enough even beside a co-named ruler.
     if entity in PLACE_EVENT_KEYS:
         return 4 + min(mentions, 2), "place-event-subject"
@@ -332,6 +481,32 @@ def _dedupe_chunks(chunks: list[dict]) -> list[dict]:
     return out
 
 
+def sentences_before_entity_heading(text: str, entity: str | None) -> set[str]:
+    """Norms of sentences that precede this person's heading in the source text.
+
+    Chunk overlap pastes that earlier section back after the heading. Those copies
+    belong to the previous section, not to the person the heading introduces.
+    """
+    if not text or not entity:
+        return set()
+    blob = " ".join(text.split())
+    heading_at = None
+    for match in FOCUS_HEADING_RE.finditer(blob):
+        people = [key for (_a, _b, key) in _person_spans(match.group(1))]
+        key = people[0] if people else heading_entity_key(match.group(1) + " :")
+        if key == entity:
+            heading_at = match.start()
+            break
+    if heading_at is None:
+        return set()
+    norms: set[str] = set()
+    for sent in re.split(r"(?<=[.!?])\s+", blob[:heading_at]):
+        norm = re.sub(r"[^a-z0-9]+", " ", sent.lower()).strip()
+        if len(norm.split()) >= 5:
+            norms.add(norm)
+    return norms
+
+
 def collect_entity_chunks(entity: str, extra: list[dict] | None = None) -> tuple[list[dict], list[dict]]:
     """All primary chunks whose subject is the entity, plus nearby page continuations."""
     from rag.engine.pack import _merge, _order, ahom_primary_chunk, looks_like_toc
@@ -363,7 +538,21 @@ def collect_entity_chunks(entity: str, extra: list[dict] | None = None) -> tuple
         useful = []
         reasons = []
         for segment in segments:
+            segment = repair_leading_stub(segment)
             score, reason = entity_subject_score(segment, entity)
+            if score < 3 and reason == "corrupt":
+                # A chunk overlap can leave "i assembled..." in front of a complete
+                # sentence ("Shivaji conquered ..."). Drop only the broken prefix.
+                sentences = [
+                    repair_leading_stub(part.strip())
+                    for part in re.split(r"(?<=[.!?])\s+", segment)
+                    if part.strip()
+                ]
+                while sentences and _looks_corrupt_sentence(sentences[0]):
+                    sentences.pop(0)
+                if sentences:
+                    segment = " ".join(sentences)
+                    score, reason = entity_subject_score(segment, entity)
             if score >= 3:
                 useful.append(segment)
                 reasons.append(reason)
@@ -380,6 +569,7 @@ def collect_entity_chunks(entity: str, extra: list[dict] | None = None) -> tuple
                 "text": " ".join(useful),
                 "subject_score": max(entity_subject_score(part, entity)[0] for part in useful),
                 "relevance_reason": ",".join(sorted(set(reasons))),
+                "pre_heading_norms": sentences_before_entity_heading(text, entity),
             }
         )
     kept = _dedupe_chunks(_order(kept))
@@ -393,23 +583,26 @@ def _entity_sentences(chunks: list[dict], entity: str) -> list[dict]:
         page = _page(item)
         for segment in split_entity_segments(item.get("text") or ""):
             score, _reason = entity_subject_score(segment, entity)
-            if score < 3:
+            if score < 3 and not item.get("focus_filtered"):
                 continue
             cleaned = []
             flags = []
             reasons = []
             for sent in re.split(r"(?<=[.!?])\s+", segment):
-                clean = re.sub(r"\s+", " ", sent).strip()
+                clean = repair_leading_stub(re.sub(r"\s+", " ", sent).strip())
                 clean = re.sub(
                     r"^(?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\s*:\s*",
                     "",
                     clean,
                 ).strip()
                 words = clean.split()
-                ok = 5 <= len(words) <= 90 and words[-1].lower().strip(".,;:") not in {
+                definition = bool(TERM_BACKREF_RE.match(clean)) and len(words) >= 3
+                ok = (definition or 5 <= len(words) <= 90) and words[-1].lower().strip(".,;:") not in {
                     "the", "of", "and", "to", "a", "an", "with", "for", "in"
                 }
                 sent_score, sent_reason = entity_subject_score(clean, entity) if ok else (0, "skip")
+                if item.get("focus_filtered") and ok:
+                    sent_score, sent_reason = 3, "focus-filtered"
                 cleaned.append(clean)
                 flags.append(ok and sent_score >= 3)
                 reasons.append(sent_reason)
@@ -423,6 +616,10 @@ def _entity_sentences(chunks: list[dict], entity: str) -> list[dict]:
                     pending = clean
                     continue
                 text = f"{pending} {clean}".strip() if pending else clean
+                if FOCUS_ANAPHOR_RE.match(clean) and idx > 0:
+                    previous = cleaned[idx - 1]
+                    if previous and previous.lower() not in text.lower():
+                        text = f"{previous} {text}".strip()
                 pending = ""
                 key = re.sub(r"[^a-z0-9]+", "", clean.lower())[:80]
                 if key in seen:
@@ -435,7 +632,7 @@ def _entity_sentences(chunks: list[dict], entity: str) -> list[dict]:
 def _assign_group(sentence: str) -> str:
     low = sentence.lower()
     for key, needles in GROUP_RULES:
-        if any(needle in low for needle in needles):
+        if any(re.search(rf"\b{re.escape(needle)}s?\b", low) for needle in needles):
             return key
     return "details"
 
@@ -518,20 +715,25 @@ def entity_readable(groups: list) -> str:
             cleaned = []
             flags = []
             for sent in re.split(r"(?<=[.!?])\s+", item.get("text") or ""):
-                clean = re.sub(r"\s+", " ", sent).strip()
+                clean = repair_leading_stub(re.sub(r"\s+", " ", sent).strip())
                 clean = re.sub(
                     r"^(?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\s*:\s*",
                     "",
                     clean,
                 ).strip()
                 words = clean.split()
-                ok = len(words) >= 5 and words[-1].lower().strip(".,;:") not in dangling
-                if ok and entity:
+                definition = bool(TERM_BACKREF_RE.match(clean)) and len(words) >= 3
+                ok = (definition or len(words) >= 5) and words[-1].lower().strip(".,;:") not in dangling
+                if ok and entity and not item.get("focus_filtered"):
                     score, _reason = entity_subject_score(clean, entity)
                     ok = score >= 3
                 cleaned.append(clean)
                 flags.append(ok)
-            final = keep_term_antecedents(cleaned, flags, entity) if entity else flags
+            final = list(keep_term_antecedents(cleaned, flags, entity) if entity else flags)
+            for index, clean in enumerate(cleaned):
+                if FOCUS_ANAPHOR_RE.match(clean) and index > 0:
+                    final[index - 1] = True
+                    final[index] = True
             for clean, keep in zip(cleaned, final):
                 if not keep:
                     continue
@@ -610,6 +812,8 @@ def _person_spans(text: str) -> list[tuple[int, int, str]]:
                 if first not in ARTICLE_WORDS and not name.startswith(first):
                     others_first.append(first)
         for match in re.finditer(r"(?<![a-z])" + re.escape(name) + r"(?![a-z])", lowered):
+            if _later_regnal(lowered, match.end()):
+                continue
             if any(a < match.end() and match.start() < b for a, b in taken):
                 continue
             prefix = lowered[max(0, match.start() - 16) : match.start()].rstrip()
@@ -670,6 +874,8 @@ def _resolve_subject(sentence: str, current: str | None) -> tuple[str | None, st
 FOCUS_ANAPHOR_RE = re.compile(
     r"^(?:due to this|because of this|as a result|thus|hence|therefore|in addition to this|so)\b,?\s*", re.I
 )
+# "To achieve this, he ..." points at the immediately previous sentence, not an earlier person.
+FOCUS_PURPOSE_RE = re.compile(r"^To\s+\w+\s+this\b", re.I)
 FOCUS_HEADING_RE = re.compile(
     r"(?:^|(?<=[.!?])\s+)([A-Z][A-Za-z'\u2019\-]+(?:\s+[A-Za-z'\u2019\-]+){0,3})\s*:\s*"
 )
@@ -699,7 +905,9 @@ def _collapse_repeats(text: str) -> str:
         changed = False
         for size in range(min(60, len(words) // 2), 1, -1):
             for i in range(0, len(words) - 2 * size + 1):
-                if words[i : i + size] == words[i + size : i + 2 * size]:
+                left = [re.sub(r"[^A-Za-z0-9]+", "", word).lower() for word in words[i : i + size]]
+                right = [re.sub(r"[^A-Za-z0-9]+", "", word).lower() for word in words[i + size : i + 2 * size]]
+                if left == right and any(left):
                     del words[i + size : i + 2 * size]
                     changed = True
                     break
@@ -733,6 +941,11 @@ def entity_focus_evidence(chunks: list[dict], entity: str | None) -> list[dict]:
             prev_sentence = None
         last_page = page
         kept: list[str] = []
+        chunk_prev: tuple[str, bool] | None = None
+        # Chunk overlap copies a previous person's sentence into the next section
+        # ("Thus he ... Baji Rao I : ... Thus he ..."). The second copy must not
+        # be reattached to the later person.
+        chunk_seen: set[str] = set()
         clean = _collapse_repeats(FOCUS_NOISE_RE.sub(" ", item.get("text") or ""))
         clean = FOCUS_SMASH_RE.sub(lambda m: m.group(1) + ". ", clean)
         # Inserted box/caption title: "...Mughal Babarnama - (Tuzuk-e-Babari) Babar wrote..." -> drop the title fragment
@@ -743,20 +956,54 @@ def entity_focus_evidence(chunks: list[dict], entity: str | None) -> list[dict]:
                 people = [key for (_a, _b, key) in _person_spans(heading)]
                 current = people[0] if people else heading_entity_key(heading + " :")
             for sentence in FOCUS_SENT_SPLIT.split(body):
-                sentence = " ".join(sentence.split())
+                sentence = repair_leading_stub(" ".join(sentence.split()))
                 if len(sentence.split()) < 3 or FOCUS_DANGLING_RE.search(sentence):
                     continue
+                if re.match(
+                    r"^(?:write an essay|answer the following|fill in the blanks|match the following|project work)\b",
+                    sentence,
+                    re.I,
+                ):
+                    prev_sentence = (sentence, False)
+                    chunk_prev = (sentence, False)
+                    continue
+                if (
+                    _looks_corrupt_sentence(sentence)
+                    or (entity and _is_posthumous_bleed(sentence, entity))
+                    or (entity and entity in epithet_only_rulers(sentence))
+                ):
+                    # A skipped sentence still breaks "this/he" so the next clause
+                    # cannot inherit the person from before the skip.
+                    prev_sentence = (sentence, False)
+                    chunk_prev = (sentence, False)
+                    continue
+                raw_norm = re.sub(r"[^a-z0-9]+", " ", sentence.lower()).strip()
+                if raw_norm in chunk_seen or raw_norm in set(item.get("pre_heading_norms") or ()):
+                    continue
+                chunk_seen.add(raw_norm)
                 before = current
                 subject, how, pron = _resolve_subject(sentence, current)
                 keep = False
                 if subject == entity:
                     keep = True
                 elif before == entity and subject in (None, "OTHER"):
-                    keep = bool(re.search(r"\b(?:his|him)\b", sentence, re.I) or possessive.search(sentence))
+                    # "Aurangzeb's successor ... him" is another ruler's sentence.
+                    # A carried "him" must not pull that sentence onto the asked person.
+                    keep = how != "possessive" and bool(
+                        re.search(r"\b(?:his|him)\b", sentence, re.I)
+                        or possessive.search(sentence)
+                        or re.match(r"^(?:these|they|this)\b", sentence, re.I)
+                    )
                 elif before == entity and subject in RULER_KEYS:
                     keep = bool(re.search(r"\b(?:was|is)\s+(?:his|her)\b", sentence, re.I))
                 elif subject in ("OTHER", None) and possessive.search(sentence):
                     keep = True
+                if FOCUS_PURPOSE_RE.match(sentence) and how.startswith("pronoun"):
+                    # "To achieve this, he ..." belongs to the previous sentence
+                    # in this same passage. A chunk boundary must not lend it
+                    # the asked person's subject from an earlier passage.
+                    if chunk_prev is None or not chunk_prev[1]:
+                        keep = False
                 if subject in RULER_KEYS:
                     current = subject
                 elif subject == "OTHER" and not keep:
@@ -768,6 +1015,7 @@ def entity_focus_evidence(chunks: list[dict], entity: str | None) -> list[dict]:
                     resolved_text = resolved_text[0].upper() + resolved_text[1:]
                 previous = prev_sentence
                 prev_sentence = (resolved_text, keep)
+                chunk_prev = (resolved_text, keep)
                 if not keep:
                     continue
                 if FOCUS_ANAPHOR_RE.match(sentence):
@@ -795,3 +1043,268 @@ def entity_focus_evidence(chunks: list[dict], entity: str | None) -> list[dict]:
         if kept:
             out.append({**item, "text": " ".join(kept), "focus_filtered": True})
     return out
+
+
+_ACHIEVEMENT_Q_RE = re.compile(r"\b(?:achievements?|accomplishments?)\b", re.I)
+_ACCOMPLISH_RE = re.compile(
+    r"\b(?:conquer\w*|establish\w*|built|build(?:s|ing)?|organi[sz]\w*|appoint\w*|"
+    r"abolish\w*|expand\w*|gain(?:ed|s)?|collect(?:ed|ion)?|coronation|crowned|"
+    r"administrat\w*|divid\w*|introduc\w*|defeat\w*|found(?:ed|er|ing)\b|"
+    r"construct\w*|train\w*|permit\w*|encourag\w*|re-established|ruled|"
+    r"ascend\w*|wrote|translat\w*|brought|renam\w*)\b",
+    re.I,
+)
+
+
+def achievement_answer(question: str, chunks: list[dict], entity: str | None) -> str | None:
+    """Textbook sentences in which the asked person is the one who accomplished something.
+
+    A later epithet ("called Shivaji II"), a summons by someone else, and what
+    happened after the person died are not that person's achievements.
+    """
+    if not question or not entity or not _ACHIEVEMENT_Q_RE.search(question):
+        return None
+    if entity not in RULER_KEYS or not chunks:
+        return None
+    title = _titles().get(entity) or entity
+    kept: list[tuple[str, int | None]] = []
+    seen: set[str] = set()
+    focused = entity_focus_evidence(chunks, entity)
+    for item in focused or chunks:
+        page = _page(item)
+        blob = " ".join((item.get("text") or "").split())
+        for sentence in FOCUS_SENT_SPLIT.split(blob):
+            sentence = " ".join(sentence.split()).strip()
+            if len(sentence.split()) < 6:
+                continue
+            if _looks_corrupt_sentence(sentence) or _is_posthumous_bleed(sentence, entity):
+                continue
+            if entity in epithet_only_rulers(sentence):
+                continue
+            score, _why = entity_subject_score(sentence, entity)
+            if score < 3:
+                continue
+            subject, _how, _off = _resolve_subject(sentence, None)
+            if subject in RULER_KEYS and subject != entity:
+                continue
+            if not _ACCOMPLISH_RE.search(sentence):
+                continue
+            norm = re.sub(r"[^a-z0-9]+", "", sentence.lower())[:160]
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            kept.append((sentence, page))
+    if not kept:
+        return None
+    pages = sorted({page for _sent, page in kept if page is not None})
+    body = " ".join(sentence for sentence, _page_no in kept)
+    if len(pages) == 1:
+        label = f" [Page {pages[0]}]"
+    elif pages:
+        label = " [Pages " + ", ".join(str(page) for page in pages) + "]"
+    else:
+        label = ""
+    return f"{title}\n\n{body}{label}"
+
+
+_PLACE_Q_RE = re.compile(r"\bplaces?\b", re.I)
+_PLACE_RE = re.compile(
+    r"\b(?:conquer\w*|renam\w*|centre of operations|center of operations|"
+    r"built a new fort|built\s+\w+\s+fort)\b",
+    re.I,
+)
+
+
+def place_answer(question: str, chunks: list[dict], entity: str | None) -> str | None:
+    """Sentences that name where the asked person expanded, conquered, or centred activity."""
+    if not question or not entity or not _PLACE_Q_RE.search(question):
+        return None
+    if entity not in RULER_KEYS or not chunks:
+        return None
+    title = _titles().get(entity) or entity
+    kept: list[tuple[str, int | None]] = []
+    seen: set[str] = set()
+    focused = entity_focus_evidence(chunks, entity)
+    for item in focused or chunks:
+        page = _page(item)
+        blob = " ".join((item.get("text") or "").split())
+        for sentence in FOCUS_SENT_SPLIT.split(blob):
+            sentence = " ".join(sentence.split()).strip()
+            if len(sentence.split()) < 6:
+                continue
+            if _looks_corrupt_sentence(sentence) or _is_posthumous_bleed(sentence, entity):
+                continue
+            if entity in epithet_only_rulers(sentence):
+                continue
+            score, _why = entity_subject_score(sentence, entity)
+            if score < 3:
+                continue
+            subject, _how, _off = _resolve_subject(sentence, None)
+            if subject in RULER_KEYS and subject != entity:
+                continue
+            if not _PLACE_RE.search(sentence):
+                continue
+            norm = re.sub(r"[^a-z0-9]+", "", sentence.lower())[:160]
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            kept.append((sentence, page))
+    if not kept:
+        return None
+    pages = sorted({page for _sent, page in kept if page is not None})
+    body = " ".join(sentence for sentence, _page_no in kept)
+    if len(pages) == 1:
+        label = f" [Page {pages[0]}]"
+    elif pages:
+        label = " [Pages " + ", ".join(str(page) for page in pages) + "]"
+    else:
+        label = ""
+    return f"{title}\n\n{body}{label}"
+
+
+_CHRONOLOGY_Q_RE = re.compile(r"\bchronolog\w*\b", re.I)
+_ADMIN_ONLY_RE = re.compile(
+    r"\b(?:ryotwari|jahagir|ashapradhan|ministers?|judicial|panchayat|"
+    r"revenue collection|administrative system|divided his kingdom)\b",
+    re.I,
+)
+
+
+def chronology_answer(question: str, chunks: list[dict], entity: str | None) -> str | None:
+    """Life events in textbook order. The model must not reshuffle them."""
+    if not question or not entity or not _CHRONOLOGY_Q_RE.search(question):
+        return None
+    if entity not in RULER_KEYS or not chunks:
+        return None
+    title = _titles().get(entity) or entity
+    kept: list[tuple[str, int | None]] = []
+    seen: set[str] = set()
+    focused = entity_focus_evidence(chunks, entity)
+    for item in focused or chunks:
+        page = _page(item)
+        blob = " ".join((item.get("text") or "").split())
+        for sentence in FOCUS_SENT_SPLIT.split(blob):
+            sentence = " ".join(sentence.split()).strip()
+            sentence = re.sub(
+                r"^The relationship between(?:\s+[A-Za-z]+){1,8}\s+(?=[A-Z])",
+                "",
+                sentence,
+            ).strip()
+            if len(sentence.split()) < 6:
+                continue
+            if _looks_corrupt_sentence(sentence) or _is_posthumous_bleed(sentence, entity):
+                continue
+            if entity in epithet_only_rulers(sentence) or _ADMIN_ONLY_RE.search(sentence):
+                continue
+            score, _why = entity_subject_score(sentence, entity)
+            if score < 3:
+                continue
+            subject, _how, _off = _resolve_subject(sentence, None)
+            if subject in RULER_KEYS and subject != entity:
+                continue
+            norm = re.sub(r"[^a-z0-9]+", "", sentence.lower())[:160]
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            kept.append((sentence, page))
+    if len(kept) < 2:
+        return None
+    pages = sorted({page for _sent, page in kept if page is not None})
+    body = " ".join(sentence for sentence, _page_no in kept)
+    if len(pages) == 1:
+        label = f" [Page {pages[0]}]"
+    elif pages:
+        label = " [Pages " + ", ".join(str(page) for page in pages) + "]"
+    else:
+        label = ""
+    return f"{title}\n\n{body}{label}"
+
+
+def drop_preheading_claims(answer: str, evidence: list[dict], entity: str | None) -> str:
+    """Drop a claim that names the focus person when the textbook sentence is an earlier person's pronoun.
+
+    Chunk boundaries copy "Thus he ..." from the previous section into the next heading.
+    Rewriting that "he" as the later person states the wrong subject's action.
+    """
+    if not answer or not evidence or not entity or entity not in RULER_KEYS:
+        return answer
+    title_tokens = set(re.findall(r"[a-z0-9]+", (_titles().get(entity) or "").lower()))
+    stop = {
+        "thus", "hence", "this", "that", "with", "from", "were", "was", "his", "her",
+        "the", "and", "only", "also", "into", "after", "before", "when", "then",
+    }
+
+    def tokens(text: str) -> set[str]:
+        return {
+            word
+            for word in re.findall(r"[a-z]{4,}", (text or "").lower())
+            if word not in stop and word not in title_tokens
+        }
+
+    def heading_norm_pos(blob: str) -> int | None:
+        for match in FOCUS_HEADING_RE.finditer(blob):
+            people = [key for (_a, _b, key) in _person_spans(match.group(1))]
+            key = people[0] if people else heading_entity_key(match.group(1) + " :")
+            if key == entity:
+                return len(re.sub(r"[^a-z0-9]+", " ", blob[: match.start()].lower()))
+        return None
+
+    def claim_before_heading(chunk_text: str, answer_sentence: str) -> bool:
+        """True when this claim's content words first appear before the focus person's heading."""
+        blob = " ".join((chunk_text or "").split())
+        head = heading_norm_pos(blob)
+        if head is None:
+            return False
+        words = [
+            word
+            for word in re.findall(r"[a-z0-9]+", answer_sentence.lower())
+            if len(word) >= 4 and word not in stop and word not in title_tokens
+        ]
+        if len(words) < 2:
+            return False
+        norm = re.sub(r"[^a-z0-9]+", " ", blob.lower())
+        start = 0
+        while True:
+            pos = norm.find(words[0], start)
+            if pos < 0 or pos >= head:
+                return False
+            window = norm[pos : pos + 90]
+            if all(word in window for word in words[:4]):
+                return True
+            start = pos + 1
+
+    lines_out: list[str] = []
+    for line in (answer or "").split("\n"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "**", "Source", "[Page")):
+            lines_out.append(line)
+            continue
+        kept: list[str] = []
+        for sent in re.split(r"(?<=[.!?])\s+(?=[A-Z\[])", stripped):
+            sent = sent.strip()
+            if not sent:
+                continue
+            subject, _how, _off = _resolve_subject(re.sub(r"\s*\[Pages?[^\]]*\]", "", sent).strip(), None)
+            pred = tokens(sent)
+            if subject != entity or len(pred) < 3:
+                kept.append(sent)
+                continue
+            matched = False
+            owned = False
+            for item in evidence:
+                text = item.get("text") or ""
+                for ev in re.split(r"(?<=[.!?])\s+", " ".join(text.split())):
+                    if len(pred & tokens(ev)) < max(3, int(0.6 * len(pred))):
+                        continue
+                    matched = True
+                    if claim_before_heading(text, sent):
+                        continue
+                    ev_subject, ev_how, _ev_off = _resolve_subject(ev, entity)
+                    if ev_subject == entity or not str(ev_how).startswith("pronoun"):
+                        owned = True
+            if matched and not owned:
+                continue
+            kept.append(sent)
+        if kept:
+            lines_out.append(" ".join(kept))
+    return "\n".join(lines_out).strip()

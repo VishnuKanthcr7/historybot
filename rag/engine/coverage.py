@@ -539,18 +539,231 @@ def _filter_entity_sentences(text: str, entity: str | None) -> str:
     return "".join(parts).strip()
 
 
+def causal_chain_kept(draft: str, answer: str) -> bool:
+    """A 'due to this' sentence in the draft must keep its own preceding cause in the answer."""
+    causal = re.compile(r"\b(?:due to this|because of this|as a result|therefore|hence)\b", re.I)
+    sents = [part.strip() for part in re.split(r"(?<=[.!?])\s+", draft or "") if part.strip()]
+
+    def stems(text: str) -> set[str]:
+        return {word for word in re.findall(r"[a-z]{4,}", (text or "").lower()) if word not in {"this", "that", "with", "from", "were", "have"}}
+
+    answer_stems = stems(answer)
+    for index, sent in enumerate(sents):
+        if not causal.search(sent):
+            continue
+        effect = stems(sent)
+        cause = stems(sents[index - 1]) if index else set()
+        if effect and len(effect & answer_stems) < max(2, int(0.5 * len(effect) + 0.999)):
+            return False
+        if len(cause) >= 2 and len(cause & answer_stems) < max(2, int(0.5 * len(cause) + 0.999)):
+            return False
+    return True
+
+
+def _not_stated_explanation(entity: str | None) -> dict:
+    return {
+        "answer": "The prescribed textbook does not state that.",
+        "plan": [],
+        "coverage": {"missing": [], "grade": "GOOD", "generated": 0},
+        "regenerated": False,
+        "fallback_used": True,
+        "section_pages": {},
+    }
+
+
+def _how_term_groups(
+    plan: list,
+    question: str,
+    entity: str | None,
+    keep_pronoun_follow: bool = False,
+) -> list | None:
+    """Keep textbook sentences that share the question's own action words.
+
+    A how-question with no known facet (training, escape, and similar) must not
+    fall through to a ruler's whole administration section. A "what was X"
+    question may also keep the next pronoun sentence, such as "He abolished...".
+    """
+    from rag.engine.entity import _aliases
+
+    stop = {
+        "how", "did", "does", "do", "was", "were", "what", "who", "when", "where", "why",
+        "the", "his", "her", "their", "him", "them", "and", "with", "from", "that", "this",
+        "into", "about", "have", "had", "been", "were", "your", "they", "used",
+        "located", "location", "happened", "during", "before", "after", "while",
+        "system", "kingdom", "administration", "administrative",
+    }
+    aliases = {entity.lower()} if entity else set()
+    if entity:
+        aliases.update(alias.lower() for alias in _aliases(entity))
+    tokens = [
+        token
+        for token in re.findall(r"[a-z]{4,}", (question or "").lower())
+        if token not in stop and token not in aliases
+    ]
+    if not tokens:
+        return None
+    kept = []
+    for group in plan:
+        sentences = []
+        seen = set()
+        pages = []
+        for item in group.chunks:
+            pieces = [re.sub(r"\s+", " ", sent).strip() for sent in re.split(r"(?<=[.!?])\s+", item.get("text") or "")]
+            pieces = [sent for sent in pieces if sent]
+            from rag.engine.entity import TERM_BACKREF_RE, other_time_owner
+
+            def _term_hit(token: str, low: str) -> bool:
+                if re.search(rf"\b{re.escape(token)}", low):
+                    return True
+                # "Mansabdari" also names "Mansabs" and "Mansabdars".
+                return len(token) >= 8 and bool(re.search(rf"\b{re.escape(token[:6])}", low))
+
+            chosen = [False] * len(pieces)
+            for index, clean in enumerate(pieces):
+                if other_time_owner(clean) not in (None, entity):
+                    continue
+                low = clean.lower()
+                matched = any(_term_hit(token, low) for token in tokens)
+                follow = (
+                    keep_pronoun_follow
+                    and index > 0
+                    and chosen[index - 1]
+                    and bool(re.match(r"^(?:he|she|it|they|this|these)\b", clean, re.I))
+                )
+                if matched or follow:
+                    chosen[index] = True
+                    if index > 0 and TERM_BACKREF_RE.match(clean):
+                        chosen[index - 1] = True
+            kept_here = False
+            for clean, take in zip(pieces, chosen):
+                if not take:
+                    continue
+                key = re.sub(r"[^a-z0-9]+", "", clean.lower())[:80]
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                sentences.append(clean)
+                kept_here = True
+            if kept_here:
+                page = _page(item)
+                if page is not None and page not in pages:
+                    pages.append(page)
+        if any(sent[:1].isupper() for sent in sentences):
+            # A chunk boundary can leave a lowercase fragment ("i assembled...").
+            # Prefer the complete textbook sentence when one also matches.
+            sentences = [sent for sent in sentences if not sent[:1].islower()]
+        if not sentences:
+            continue
+        base = dict(group.chunks[0]) if group.chunks else {}
+        base["text"] = " ".join(sentences)
+        base["focus_filtered"] = True
+        kept.append(
+            CoverageGroup(
+                key=group.key,
+                title=group.title,
+                pages=pages or list(group.pages or []),
+                chunks=[base],
+                markers=list(group.markers or []),
+            )
+        )
+    return kept or None
+
+
 def generate_entity_explanation(question: str, chunks: list[dict], entity: str | None) -> dict | None:
-    from rag.engine.entity import build_entity_plan, entity_readable
-    from rag.engine.pack import detect_entity
+    from rag.engine.entity import (
+        achievement_answer,
+        build_entity_plan,
+        entity_focus_evidence,
+        entity_readable,
+        place_answer,
+        chronology_answer,
+    )
+    from rag.engine.pack import detect_entity, detect_facet
+    from rag.engine.validate import enforce_evidence_support
 
     entity = entity or detect_entity(extract_topics(question))
     if not entity:
         return None
+    achieved = achievement_answer(question, chunks, entity) or place_answer(question, chunks, entity) or chronology_answer(question, chunks, entity)
+    if achieved:
+        pages = sorted({p for item in chunks if (p := _page(item)) is not None and str(p) in achieved})
+        return {
+            "answer": achieved,
+            "plan": [],
+            "coverage": {"missing": [], "grade": "GOOD", "generated": 1},
+            "regenerated": False,
+            "fallback_used": True,
+            "section_pages": {f"{entity}:achievements": pages},
+        }
+    source_chunks = list(chunks)
+    if entity in RULER_KEYS:
+        focused = entity_focus_evidence(chunks, entity)
+        if focused:
+            chunks = focused
     plan = build_entity_plan(question, chunks, entity)
+    how = bool(re.match(r"^\s*how\b", question or "", re.I))
+    term_question = bool(re.match(r"^\s*(?:what|where)\b", question or "", re.I))
+    if how:
+        facet = detect_facet(question)
+        if facet:
+            plan = [group for group in plan if str(group.key).endswith(":" + facet)]
+        else:
+            termed = _how_term_groups(plan, question, entity)
+            if termed:
+                plan = termed
+            else:
+                plan = [
+                    group
+                    for group in plan
+                    if str(group.key).endswith(":actions") or str(group.key).endswith(":administration")
+                ]
+        if not plan:
+            return _not_stated_explanation(entity)
+    elif term_question:
+        raw = [
+            CoverageGroup(
+                key=f"{entity}:term",
+                title="What does the textbook say?",
+                pages=sorted({p for item in source_chunks if (p := _page(item)) is not None}),
+                chunks=source_chunks,
+                markers=[],
+            )
+        ]
+        termed = _how_term_groups(raw, question, entity, keep_pronoun_follow=True)
+        if termed:
+            plan = termed
     if not plan:
         return None
     title = _entity_title(entity)
     draft = combine_entity_sections(entity, [(group, entity_readable([group])) for group in plan])
+    # Subject-filtered extracts already name the right person. A rewrite can pull in the
+    # previous person's sentence from the same chunk ("Thus he established the fame...").
+    focus_locked = bool(plan) and all(
+        group.chunks and all(item.get("focus_filtered") for item in group.chunks) for group in plan
+    )
+    if how or (term_question and focus_locked) or (focus_locked and not wants_easy_english(question)):
+        text = draft
+        used_extractive = True
+        score = coverage_score(draft, plan)
+        draft_score = score
+        regenerated = False
+        # The draft is already limited to the asked subject's sentences.
+        # Scoring each sentence by name again drops administration lines that
+        # continue that subject with "his" or "these/they were called".
+        text = sanitize_student_text(text)
+        text = _drop_empty_headings(text)
+        if not re.search(r"\[Page", text):
+            pages = sorted({page for group in plan for page in (group.pages or [])})
+            if pages:
+                text = f"{text}{_page_label(pages)}"
+        return {
+            "answer": text,
+            "plan": [group.as_public() for group in plan],
+            "coverage": score,
+            "regenerated": False,
+            "fallback_used": True,
+            "section_pages": {group.key: group.pages for group in plan},
+        }
     extra = ""
     if wants_easy_english(question) or re.search(
         r"easy english|simple english|explain simply|class 9 student", question or "", re.I
@@ -624,6 +837,15 @@ def generate_entity_explanation(question: str, chunks: list[dict], entity: str |
     text = _filter_entity_sentences(text, entity)
     text = sanitize_student_text(text)
     text = _drop_empty_headings(text)
+    if not causal_chain_kept(draft, text):
+        text = draft
+        used_extractive = True
+    supported = enforce_evidence_support(text, chunks, title)
+    if supported and causal_chain_kept(draft, supported) and len(supported.split()) >= max(20, int(len(draft.split()) * 0.45)):
+        text = supported
+    else:
+        text = draft
+        used_extractive = True
     if not re.search(r"\[Page", text):
         pages = sorted({page for group in plan if group_covered(text, group) for page in (group.pages or [])})
         if not pages:
@@ -644,7 +866,32 @@ def generate_from_plan(question: str, chunks: list[dict], question_type: str, de
     from rag.engine.pack import detect_entity
 
     entity = detect_entity(extract_topics(question))
-    if question_type == "EXPLANATION" and entity:
+    named_rulers = [key for key in RULER_KEYS if key in extract_topics(question)]
+    if question_type == "EXPLANATION" and len(named_rulers) >= 2:
+        from rag.engine.entity import entity_focus_evidence
+
+        parts = []
+        plans = []
+        for ruler in named_rulers:
+            focused = entity_focus_evidence(chunks, ruler)
+            if not focused:
+                continue
+            result = generate_entity_explanation(question, focused, ruler)
+            answer = (result or {}).get("answer") or ""
+            if not answer.strip() or answer.strip() == "The prescribed textbook does not state that.":
+                continue
+            parts.append(answer)
+            plans.extend((result or {}).get("plan") or [])
+        if parts:
+            return {
+                "answer": "\n\n".join(parts),
+                "plan": plans,
+                "coverage": {"missing": [], "grade": "GOOD", "generated": len(parts)},
+                "regenerated": False,
+                "fallback_used": False,
+                "section_pages": {},
+            }
+    if question_type == "EXPLANATION" and entity and len(named_rulers) < 2:
         entity_result = generate_entity_explanation(question, chunks, entity)
         if entity_result:
             return entity_result

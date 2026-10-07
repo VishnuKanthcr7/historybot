@@ -2,7 +2,14 @@ import { useEffect, useRef } from "react";
 import MessageBubble from "./MessageBubble.jsx";
 import { LABELS } from "../i18n/labels.js";
 
-export default function MessageList({ messages, loading, language }) {
+const EXAMPLES = [
+  "Who was Akbar?",
+  "Why did Sher Shah defeat Humayun?",
+  "Explain the Mansabdari system.",
+  "Compare Akbar and Aurangzeb.",
+];
+
+export default function MessageList({ messages, loading, language, onAsk }) {
   const endRef = useRef(null);
   const t = LABELS[language] || LABELS.en;
 
@@ -11,15 +18,23 @@ export default function MessageList({ messages, loading, language }) {
   }, [messages, loading]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5 md:px-8">
+    <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-5 md:px-8">
       {messages.length === 0 && !loading ? (
-        <div className="mx-auto max-w-2xl border border-rule bg-cream p-6">
-          <p className="font-serif text-xl text-navy">{t.emptyChat}</p>
-          <p className="mt-2 text-sm leading-relaxed text-stone-600">{t.how2}</p>
-          <ul className="mt-4 space-y-1.5 text-sm text-stone-600">
-            <li>· Who was Akbar?</li>
-            <li>· Explain Shivaji in detail</li>
-            <li>· Give me 10 MCQs on the Marathas</li>
+        <div className="mx-auto max-w-2xl pt-8 sm:pt-14">
+          <p className="font-serif text-3xl text-navy">HistoryBot</p>
+          <p className="mt-2 text-base text-muted">{t.emptyChat}</p>
+          <ul className="mt-6 grid gap-2 sm:grid-cols-2">
+            {EXAMPLES.map((example) => (
+              <li key={example}>
+                <button
+                  type="button"
+                  onClick={() => onAsk?.(example)}
+                  className="min-h-11 w-full rounded-2xl border border-rule bg-cream px-4 py-3 text-left text-sm text-ink transition hover:border-brass"
+                >
+                  {example}
+                </button>
+              </li>
+            ))}
           </ul>
         </div>
       ) : null}
@@ -30,12 +45,9 @@ export default function MessageList({ messages, loading, language }) {
           </li>
         ))}
         {loading ? (
-          <li
-            className="border border-dashed border-brass/40 bg-cream/80 px-4 py-3 text-sm text-brass"
-            aria-live="polite"
-          >
+          <li className="px-1 text-sm text-muted" aria-live="polite">
             <span className="inline-flex items-center gap-2">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-brass" aria-hidden />
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brass" aria-hidden />
               {t.thinking}
             </span>
           </li>

@@ -22,6 +22,13 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL") or os.environ.get("LLM_MODEL") or 
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "").rstrip("/")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", OLLAMA_MODEL)
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "").strip() or "gpt-6.1-sol"
+OPENAI_BASE_URL = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com").rstrip("/")
+_REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "low").strip().lower() or "low"
+if OPENAI_REASONING_EFFORT not in _REASONING_EFFORTS:
+    OPENAI_REASONING_EFFORT = "low"
 
 RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "5"))
 # Starting cosine-distance cutoff from Phase 5 tests (not a proven accuracy guarantee).

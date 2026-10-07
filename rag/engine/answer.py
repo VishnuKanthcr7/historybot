@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import re
 import time
+from functools import lru_cache
 
 from rag.engine.citations import supporting_evidence
 from rag.engine.classify import (
+    FOLLOW_SHORT_RE,
+    PRONOUN_RE,
     TOPIC_ALIASES,
+    _folded,
     casual_reply,
     classify_answer_mode,
     classify_casual,
@@ -18,6 +22,7 @@ from rag.engine.classify import (
     strip_leading_greeting,
 )
 from rag.engine.evidence import (
+    content_tokens,
     evidence_is_sufficient,
     evidence_matches_topic,
     evidence_subject_match,
@@ -29,18 +34,20 @@ from rag.engine.intent import (
     entity_focus_query,
     infer_previous_task,
     is_more_followup,
+    last_mcq_request,
     looks_like_mcq_request,
     previous_assistant,
     requested_item_count,
+    revises_current_questions,
     wants_easy_english,
 )
 from rag.engine.mcq import mcqs_from_pack
 from rag.engine.normalize import (
+    heuristic_followup_query,
     looks_kannada,
     looks_like_injection,
     looks_like_roleplay,
     normalize_question,
-    rewrite_for_retrieval,
     trim_history,
 )
 from rag.engine.pack import build_evidence_pack, detect_entity
@@ -55,7 +62,7 @@ from rag.engine.sanitize import sanitize_student_text
 from rag.engine.validate import enforce_evidence_support, is_refusal, unsupported_named_items, validate_answer
 from rag.llm.client import complete
 from rag.llm.config import RAG_TOP_K
-from rag.prompts.tutor import KANNADA_UNAVAILABLE, SYSTEM_PROMPT, refusal_text
+from rag.prompts.tutor import FINAL_ANSWER_PROMPT, KANNADA_UNAVAILABLE, SYSTEM_PROMPT, refusal_text
 from rag.vectorstore.retrieve import retrieve_primary
 
 LIMITED_EN = (
@@ -67,6 +74,42 @@ BOUNDARY_EN = (
     "I can help with topics covered in your prescribed Class 9 Karnataka State Board textbook. "
     "This information is not available in the provided textbook."
 )
+# Ordinary English that can appear in the textbook without naming its subject.
+# A question is in-domain only when it has a textbook token outside this set,
+# a known topic alias, or it is an anaphoric follow-up of the current question.
+_GENERIC_WORDS = frozenset(
+    {
+        "abolish", "abolished", "about", "above", "across", "after", "again", "against", "along", "also",
+        "although", "among", "another", "answer", "answers", "around", "assumed",
+        "because", "become", "became", "been", "before", "being", "below", "between",
+        "birth", "board", "born", "both", "built", "called", "came", "captured",
+        "century", "chapter", "class", "compare", "constructed", "control",
+        "controlled", "could", "country", "current", "death", "defeated", "describe",
+        "died", "different", "during", "early", "eight", "eighteen", "eighty",
+        "either", "eleven", "else", "emperor", "emperors", "especially", "established",
+        "even", "every", "explain", "father", "fifteen", "fifth", "fifty", "first",
+        "five", "following", "forty", "fourteen", "fourth", "from", "general", "give",
+        "given", "great", "happened", "having", "help", "here", "history", "however",
+        "hundred", "important", "including", "information", "into", "invaded", "just",
+        "killed", "king", "kings", "known", "large", "later", "life", "like", "list",
+        "lived", "major", "make", "many", "married", "minister", "more", "most",
+        "mother", "much", "must", "name", "names", "next", "nine", "nineteen",
+        "ninety", "number", "only", "onto", "other", "over", "page", "pages", "part",
+        "parts", "people", "period", "person", "place", "places", "please", "power", "prime",
+        "queen", "queens", "question", "questions", "received", "ruled", "ruler",
+        "rulers", "ruling", "same", "second", "seven", "seventeen", "seventy",
+        "several", "shall", "should", "show", "shown", "since", "sixteen", "sixty",
+        "succeed", "succeeded",
+        "small", "soldier", "soldiers", "solve", "solved", "some", "state", "states",
+        "still", "student", "students", "such", "system", "taken", "tell", "textbook",
+        "than", "that", "their", "them", "then", "there", "these", "they", "third",
+        "thirteen", "thirty", "this", "those", "thousand", "three", "through", "time",
+        "times", "today", "trained", "training", "twelve", "twenty", "type", "under",
+        "until", "using", "very", "warfare", "were", "what", "when", "where", "which",
+        "while", "whose", "with", "within", "without", "work", "world", "would",
+        "write", "writing", "written", "year", "years", "young", "your",
+    }
+)
 OUTSIDE_SOURCE_NOTE = (
     "I can only use your prescribed Class 9 Karnataka State Board textbook, "
     "not Wikipedia, NCERT, the internet, or other books."
@@ -76,6 +119,9 @@ ROLEPLAY_NOTE = (
 )
 OFF_DOMAIN_CLAUSES = (
     (r"capital of karnataka", "the capital of Karnataka"),
+    # A present-day "capital of <place>" ask. "capital of the ..." stays available
+    # for a dynasty or kingdom the textbook actually discusses.
+    (r"\bcapital of (?!the\b)", "that capital"),
     (r"world war", "World War II"),
     (r"world cup", "the World Cup"),
     (r"\bpython\b", "Python"),
@@ -89,6 +135,62 @@ OFF_DOMAIN_CLAUSES = (
     (r"exact birthplace|exact place of birth", "the exact birthplace"),
     (r"chatgpt|openai", "that request"),
 )
+
+
+def _question_content_tokens(question: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z]{5,}", (question or "").lower())
+        if token not in _GENERIC_WORDS
+    }
+
+
+@lru_cache(maxsize=1)
+def _textbook_domain_tokens() -> frozenset[str]:
+    """Words of the Class 9 textbook and its topic lists, minus ordinary English."""
+    from rag.engine.topic_map import FACET_TERMS, load_primary_chunks
+
+    tokens: set[str] = set()
+    for aliases in TOPIC_ALIASES.values():
+        for alias in aliases:
+            tokens.update(re.findall(r"[a-z]{5,}", alias.lower()))
+    for terms in FACET_TERMS.values():
+        for term in terms:
+            tokens.update(re.findall(r"[a-z]{5,}", term.lower()))
+    for item in load_primary_chunks():
+        tokens.update(re.findall(r"[a-z]{5,}", (item.get("text") or "").lower()))
+    return frozenset(token for token in tokens if token not in _GENERIC_WORDS)
+
+
+def _is_contextual_followup(question: str, domain: frozenset[str] | None) -> bool:
+    """A follow-up continues the conversation. It does not name a new outside subject.
+
+    The previous answer is not evidence. Only the current wording counts:
+    a short continuation, or a pronoun whose other content words stay in the textbook.
+    """
+    if FOLLOW_SHORT_RE.match(_folded(question or "")):
+        return True
+    if not PRONOUN_RE.search(question or ""):
+        return False
+    tokens = _question_content_tokens(question)
+    if domain is None:
+        return not tokens
+    return not (tokens - domain)
+
+
+def _current_question_outside_domain(question: str) -> bool:
+    """True when this question itself is outside the Class 9 textbook domain."""
+    if extract_topics(question):
+        return False
+    tokens = _question_content_tokens(question)
+    if _is_contextual_followup(question, None) and not tokens:
+        return False
+    domain = _textbook_domain_tokens()
+    if _is_contextual_followup(question, domain):
+        return False
+    if tokens & domain:
+        return False
+    return True
 
 
 def answer_question(
@@ -130,6 +232,8 @@ def answer_question(
     off_labels = _off_domain_labels(rag_question)
     if off_labels and not topics:
         return _boundary(language, rag_question)
+    if _current_question_outside_domain(rag_question):
+        return _boundary(language, rag_question)
     if looks_like_injection(rag_question) and not topics:
         return _unavailable(language, rag_question, [], [], intent=None, mode="NORMAL")
     if looks_like_roleplay(rag_question) and not topics:
@@ -146,8 +250,11 @@ def answer_question(
     stored_task = collect_task_state(history, task_state)
     previous_task = infer_previous_task(history, stored_task)
     more = is_more_followup(search_question) or is_more_followup(rag_question)
-    if more and previous_task == "MCQ":
-        previous = last_user_question(history)
+    revise_questions = revises_current_questions(search_question) or revises_current_questions(rag_question)
+    prior_mcq = last_mcq_request(history) if revise_questions else ""
+    continue_mcq = bool(prior_mcq) or (previous_task == "MCQ" and more)
+    if continue_mcq:
+        previous = prior_mcq or last_user_question(history)
         search_question = previous or search_question
         if not extract_topics(search_question):
             if stored_task.get("entity") and stored_task["entity"] in TOPIC_ALIASES:
@@ -181,23 +288,37 @@ def answer_question(
             question_type,
         ) or search_question
     else:
+        from rag.engine.facts import _expand_pronouns
+
+        previous_user = last_user_question(history)
+        # A question that just left history must not keep feeding the old person
+        # into "he" or "his".
+        if previous_user and _current_question_outside_domain(previous_user):
+            pass
+        else:
+            search_question = _expand_pronouns(search_question, history) or search_question
         mode = classify_answer_mode(search_question)
         intent = classify_intent(search_question, history)
         question_type = classify_question_type(search_question, intent)
+        # A follow-up that itself asks for an explanation of a named topic
+        # must keep subject filtering. The FOLLOW_UP label only means the
+        # chat continued; it must not switch to unfiltered chunk text.
+        if question_type == "FOLLOW_UP" and extract_topics(search_question):
+            standalone = classify_question_type(search_question, None)
+            if standalone in {"EXPLANATION", "BROAD_TOPIC"}:
+                question_type = standalone
         previous = last_user_question(history) if intent == "FOLLOW_UP" else ""
         if intent == "FOLLOW_UP" and not extract_topics(previous) and not extract_topics(search_question):
             return _clarify(language, rag_question, intent, mode)
-        rewrite_history = []
-        if intent == "FOLLOW_UP" and previous:
-            rewrite_history = [{"role": "user", "content": previous}]
         focus = entity_focus_query(
             detect_entity(extract_topics(search_question)),
             extract_topics(search_question),
             question_type,
         )
-        retrieval_query = focus or rewrite_for_retrieval(
-            search_question, rewrite_history, force=bool(rewrite_history)
-        )
+        follow = ""
+        if intent == "FOLLOW_UP" and previous and not extract_topics(search_question):
+            follow = heuristic_followup_query(search_question, previous) or ""
+        retrieval_query = _with_question_terms(search_question, focus or follow)
 
     depth_profile = classify_depth(
         search_question if not more else rag_question,
@@ -226,19 +347,32 @@ def answer_question(
     elif mode == "DETAILED":
         top_k = max(top_k, 14)
     top_k = max(RAG_TOP_K, top_k)
-    if not more and not looks_like_mcq_request(search_question) and not looks_like_mcq_request(rag_question):
-        from rag.engine.facts import try_fact_answer
-
-        fact_result = try_fact_answer(search_question, history)
-        if fact_result is not None:
-            timings["T8_total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
-            fact_result["timings"] = timings
-            return fact_result
     t_retrieve = time.perf_counter()
     primary_hits = retrieve_primary(retrieval_query, top_k=top_k, language="en")
     timings["T1_retrieve_ms"] = round((time.perf_counter() - t_retrieve) * 1000, 1)
     if looks_like_mcq_request(search_question) or looks_like_mcq_request(rag_question):
         question_type = "EXAM"
+    if question_type != "EXAM" and mode != "ECONTENT" and not continue_mcq:
+        lookup = (search_question or "").strip()
+        if retrieval_query and retrieval_query.lower() not in lookup.lower():
+            lookup = f"{lookup} {retrieval_query}".strip()
+        if lookup and lookup != retrieval_query:
+            primary_hits = retrieve_primary(lookup, top_k=top_k, language="en")
+            retrieval_query = lookup
+        return _reasoned_history_answer(
+            search_question,
+            rag_question,
+            language,
+            retrieval_query,
+            primary_hits,
+            intent,
+            mode,
+            depth_profile,
+            off_labels,
+            history,
+            t0,
+            timings,
+        )
     pack = build_evidence_pack(
         search_question,
         retrieval_query,
@@ -278,20 +412,58 @@ def answer_question(
         return _unavailable(language, retrieval_query, primary_hits, primary_selected, intent=intent, mode=mode)
 
     selected = list(primary_selected)
+    if "focused-person" in pack.reasons and selected:
+        sentences = []
+        seen_sentences = set()
+        for item in selected:
+            for part in re.split(r"(?<=[.!?])\s+", item.get("text") or ""):
+                cleaned = " ".join(part.split())
+                key = cleaned.lower()
+                if cleaned and key not in seen_sentences:
+                    seen_sentences.add(key)
+                    sentences.append(cleaned)
+        if sentences:
+            sources = _sources(selected)
+            answer = f"{' '.join(sentences)}\n\n{_citation_block(sources)}"
+            result = _payload(
+                answer,
+                language,
+                retrieval_query,
+                primary_hits,
+                selected,
+                "focused_person",
+                intent,
+                mode,
+                0,
+                [],
+                pack,
+                fallback=False,
+                sources=sources,
+            )
+            result["task"] = {
+                "type": "EXPLAIN",
+                "topic": pack.topics[0] if pack.topics else None,
+                "entity": None,
+                "used_chunk_ids": [item.get("chunk_id") for item in selected if item.get("chunk_id")],
+                "depth": depth_profile.depth,
+            }
+            result["depth"] = depth_profile.as_public()
+            timings["T8_total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            result["timings"] = timings
+            return result
     if question_type == "EXAM":
-        mcq_turn = looks_like_mcq_request(search_question) or looks_like_mcq_request(rag_question) or (
-            more and previous_task == "MCQ"
-        )
+        mcq_turn = looks_like_mcq_request(search_question) or looks_like_mcq_request(rag_question) or continue_mcq
         if mcq_turn:
             count_source = rag_question if looks_like_mcq_request(rag_question) else search_question
-            default_count = int(stored_task.get("count") or 10) if more else 10
+            default_count = int(stored_task.get("count") or 10) if (more or revise_questions) else 10
             count = requested_item_count(count_source, default=default_count)
             exam, fingerprints = mcqs_from_pack(
                 search_question,
                 selected,
                 count=count,
-                previous_answer=previous_assistant(history) if more else "",
-                previous_fingerprints=stored_task.get("fingerprints") if more else [],
+                previous_answer=previous_assistant(history) if (more or revise_questions) else "",
+                previous_fingerprints=stored_task.get("fingerprints") if (more or revise_questions) else [],
+                prefer_specific=revise_questions,
             )
             if exam:
                 sources = _sources(supporting_evidence(_mcq_attribution_text(exam), selected, min_overlap=2))
@@ -389,10 +561,15 @@ def answer_question(
                 readable_extract,
                 build_coverage_plan,
             )
-            from rag.engine.entity import build_entity_plan, entity_readable
+            from rag.engine.entity import build_entity_plan, entity_focus_evidence, entity_readable
 
             entity_key = pack.entity or detect_entity(extract_topics(search_question))
-            entity_plan = build_entity_plan(search_question, selected, entity_key) if entity_key else []
+            focused_selected = entity_focus_evidence(selected, entity_key) if entity_key else []
+            entity_plan = (
+                build_entity_plan(search_question, focused_selected or selected, entity_key)
+                if entity_key
+                else []
+            )
             if entity_plan:
                 raw = combine_entity_sections(
                     entity_key,
@@ -418,6 +595,9 @@ def answer_question(
                 raw = filtered
             if not raw.strip().lower().startswith("additional"):
                 raw = "Additional textbook points:\n\n" + raw
+        from rag.engine.entity import drop_preheading_claims
+
+        raw = drop_preheading_claims(raw, selected, pack.entity)
         raw = _decorate_student_answer(rag_question, raw, off_labels)
         sources = _sources(supporting_evidence(raw, selected, min_overlap=2))
         if not sources:
@@ -519,12 +699,13 @@ def answer_question(
         return result
 
     raw = _strip_invented_pages(payload["raw"])
-    if question_type == "DIRECT":
-        from rag.engine.coverage import GROUP_TITLE
-        from rag.engine.topic_map import RULER_KEYS
+    from rag.engine.coverage import GROUP_TITLE
+    from rag.engine.topic_map import RULER_KEYS
 
-        title = GROUP_TITLE.get(pack.entity) if pack.entity in RULER_KEYS else None
+    title = GROUP_TITLE.get(pack.entity) if pack.entity in RULER_KEYS else None
+    if question_type == "DIRECT":
         raw = enforce_evidence_support(raw, llm_evidence, title)
+    raw = _keep_stated_identity(rag_question, raw, list(llm_evidence) + list(selected), title)
     raw = _apply_partial_refusals(rag_question, raw, selected)
     raw = _apply_why_motive_note(rag_question, raw, selected, pack.entity, depth_profile.depth)
     raw = _decorate_student_answer(rag_question, raw, off_labels)
@@ -555,6 +736,42 @@ def answer_question(
     timings["T8_total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
     result["timings"] = timings
     return result
+
+
+_QUERY_STOP = {
+    "how", "did", "does", "what", "who", "when", "where", "why", "type",
+    "the", "his", "her", "their", "him", "them", "and", "with", "from", "that", "this",
+    "into", "about", "have", "been", "your", "they", "used", "tell", "more",
+    "was", "were", "important", "achievement", "achievements",
+    "accomplishment", "accomplishments", "place", "places", "expansion",
+}
+
+
+def _with_question_terms(question: str, query: str) -> str:
+    """Keep the entity focus, and add the question's own content words.
+
+    Follow-up retrieval otherwise collapses to the person alone, so a question
+    about warfare or a tax can miss the chunk that actually states it.
+    """
+    from rag.engine.entity import epithet_only_rulers
+
+    epithets = epithet_only_rulers(question)
+    entity = detect_entity(extract_topics(question) - epithets) or detect_entity(extract_topics(question))
+    aliases = set()
+    if entity and entity in TOPIC_ALIASES:
+        aliases.update(alias.lower() for alias in TOPIC_ALIASES[entity])
+    for key in epithets:
+        if entity:
+            aliases.update(alias.lower() for alias in TOPIC_ALIASES.get(key, ()) if isinstance(alias, str))
+    tokens = []
+    for token in re.findall(r"[a-z]{4,}", (question or "").lower()):
+        if token in _QUERY_STOP or token in aliases or token in (query or "").lower():
+            continue
+        if token not in tokens:
+            tokens.append(token)
+    if not tokens:
+        return query
+    return f"{query} {' '.join(tokens[:6])}".strip()
 
 
 def _looks_limited(question: str) -> bool:
@@ -652,10 +869,12 @@ def _exam_from_pack(question: str, chunks: list[dict]) -> str:
 
 def _asks_outside_textbook(question: str) -> bool:
     lowered = (question or "").lower()
-    return (
-        "not in the textbook" in lowered
-        or "not in the provided textbook" in lowered
-        or "outside the textbook" in lowered
+    return bool(
+        re.search(
+            r"\bnot in (?:this|the|your|our) (?:provided )?textbook\b"
+            r"|\boutside (?:this|the|your) textbook\b",
+            lowered,
+        )
     )
 
 
@@ -724,22 +943,42 @@ def _clarify(language: str, question: str, intent: str, mode: str) -> dict:
 
 
 
-def _apply_why_motive_note(question: str, answer: str, evidence: list[dict], entity: str | None, depth: str | None) -> str:
-    """If a why-question has action evidence but no motive, say so before supported context."""
-    if (depth or "") != "why" or not (answer or "").strip():
-        return answer
-    from rag.engine.depth import evidence_states_motive
+def _stated_naming_reason(answer: str) -> str | None:
+    """The sentence pair that says why someone was called a name, when the draft already has it."""
+    link = re.compile(r"\b(?:hence|therefore|thus|because)\b", re.I)
+    naming = re.compile(r"\b(?:called|known as|named)\b", re.I)
+    for para in re.split(r"\n\s*\n", answer or ""):
+        body = re.sub(r"^#+\s+.*$", "", para, flags=re.M).strip()
+        if not body:
+            continue
+        pages = " ".join(re.findall(r"\[Pages?[^\]]+\]", body))
+        plain = re.sub(r"\[Pages?[^\]]+\]", "", body)
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", plain) if part.strip()]
+        for index, sentence in enumerate(sentences):
+            if not naming.search(sentence):
+                continue
+            previous = sentences[index - 1] if index else ""
+            if not (link.search(sentence) or link.search(previous)):
+                continue
+            parts = [part for part in (previous, sentence) if part]
+            text = " ".join(parts)
+            if pages:
+                text = f"{text} {pages}"
+            return text.strip()
+    return None
 
-    if evidence_states_motive(evidence, entity, question):
-        return answer
-    low = (answer or "").lower()
-    if "does not state a motive" in low or "does not give the motive" in low or "motive is not" in low:
-        return answer
-    note = (
-        "The prescribed textbook does not state a motive or reason for this. "
-        "Here is the surrounding supported context from the textbook:"
-    )
-    return f"{note}\n\n{answer}"
+
+def _apply_why_motive_note(question: str, answer: str, evidence: list[dict], entity: str | None, depth: str | None) -> str:
+    """Drop a forced 'no motive' preface. Roles in the textbook are enough to explain why."""
+    del question, evidence, entity, depth
+    return re.sub(
+        r"^\s*The prescribed textbook does not state a motive or reason for this\.\s*"
+        r"(?:Here is the surrounding supported context from the textbook:?\s*)?",
+        "",
+        answer or "",
+        count=1,
+        flags=re.I,
+    ).strip()
 
 
 def _apply_partial_refusals(question: str, answer: str, evidence: list[dict]) -> str:
@@ -809,6 +1048,48 @@ def _payload(
     }
 
 
+def _keep_stated_identity(question: str, raw: str, evidence: list[dict], title: str | None) -> str:
+    """A who-was answer keeps the textbook sentence that states who the person was.
+
+    Later events can stay. They do not replace "X was the eldest son of Y" or
+    "X was the second king".
+    """
+    if not title or not re.match(r"\s*who\s+(?:was|is|were|are)\b", question or "", re.I):
+        if not re.match(r"\s*who\s+(?:was|is|were|are)\b", question or "", re.I):
+            return raw
+        from rag.engine.classify import extract_topics
+        from rag.engine.coverage import GROUP_TITLE
+        from rag.engine.pack import detect_entity
+        from rag.engine.topic_map import RULER_KEYS
+
+        entity = detect_entity(extract_topics(question or ""))
+        title = GROUP_TITLE.get(entity) if entity in RULER_KEYS else None
+    if not title:
+        return raw
+    if re.search(r"\b(?:son|daughter)\s+of\b", raw or "", re.I) and re.search(r"\b(?:king|ruler)\b", raw or "", re.I):
+        return raw
+    from rag.engine.validate import _evidence_sentences
+
+    identity = None
+    for sentence in _evidence_sentences(evidence):
+        if title.lower() not in sentence.lower():
+            continue
+        if re.search(
+            r"\bwas the (?:eldest |elder |younger |second |first |third )?(?:son|daughter|king|ruler)\b",
+            sentence,
+            re.I,
+        ):
+            identity = sentence.strip()
+            identity = re.sub(r"^([A-Z][\w''\-]+)\s+\1\b", r"\1", identity)
+            break
+    if not identity:
+        return raw
+    folded = re.sub(r"\s+", " ", (raw or "")).strip()
+    if identity.lower() in folded.lower():
+        return raw
+    return f"{identity} {folded}".strip()
+
+
 def _identity_focus_evidence(question: str, primary: list[dict], question_type: str, entity: str | None) -> list[dict]:
     """For a single-person DIRECT question, give the LLM only sentences whose subject is that person."""
     from rag.engine.entity import entity_focus_evidence
@@ -837,6 +1118,240 @@ def _mcq_attribution_text(exam: str) -> str:
         correct = options.get(letter.group(1), "") if letter else ""
         lines.append(f"{stem.group(1).splitlines()[0].rstrip('?')} - {correct}.")
     return "\n".join(lines) or exam
+
+
+def _model_passage(text: str) -> str:
+    """Readable textbook sentences for the model. Fragments are omitted, not rewritten."""
+    from rag.engine.entity import repair_leading_stub
+
+    cleaned = repair_leading_stub(" ".join((text or "").split()))
+    cleaned = re.sub(r"\b([A-Za-z][A-Za-z'\-]{1,28})(?:\s+\1\b)+", r"\1", cleaned)
+    cleaned = re.sub(r"(?:\s+and)?\s+Do you know this\??", "", cleaned, flags=re.I)
+    kept = []
+    seen = set()
+    for part in re.split(r"(?<=[.!?])\s+", cleaned):
+        sentence = part.strip(" ;")
+        sentence = re.sub(r"^(?:st|yun|cting|eauty)\s+", "", sentence)
+        key = re.sub(r"\s+", " ", sentence.lower())
+        words = key.split()
+        # A complete short sentence such as "Humayun was his father." is evidence.
+        # Only drop fragments that are too short to be a statement.
+        if len(words) < 3 or key in seen:
+            continue
+        if len(words) < 5 and not re.search(r"\b(?:was|were|is|are|became|ruled)\b", key):
+            continue
+        seen.add(key)
+        if sentence[-1:] not in ".!?":
+            sentence += "."
+        kept.append(sentence)
+    return " ".join(kept)
+
+
+def _trim_passage(text: str, limit: int = 700) -> str:
+    cleaned = " ".join((text or "").split())
+    if len(cleaned) <= limit:
+        return cleaned
+    cut = cleaned[:limit].rsplit(". ", 1)[0]
+    return f"{cut}." if cut else cleaned[:limit]
+
+
+def _evidence_score(question: str, text: str) -> int:
+    """Prefer passages that state the relationship a kinship question is asking about."""
+    score = overlap_count(question, text)
+    if re.search(r"\b(succeed\w*|successor|father|mother|son|daughter|parent)\b", question or "", re.I):
+        if re.search(r"\b(son of|daughter of|eldest son|came to power|succeeded|successor)\b", text or "", re.I):
+            score += 12
+    return score
+
+
+def _prompt_evidence(question: str, hits: list[dict]) -> list[dict]:
+    """A few relevant passages, not the whole chapter."""
+    pool = [item for item in hits or [] if (item.get("text") or "").strip()]
+    cleaned = []
+    seen = set()
+    for item in pool:
+        key = item.get("chunk_id") or (item.get("text") or "")[:80]
+        if key in seen:
+            continue
+        seen.add(key)
+        copy = dict(item)
+        copy["text"] = _model_passage(_trim_passage(item.get("text") or ""))
+        copy["_score"] = _evidence_score(question, copy["text"])
+        if copy["text"]:
+            cleaned.append(copy)
+    cleaned.sort(key=lambda item: item["_score"], reverse=True)
+    kept = cleaned[:6]
+    question_terms = content_tokens(question)
+    named = set()
+    for key in extract_topics(question):
+        named.add(key.lower())
+        for alias in TOPIC_ALIASES.get(key, ()):
+            if isinstance(alias, str):
+                named.add(alias.lower())
+    named = {token for token in named if token in content_tokens(" ".join(named))}
+
+    def relevant_terms(text: str) -> set[str]:
+        tokens = content_tokens(text)
+        if named and not (tokens & named):
+            return set()
+        return tokens & question_terms
+
+    def covered_by(items: list[dict]) -> set[str]:
+        found = set()
+        for entry in items:
+            found |= relevant_terms(entry["text"])
+        return found
+
+    # A multi-part question can ask about succession and a defeat together.
+    # A word counts as covered only in a passage that also names the person asked about.
+    covered = covered_by(kept)
+    swaps = 0
+    while swaps < 2 and kept:
+        missing = question_terms - covered
+        if not missing:
+            break
+        best = None
+        best_added: set[str] = set()
+        for item in cleaned:
+            if item in kept:
+                continue
+            added = relevant_terms(item["text"]) & missing
+            if len(added) > len(best_added):
+                best = item
+                best_added = added
+        if best is None:
+            break
+        replace_at = None
+        for index in range(len(kept) - 1, -1, -1):
+            others = covered_by(kept[:index] + kept[index + 1 :])
+            unique = relevant_terms(kept[index]["text"]) - others
+            if not unique:
+                replace_at = index
+                break
+        if replace_at is None:
+            break
+        kept[replace_at] = best
+        covered |= best_added
+        swaps += 1
+    for item in kept:
+        item.pop("_score", None)
+    return kept
+
+
+def _pronoun_context(question: str, history: list[dict] | None, intent: str | None) -> str:
+    """Earlier student questions, only when this question needs them for pronouns."""
+    needs_prior = intent == "FOLLOW_UP" or bool(PRONOUN_RE.search(question or ""))
+    if not needs_prior or not history:
+        return ""
+    recent = []
+    for item in history:
+        if (item.get("role") or "").lower() != "user":
+            continue
+        text = (item.get("content") or item.get("text") or "").strip()
+        if text and text.lower() != (question or "").strip().lower():
+            recent.append(text)
+    recent = recent[-3:]
+    if not recent:
+        return ""
+    lines = "\n".join(f"- {text}" for text in recent)
+    note = ""
+    if _current_question_outside_domain(recent[-1]):
+        note = (
+            "The previous question left History and Social Science. "
+            "Do not treat an older person as the subject of this question.\n"
+        )
+    return (
+        "Earlier student questions, use only to resolve pronouns in the current question:\n"
+        f"{lines}\n"
+        f"{note}"
+    )
+
+
+def _reasoned_history_answer(
+    question: str,
+    original_question: str,
+    language: str,
+    retrieval_query: str,
+    hits: list[dict],
+    intent: str | None,
+    mode: str | None,
+    depth_profile,
+    off_labels: list[str] | None,
+    history: list[dict] | None,
+    t0: float,
+    timings: dict,
+) -> dict:
+    """One model call over the retrieved passages. The textbook stays primary."""
+    evidence = _prompt_evidence(question, hits)
+    prior = _pronoun_context(original_question or question, history, intent)
+    user = (
+        f"{prior}"
+        f"Student question: {original_question or question}\n"
+        + (
+            f"Question with pronouns resolved: {question}\n"
+            if (question or "").strip().lower() != (original_question or question or "").strip().lower()
+            else ""
+        )
+        + "\nAnswer the student directly.\n"
+        "Read every passage, not only the first. "
+        "If a passage says someone was another's child, was the next ruler, or came to power after that person, "
+        "that is enough to say who succeeded whom and who the parent was. "
+        "Answer every part. Use the passages for every part they support. "
+        "For a part the passages do not support, add it under Additional historical context when you know it confidently. "
+        "Use earlier questions only to resolve pronouns. "
+        "Skip garbled words. Do not write page numbers.\n\n"
+        f"Textbook passages:\n{chr(10).join(_blocks(evidence, 'TEXTBOOK')) or '(No closely matching passage was retrieved.)'}"
+    )
+    raw = complete(
+        [
+            {"role": "system", "content": FINAL_ANSWER_PROMPT},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.2,
+        max_tokens=1000,
+    )
+    raw = _apply_why_motive_note(question, raw or "", evidence, None, getattr(depth_profile, "depth", None))
+    raw = _strip_invented_pages(raw)
+    raw = _decorate_student_answer(original_question, raw, off_labels)
+    textbook_part = re.split(r"\n+Additional historical context:\s*", raw, maxsplit=1, flags=re.I)[0]
+    refusal_sentences = [part for part in re.split(r"[.!?]+", textbook_part) if part.strip()]
+    weak_textbook = bool(
+        re.search(r"\b(?:do|does) not (?:give|provide|state|contain|cover)\b", textbook_part, re.I)
+        and len(refusal_sentences) <= 1
+    )
+    sources = [] if weak_textbook else _sources(supporting_evidence(textbook_part, evidence, min_overlap=2))
+    if not sources and not weak_textbook:
+        sources = _sources(supporting_evidence(textbook_part, evidence, min_overlap=1))
+    answer = raw if not sources else f"{raw}\n\n{_citation_block(sources)}"
+    result = {
+        "answer": sanitize_student_text(answer),
+        "language": language,
+        "grounded": bool(sources),
+        "sources": sources,
+        "retrieval_query": retrieval_query,
+        "retrieved": _public_hits(hits),
+        "selected_chunk_ids": [item.get("chunk_id") for item in evidence if item.get("chunk_id")],
+        "validation_reason": "reasoned_history",
+        "intent": intent,
+        "mode": mode or "NORMAL",
+        "question_type": "DIRECT",
+        "used_supplementary": bool(re.search(r"Additional historical context\s*:", answer or "", re.I)),
+        "regeneration_count": 0,
+        "unsupported_claims": [],
+        "fallback_used": False,
+    }
+    if depth_profile is not None:
+        result["depth"] = depth_profile.as_public()
+        result["task"] = {
+            "type": "EXPLAIN",
+            "topic": None,
+            "entity": None,
+            "used_chunk_ids": result["selected_chunk_ids"],
+            "depth": depth_profile.depth,
+        }
+    timings["T8_total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+    result["timings"] = timings
+    return result
 
 
 def _ask_llm(question: str, primary: list[dict], mode: str, strict: bool, question_type: str = "DIRECT", depth_profile=None, entity: str | None = None) -> dict:
