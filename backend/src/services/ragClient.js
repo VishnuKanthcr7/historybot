@@ -53,6 +53,7 @@ export async function queryRag({ question, language, conversationHistory, taskSt
     answer: payload.answer,
     language: payload.language === "kn" ? "kn" : "en",
     grounded: Boolean(payload.grounded),
+    usedSupplementary: Boolean(payload.used_supplementary),
     sources: Array.isArray(payload.sources) ? payload.sources : [],
     intent: payload.intent || null,
     task: payload.task || null,
@@ -88,6 +89,8 @@ export async function renderEcontentPdf(document, images) {
         caption: item.caption,
         alt_text: item.alt_text,
         topic: item.topic,
+        source: item.source || null,
+        license: item.license || null,
       })),
     },
     config.rag.timeoutMs

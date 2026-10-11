@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import MessageBubble from "./MessageBubble.jsx";
 import { LABELS } from "../i18n/labels.js";
 
@@ -13,9 +13,23 @@ export default function MessageList({ messages, loading, language, onAsk }) {
   const endRef = useRef(null);
   const t = LABELS[language] || LABELS.en;
 
+  const [announcement, setAnnouncement] = useState("");
+  const wasLoading = useRef(false);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  // Tell screen-reader users when an answer arrives (the "thinking" line disappears silently).
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (wasLoading.current && !loading && last?.role === "assistant") {
+      setAnnouncement(t.answerReady || "Answer ready");
+    } else if (loading) {
+      setAnnouncement("");
+    }
+    wasLoading.current = loading;
+  }, [loading, messages, t.answerReady]);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-5 md:px-8">
@@ -53,6 +67,9 @@ export default function MessageList({ messages, loading, language, onAsk }) {
           </li>
         ) : null}
       </ol>
+      <p className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </p>
       <div ref={endRef} />
     </div>
   );

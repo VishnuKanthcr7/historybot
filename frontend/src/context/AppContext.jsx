@@ -31,6 +31,7 @@ export function AppProvider({ children }) {
   const [econtent, setEcontent] = useState(null);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
+  const [user, setUser] = useState(null);
 
   const refreshList = useCallback(async (sid) => {
     if (!sid) return;
@@ -38,22 +39,62 @@ export function AppProvider({ children }) {
     setConversations(mapList(payload));
   }, []);
 
+  // When the server rejects the stored login token (expired or signed out
+  // elsewhere), api.js clears it and this resets the signed-in state, so
+  // RequireUser sends the student back to the login page.
+  useEffect(() => {
+    api.setUnauthorizedHandler(() => {
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(CURRENT_KEY);
+      setUser(null);
+      setSessionId("");
+      setCurrentId("");
+      setMessages([]);
+      setConversations([]);
+      setEcontent(null);
+    });
+    return () => api.setUnauthorizedHandler(null);
+  }, []);
+
+  const useAccountSession = useCallback(
+    async (account, session) => {
+      const previous = localStorage.getItem(SESSION_KEY);
+      if (previous && previous !== session) {
+        localStorage.removeItem(CURRENT_KEY);
+        setCurrentId("");
+        setMessages([]);
+        setEcontent(null);
+      }
+      localStorage.setItem(SESSION_KEY, session);
+      setUser(account);
+      setSessionId(session);
+      await refreshList(session);
+    },
+    [refreshList]
+  );
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        let sid = localStorage.getItem(SESSION_KEY);
-        if (!sid) {
-          const created = await api.createSession();
-          // Prefer a session another flow wrote while createSession was in flight
-          // (e.g. test harness / another tab), so we do not clobber it.
-          const existing = localStorage.getItem(SESSION_KEY);
-          sid = existing || created.session_id;
-          if (!existing) localStorage.setItem(SESSION_KEY, sid);
+        if (api.getAuthToken()) {
+          try {
+            const me = await api.currentAccount();
+            if (cancelled) return;
+            await useAccountSession(me.user, me.session_id);
+            return;
+          } catch (err) {
+            if (err.code === "UNAUTHENTICATED" || err.status === 401) {
+              api.setAuthToken("");
+            } else {
+              throw err;
+            }
+          }
         }
         if (cancelled) return;
-        setSessionId(sid);
-        await refreshList(sid);
+        setUser(null);
+        setSessionId("");
+        setConversations([]);
       } catch (err) {
         if (!cancelled) setError(err.message || "Could not start a session.");
       } finally {
@@ -63,7 +104,45 @@ export function AppProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshList]);
+  }, [refreshList, useAccountSession]);
+
+  const login = useCallback(
+    async (email, password) => {
+      const result = await api.loginAccount(email, password);
+      api.setAuthToken(result.token);
+      setError("");
+      await useAccountSession(result.user, result.session_id);
+    },
+    [useAccountSession]
+  );
+
+  const register = useCallback(
+    async (displayName, email, password) => {
+      const result = await api.registerAccount(displayName, email, password);
+      api.setAuthToken(result.token);
+      setError("");
+      await useAccountSession(result.user, result.session_id);
+    },
+    [useAccountSession]
+  );
+
+  const logout = useCallback(async () => {
+    try {
+      await api.logoutAccount();
+    } catch {
+      // Local sign-out still continues if the network call fails.
+    }
+    api.setAuthToken("");
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(CURRENT_KEY);
+    setUser(null);
+    setCurrentId("");
+    setMessages([]);
+    setConversations([]);
+    setEcontent(null);
+    setError("");
+    setSessionId("");
+  }, []);
 
   const setLanguage = useCallback((next) => {
     const value = next === "kn" ? "kn" : "en";
@@ -198,6 +277,10 @@ export function AppProvider({ children }) {
   const value = useMemo(
     () => ({
       sessionId,
+      user,
+      login,
+      register,
+      logout,
       language,
       setLanguage,
       conversations,
@@ -220,6 +303,10 @@ export function AppProvider({ children }) {
     }),
     [
       sessionId,
+      user,
+      login,
+      register,
+      logout,
       language,
       setLanguage,
       conversations,

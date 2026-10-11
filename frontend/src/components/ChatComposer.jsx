@@ -37,7 +37,7 @@ export default function ChatComposer({ disabled, onSend, labels }) {
           onChange={(e) => setValue(e.target.value.slice(0, 2000))}
           onKeyDown={onKeyDown}
           placeholder={labels.askPlaceholderHome || labels.ask}
-          className="max-h-36 min-h-12 flex-1 resize-none bg-transparent px-2 py-2 text-[15px] outline-none disabled:opacity-60"
+          className="max-h-36 min-h-12 min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-base outline-none disabled:opacity-60"
         />
         <button
           type="submit"

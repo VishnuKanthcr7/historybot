@@ -1,7 +1,8 @@
+import { useState } from "react";
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import SourceCite from "./SourceCite.jsx";
-import { imageUrl } from "../services/api.js";
+import ProtectedImage, { ImageFigure } from "./ProtectedImage.jsx";
 import { LABELS } from "../i18n/labels.js";
 
 function displayContent(content) {
@@ -10,13 +11,34 @@ function displayContent(content) {
     .trim();
 }
 
+// Answers come in labelled parts: "From your textbook" (cited), "Additional historical
+// explanation" (general history, never cited) and an optional "Quick revision".
+const SECTION_RE =
+  /^[ \t]*(?:#{1,4}[ \t]*)?\*\*[ \t]*(From your textbook|Additional historical (?:explanation|context)|Quick revision)[ \t]*:?[ \t]*\*\*[ \t]*$/gim;
+
 function splitContext(content) {
   const cleaned = displayContent(content);
-  const parts = cleaned.split(/\n+Additional historical context:\s*/i);
-  return {
-    main: (parts[0] || "").trim(),
-    extra: (parts[1] || "").trim(),
-  };
+  const marks = [...cleaned.matchAll(SECTION_RE)];
+  if (!marks.length) {
+    const parts = cleaned.split(/\n+Additional historical context:\s*/i);
+    return { labelled: false, main: (parts[0] || "").trim(), extra: (parts[1] || "").trim(), revision: "" };
+  }
+  const out = { labelled: true, main: cleaned.slice(0, marks[0].index).trim(), extra: "", revision: "" };
+  marks.forEach((mark, index) => {
+    const end = index + 1 < marks.length ? marks[index + 1].index : cleaned.length;
+    const body = cleaned.slice(mark.index + mark[0].length, end).trim();
+    const label = mark[1].toLowerCase();
+    if (label.startsWith("from")) out.main = [out.main, body].filter(Boolean).join("\n\n");
+    else if (label.startsWith("quick")) out.revision = body;
+    else out.extra = [out.extra, body].filter(Boolean).join("\n\n");
+  });
+  return out;
+}
+
+function SectionLabel({ children }) {
+  return (
+    <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-navy">{children}</p>
+  );
 }
 
 const markdownComponents = {
@@ -40,7 +62,7 @@ const markdownComponents = {
 
 export default function MessageBubble({ message, language }) {
   const isUser = message.role === "user";
-  const { main, extra } = splitContext(message.content);
+  const { labelled, main, extra, revision } = splitContext(message.content);
   return (
     <article className={isUser ? "flex justify-end" : "flex gap-3"}>
       {isUser ? null : (
@@ -58,7 +80,7 @@ export default function MessageBubble({ message, language }) {
             : "flex-1 border border-rule bg-cream"
         }`}
       >
-        <p className={`mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] ${isUser ? "text-cream/70" : "text-brass"}`}>
+        <p className={`mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] ${isUser ? "text-cream/70" : "text-navy"}`}>
           {isUser ? (language === "kn" ? "ವಿದ್ಯಾರ್ಥಿ" : "You") : "HistoryBot"}
         </p>
         {isUser ? (
@@ -66,16 +88,18 @@ export default function MessageBubble({ message, language }) {
         ) : (
           <div className="prose-history break-words text-[15px] leading-relaxed text-ink">
             {main ? (
-              <Markdown rehypePlugins={[rehypeSanitize]} components={markdownComponents}>
-                {main}
-              </Markdown>
+              <section>
+                {labelled ? <SectionLabel>From your textbook</SectionLabel> : null}
+                <Markdown rehypePlugins={[rehypeSanitize]} components={markdownComponents}>
+                  {main}
+                </Markdown>
+              </section>
             ) : null}
             <SourceCite sources={message.sources} language={language} />
             {extra ? (
               <aside className="mt-3 rounded-xl border border-rule bg-paper px-3 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brass">
-                  Additional historical context
-                </p>
+                <SectionLabel>Additional historical explanation</SectionLabel>
+                <p className="text-xs text-muted">General history to help you understand. Not from your textbook pages.</p>
                 <div className="mt-2">
                   <Markdown rehypePlugins={[rehypeSanitize]} components={markdownComponents}>
                     {extra}
@@ -83,25 +107,67 @@ export default function MessageBubble({ message, language }) {
                 </div>
               </aside>
             ) : null}
-            {(message.images || []).map((img) => (
-              <figure key={img.id} className="mt-3 overflow-hidden rounded-xl border border-rule bg-paper p-2">
-                <img
-                  src={imageUrl(img.id)}
-                  alt={img.alt}
-                  className="max-h-52 w-full object-contain"
-                  loading="lazy"
+            {revision ? (
+              <aside className="mt-3 rounded-xl border border-rule bg-cream px-3 py-3">
+                <SectionLabel>Quick revision</SectionLabel>
+                <div className="mt-1">
+                  <Markdown rehypePlugins={[rehypeSanitize]} components={markdownComponents}>
+                    {revision}
+                  </Markdown>
+                </div>
+              </aside>
+            ) : null}
+            {(message.images || []).map((img) =>
+              img.media_kind === "gif" ? (
+                <figure key={img.id} className="mt-3 overflow-hidden rounded-xl border border-rule bg-paper p-2">
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-navy">
+                    Educational animation
+                  </p>
+                  <MotionSafeGif id={img.id} alt={img.alt} language={language} />
+                  <figcaption className="mt-1 text-xs text-muted">
+                    {img.title}
+                    {[img.source, img.license].filter(Boolean).length ? (
+                      <span className="mt-1 block">{[img.source, img.license].filter(Boolean).join(" · ")}</span>
+                    ) : null}
+                  </figcaption>
+                </figure>
+              ) : (
+                <ImageFigure
+                  key={img.id}
+                  img={img}
+                  pageLabel={LABELS[language]?.textbookPage || "Textbook page"}
                 />
-                <figcaption className="mt-1 text-xs text-muted">
-                  {img.title}
-                  {img.textbook_page_number
-                    ? ` · ${LABELS[language]?.textbookPage || "Textbook page"} ${img.textbook_page_number}`
-                    : ""}
-                </figcaption>
-              </figure>
-            ))}
+              )
+            )}
           </div>
         )}
       </div>
     </article>
+  );
+}
+
+// Animations play automatically unless the reader asked the system for reduced motion;
+// then the GIF loads only when they choose "Show animation" (WCAG 2.2.2).
+function MotionSafeGif({ id, alt, language }) {
+  const reduce =
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [shown, setShown] = useState(!reduce);
+  const t = LABELS[language] || LABELS.en;
+  return (
+    <div>
+      {shown ? <ProtectedImage id={id} alt={alt} className="max-h-52 w-full object-contain" /> : null}
+      {reduce ? (
+        <button
+          type="button"
+          className="mt-1 min-h-11 rounded-lg border border-rule px-3 text-xs text-navy"
+          aria-pressed={shown}
+          onClick={() => setShown((value) => !value)}
+        >
+          {shown ? t.hideAnimation || LABELS.en.hideAnimation : t.showAnimation || LABELS.en.showAnimation}
+        </button>
+      ) : null}
+    </div>
   );
 }

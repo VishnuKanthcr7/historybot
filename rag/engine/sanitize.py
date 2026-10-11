@@ -21,6 +21,34 @@ _LEADING_FRAGMENT = re.compile(
 )
 
 
+_TABLE_ROW = re.compile(r"^\|.*\|$")
+_TABLE_SEP = re.compile(r"^\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?$")
+_BOLD_ONLY = re.compile(r"^\*\*[^*]+\*\*:?$")
+_LIST_MARKER = re.compile(r"^(\s*(?:[-*\u2022]\s+|\d+[.)]\s+))")
+_CITATION_LINE = re.compile(r"^(?:Source:|Sources:|Textbook pages?\b|\[Pages?\s+[0-9,\s]+\]$)", re.I)
+
+
+def is_structural_line(line: str) -> bool:
+    """Markdown headings, bold-only headings, table rows, short labels and citation lines.
+
+    These are layout, not sentences: cleanup must not split them or append a full stop.
+    """
+    stripped = (line or "").strip()
+    if not stripped:
+        return False
+    return bool(
+        stripped.startswith("#")
+        or _BOLD_ONLY.match(stripped)
+        or _TABLE_ROW.match(stripped)
+        or _TABLE_SEP.match(stripped)
+        or _CITATION_LINE.match(stripped)
+        or (stripped.endswith(":") and len(stripped.split()) <= 8)
+        or stripped.startswith("Additional historical context")
+        or re.match(r"^[A-D]\.\s+\S", stripped)
+        or re.match(r"^Answer:\s*[A-D]\s*$", stripped, re.I)
+    )
+
+
 def _collapse_ocr_spacing(text: str) -> str:
     def repl(match: re.Match[str]) -> str:
         chunk = match.group(0)
@@ -235,13 +263,19 @@ def _drop_corrupt_student_sentences(text: str) -> str:
     return " ".join(kept)
 
 
-def _strip_callouts(text: str) -> str:
+def _strip_callouts(text: str, add_period: bool = True) -> str:
     """Remove a textbook box heading that was read into the sentence."""
     cleaned = _CALLOUT.sub("", text or "")
     cleaned = _REPRINT_BANNER.sub("", cleaned)
     cleaned = _MULTI_SPACE.sub(" ", cleaned).strip()
     cleaned = re.sub(r"\s+([.!?])", r"\1", cleaned)
-    if cleaned and cleaned[-1] not in ".!?":
+    # Never put a full stop after closing markdown (**, `), a colon, or a table pipe.
+    if (
+        add_period
+        and cleaned
+        and not re.search(r"(?:[.!?:|*`]|[.!?][)\u201d\"'])$", cleaned)
+        and not re.search(r"\[(?:Textbook )?[Pp]ages? [^\]]+\]$", cleaned)
+    ):
         cleaned += "."
     return cleaned
 
@@ -288,16 +322,13 @@ def _polish_presentation(text: str) -> str:
         lines: list[str] = []
         for line in block.splitlines():
             stripped = line.strip()
-            if (
-                stripped.startswith("#")
-                or stripped.startswith("Source:")
-                or stripped.startswith("Additional historical context")
-                or re.match(r"^[A-D]\.\s+\S", stripped)
-                or re.match(r"^Answer:\s*[A-D]\s*$", stripped, re.I)
-            ):
+            if is_structural_line(stripped):
                 lines.append(line)
                 continue
-            body = _strip_callouts(line)
+            marker = _LIST_MARKER.match(line)
+            prefix = marker.group(1) if marker else ""
+            # A list item is not forced to end with a full stop; a prose line is.
+            body = _strip_callouts(line[len(prefix):], add_period=not prefix)
             sentences = [
                 part.strip()
                 for part in re.split(r"(?<=[.!?])\s+", body)
@@ -318,7 +349,7 @@ def _polish_presentation(text: str) -> str:
                     seen.append(words)
                 kept.append(sentence)
             if kept:
-                lines.append(" ".join(kept))
+                lines.append(prefix + " ".join(kept))
         if any(line.strip() for line in lines):
             kept_blocks.append("\n".join(lines))
         elif kept_blocks and re.fullmatch(r"\n\s*\n", kept_blocks[-1]):
@@ -343,17 +374,12 @@ def sanitize_student_text(text: str) -> str:
         for line in lines:
             raw = line
             stripped = raw.strip()
-            if (
-                stripped.startswith("#")
-                or stripped.startswith("Source:")
-                or re.match(r"^[A-D]\.\s+\S", stripped)
-                or re.match(r"^Answer:\s*[A-D]\s*$", stripped, re.I)
-            ):
+            if is_structural_line(stripped):
                 out_lines.append(raw)
                 continue
             prefix = ""
             body = raw
-            bullet = re.match(r"^(\s*(?:[-*]\s+|\d+\.\s+))", raw)
+            bullet = _LIST_MARKER.match(raw)
             if bullet:
                 prefix = bullet.group(1)
                 body = raw[len(prefix) :]
@@ -374,6 +400,20 @@ def sanitize_student_text(text: str) -> str:
     return _polish_presentation(result.strip())
 
 
+_LABEL_KEYS = frozenset({"name", "term", "title", "label"})
+
+
+def _sanitize_label(text: str) -> str:
+    """Clean a short label (a name, a term) without adding a full stop it did not have."""
+    out = sanitize_student_text(text)
+    if isinstance(text, str) and not text.rstrip().endswith(".") and out.endswith("."):
+        out = out[:-1].rstrip()
+    return out
+
+
+sanitize_label = _sanitize_label
+
+
 def sanitize_structured(value):
     """Recursively sanitize strings inside lists/dicts used by e-content."""
     if isinstance(value, str):
@@ -382,9 +422,16 @@ def sanitize_structured(value):
         return [sanitize_structured(item) for item in value]
     if isinstance(value, dict):
         out = {}
+        options = value.get("options") if isinstance(value.get("options"), list) else None
         for key, item in value.items():
             if key in {"pages", "options", "type"}:
                 out[key] = item
+            elif key in _LABEL_KEYS and isinstance(item, str):
+                out[key] = _sanitize_label(item)
+            elif key == "answer" and options is not None and isinstance(item, str):
+                # An MCQ answer must stay identical to one of its options.
+                cleaned = _sanitize_label(item)
+                out[key] = item if item in options else cleaned
             else:
                 out[key] = sanitize_structured(item)
         return out

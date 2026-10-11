@@ -79,3 +79,5 @@ coverage/
 # Notes:
 # data/fonts/ and data/images/ are NOT ignored so approved OFL fonts
 # and verified images can be committed when they are added in later phases.
+*-backup-*/
+.netlify/

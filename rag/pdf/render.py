@@ -110,6 +110,17 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
     )
     styles.add(
         ParagraphStyle(
+            "HBSub",
+            fontName=heading_font,
+            fontSize=10.5,
+            leading=14,
+            textColor=NAVY,
+            spaceBefore=6,
+            spaceAfter=2,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
             "HBBody",
             fontName=body_font,
             fontSize=10,
@@ -142,13 +153,21 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
     story.append(Paragraph(_esc(title), styles["HBTitle"]))
     lang_label = "Kannada" if language == "kn" else "English"
     story.append(Paragraph(f"Language: {lang_label}", styles["HBMeta"]))
-    story.append(Paragraph("Answers are taken only from the prescribed Class 9 textbook.", styles["HBMeta"]))
+    story.append(
+        Paragraph(
+            "Textbook content comes first and cites printed page numbers. The section "
+            "'Additional historical explanation' is general history added to help you understand; "
+            "it is not from the textbook pages.",
+            styles["HBMeta"],
+        )
+    )
     story.append(Spacer(1, 6))
 
     section_order = [
         ("introduction", "Introduction"),
         ("learning_objectives", "Learning objectives"),
         ("detailed_explanation", "Detailed explanation"),
+        ("additional_explanation", "Additional historical explanation"),
         ("important_people", "Important people"),
         ("important_terms", "Important terms"),
         ("timeline", "Timeline"),
@@ -162,6 +181,11 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
     for key, heading in section_order:
         value = content.get(key)
         if not value:
+            continue
+        if key == "additional_explanation":
+            story.append(Paragraph(_esc(heading), styles["HBH"]))
+            story.append(Paragraph("General history, not from the textbook pages.", styles["HBMeta"]))
+            story.extend(_flow_markdown(value, styles))
             continue
         if key == "detailed_explanation":
             story.append(Paragraph(_esc(heading), styles["HBH"]))
@@ -178,7 +202,7 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
         story.append(KeepTogether(block))
 
     if images:
-        story.append(Paragraph("Textbook figures", styles["HBH"]))
+        story.append(Paragraph("Figures and images", styles["HBH"]))
         for item in images:
             path = IMAGE_ROOT / str(item.get("file_path") or "")
             if not path.is_file():
@@ -190,6 +214,11 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
                 continue
             story.append(img)
             story.append(Paragraph(_esc(caption), styles["HBMeta"]))
+            credit = " · ".join(
+                str(part) for part in (item.get("source"), item.get("license")) if part
+            )
+            if credit:
+                story.append(Paragraph(_esc(credit[:400]), styles["HBMeta"]))
 
     source_lines = []
     textbook_label = "Class 9 Karnataka State Board 2026–27 textbook"
@@ -254,19 +283,45 @@ def _flow_value(value, style, fallback):
     return flows
 
 
+_BOLD_HEADING_RE = re.compile(r"^\*\*([^*]+)\*\*:?$")
+_INLINE_BOLD_RE = re.compile(r"\*\*([^*\n]+)\*\*")
+
+
+def _inline_markup(text: str) -> str:
+    """Escape text and drop markdown ** markers instead of printing asterisks.
+
+    Plain text on purpose: the embedded body fonts have no registered bold face.
+    """
+    return _esc(_INLINE_BOLD_RE.sub(r"\1", text))
+
+
 def _flow_markdown(text: str, styles) -> list:
     flows = []
-    for block in re.split(r"\n(?=## )", str(text or "").strip()):
-        block = block.strip()
-        if not block:
+    paragraph: list[str] = []
+
+    def flush() -> None:
+        if paragraph:
+            flows.append(Paragraph("<br/>".join(_inline_markup(line) for line in paragraph), styles["HBBody"]))
+            paragraph.clear()
+
+    for line in str(text or "").strip().splitlines():
+        stripped = line.strip()
+        if not stripped:
+            flush()
             continue
-        if block.startswith("## "):
-            heading, _, rest = block.partition("\n")
-            flows.append(Paragraph(_esc(heading[3:].strip()), styles["HBH"]))
-            if rest.strip():
-                flows.append(Paragraph(_esc(rest).replace("\n", "<br/>"), styles["HBBody"]))
+        heading, style = None, "HBSub"
+        if stripped.startswith("#"):
+            heading, style = stripped.lstrip("#").strip(), "HBH"
         else:
-            flows.append(Paragraph(_esc(block).replace("\n", "<br/>"), styles["HBBody"]))
+            match = _BOLD_HEADING_RE.match(stripped)
+            if match:
+                heading = match.group(1).strip().rstrip(":")
+        if heading:
+            flush()
+            flows.append(Paragraph(_esc(heading), styles[style]))
+            continue
+        paragraph.append(stripped)
+    flush()
     return flows
 
 

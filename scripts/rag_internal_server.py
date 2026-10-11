@@ -26,6 +26,16 @@ def main() -> None:
     secret = os.environ.get("INTERNAL_RAG_SECRET") or os.environ.get("RAG_INTERNAL_SECRET")
     if not secret:
         raise SystemExit("INTERNAL_RAG_SECRET is required")
+    from rag.llm.client import describe_provider
+
+    info = describe_provider()
+    # Provider name and reason only; never keys.
+    print(
+        f"HistoryBot RAG llm_provider={info.get('llm_provider')} model={info.get('model', '')} "
+        f"reason={info.get('reason')} fallback={info.get('fallback')}",
+        file=sys.stderr,
+        flush=True,
+    )
     uvicorn.run(
         "rag.internal_api:app",
         host="127.0.0.1",

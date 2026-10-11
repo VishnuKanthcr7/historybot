@@ -1,8 +1,9 @@
-"""Grounded structured E-content from the approved Class 9 textbook only."""
+"""Structured E-content: textbook sections with citations, plus one labelled additional explanation."""
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from rag.engine.answer import _public_hits, _sources, _unavailable
@@ -19,10 +20,12 @@ from rag.engine.coverage import (
     readable_extract,
 )
 from rag.engine.topic_map import AHOM_FAMILY, MARATHA_FAMILY, MUGHAL_FAMILY, RULER_KEYS
-from rag.engine.sanitize import sanitize_student_text, sanitize_structured
+from rag.engine.sanitize import sanitize_label, sanitize_student_text, sanitize_structured
 from rag.engine.validate import unsupported_named_items
 from rag.llm.client import LlmError, complete
-from rag.prompts.econtent import ECONTENT_SYSTEM
+
+_LOG = logging.getLogger("historybot.econtent")
+from rag.prompts.econtent import ECONTENT_SUPPLEMENT_SYSTEM, ECONTENT_SYSTEM
 from rag.prompts.tutor import KANNADA_UNAVAILABLE, refusal_text
 from rag.vectorstore.retrieve import retrieve_primary
 
@@ -39,6 +42,7 @@ ALLOWED_KEYS = (
     "exam_questions",
     "mcqs",
     "revision",
+    "additional_explanation",
     "section_citations",
     "textbook_source_pages",
 )
@@ -222,6 +226,9 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
     if not _usable(content.get("detailed_explanation")):
         return _refused(language, retrieval_query, primary_hits, primary_selected)
 
+    extra = _additional_explanation(content.get("title") or topic, content)
+    if extra:
+        content["additional_explanation"] = extra
     used_pages = list(content.get("textbook_source_pages") or [])
     sources = _sources(
         [
@@ -242,7 +249,7 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
         "retrieval_query": retrieval_query,
         "retrieved": _public_hits(primary_hits),
         "selected_chunk_ids": [item["chunk_id"] for item in primary_selected],
-        "used_supplementary": False,
+        "used_supplementary": bool(content.get("additional_explanation")),
         "evidence_pack": pack.as_public(),
         "coverage": {
             "plan": covered.get("plan"),
@@ -254,6 +261,41 @@ def generate_econtent(topic: str, language: str = "en") -> dict:
         },
     }
 
+
+
+def _additional_explanation(title: str, content: dict) -> str:
+    """One model call for the labelled supplementary section. Never cited; omitted on failure."""
+    textbook_part = "\n".join(
+        str(content.get(key) or "") for key in ("introduction", "detailed_explanation") if content.get(key)
+    )[:2500]
+    if not textbook_part.strip():
+        return ""
+    try:
+        raw = complete(
+            [
+                {"role": "system", "content": ECONTENT_SUPPLEMENT_SYSTEM},
+                {
+                    "role": "user",
+                    "content": f"Module topic: {title}\n\nTextbook part of the module:\n{textbook_part}",
+                },
+            ],
+            temperature=0.2,
+            max_tokens=650,
+        )
+    except Exception:  # pragma: no cover - the module is still valid without it
+        _LOG.warning("econtent additional explanation failed", exc_info=True)
+        return ""
+    from rag.engine.answer import _clean_supplement, _split_sections
+
+    text = (raw or "").strip()
+    _tb, sup, _rev, labelled = _split_sections(text)
+    if labelled:
+        text = "\n\n".join(part for part in (_tb, sup) if part.strip())
+    text = _clean_supplement(text)
+    if META_RE.search(text):
+        text = "\n".join(line for line in text.splitlines() if not META_RE.search(line))
+    text = sanitize_student_text(text).strip()
+    return text if len(text.split()) >= 25 else ""
 
 
 _PRONOUN_LEAD_RE = re.compile(
@@ -409,8 +451,15 @@ def _clarify_pronoun_sentence(
         # Skip hostile "lost to the X" cases when default_subject is from that side.
         if re.search(r"\b(he|she)\b", sent, re.I) and not _names_in_sentence(sent, known):
             actor = _last_singular_actor(prior or "", known) if prior else None
-            if not actor:
-                actor = default_subject
+            if not actor and default_subject:
+                # Use the module subject only when the previous sentence is about them (or there
+                # is none). Otherwise "he" may be someone else ("Aurangzeb ... To achieve this, he
+                # appointed Shaista Khan"), so the pronoun is kept rather than guessed.
+                prior_text = prior or ""
+                if not prior_text.strip() or re.search(
+                    r"(?<![a-z])" + re.escape(default_subject.lower()) + r"(?![a-z])", prior_text.lower()
+                ):
+                    actor = default_subject
             if actor:
                 hostile = re.search(
                     r"\b(he|she)\s+lost\s+to\s+the\s+(marathas|mughals)\b",
@@ -503,6 +552,47 @@ def _clarify_text(
         out_lines.append(prefix + joined if joined else raw.rstrip())
     return "\n".join(out_lines).strip()
 
+def _plan_texts(plan) -> list[str]:
+    texts: list[str] = []
+    for group in plan or []:
+        for chunk in getattr(group, "chunks", None) or []:
+            text = chunk.get("text") if isinstance(chunk, dict) else None
+            if text:
+                texts.append(" ".join(_normalize_ocr_text(text).split()))
+    return texts
+
+
+def _textbook_prior_sentence(sentence: str, sources: list[str]) -> str | None:
+    """The textbook sentence just before this one, when the sentence is found in a source chunk."""
+    needle = " ".join((sentence or "").split()).rstrip(".!?")
+    if len(needle) < 20:
+        return None
+    probe = needle[: min(len(needle), 80)].lower()
+    for text in sources:
+        at = text.lower().find(probe)
+        if at <= 0:
+            continue
+        before = re.split(r"(?<=[.!?])\s+", text[:at].strip())
+        before = [part for part in before if part.strip()]
+        if before:
+            return before[-1]
+    return None
+
+
+def _clarify_list_item(item: str, known: list[str], default: str | None, sources: list[str]) -> str:
+    """Clarify one list row. A row is a lone textbook sentence, so a pronoun is resolved from the
+    sentence before it in the textbook; when that sentence is about someone else, "he" stays."""
+    if re.search(r"\b(he|she)\b", item, re.I) and not _names_in_sentence(item, known):
+        prior = _textbook_prior_sentence(item, sources)
+        if prior:
+            fixed = _clarify_pronoun_sentence(item.strip(), prior, known, default)
+            return fixed or ""
+        if not _PRONOUN_LEAD_RE.match(item.strip()):
+            # Context not found: a mid-sentence "he" is left as written rather than guessed.
+            return item
+    return _clarify_text(item, known, default)
+
+
 def _clarify_content(content: dict, plan, entity: str | None, display: str) -> dict:
     known = _known_person_names(plan, entity=entity, display=display)
     default = display
@@ -513,15 +603,19 @@ def _clarify_content(content: dict, plan, entity: str | None, display: str) -> d
     ):
         if content.get(key):
             content[key] = _clarify_text(content[key], known, default)
+    sources = _plan_texts(plan)
     for key in ("key_points", "main_events", "learning_objectives"):
         rows = content.get(key)
         if isinstance(rows, list):
-            content[key] = [
-                _clarify_text(item, known, default) if isinstance(item, str) else item
-                for item in rows
-                if not isinstance(item, str) or _clarify_text(item, known, default)
-            ]
-            content[key] = [item for item in content[key] if item]
+            fixed_rows = []
+            for item in rows:
+                if not isinstance(item, str):
+                    fixed_rows.append(item)
+                    continue
+                fixed = _clarify_list_item(item, known, default, sources)
+                if fixed:
+                    fixed_rows.append(fixed)
+            content[key] = fixed_rows
     for person in content.get("important_people") or []:
         if person.get("note"):
             person["note"] = _clarify_text(person["note"], known, person.get("name") or default)
@@ -938,7 +1032,9 @@ def _enrich_detailed(detailed: str, plan, entity: str | None) -> str:
         r"\2",
         base,
     )
-    base = re.sub(r"\s{2,}", " ", base).strip()
+    # Keep paragraph and heading line breaks; only squeeze spaces.
+    base = re.sub(r"[ \t]{2,}", " ", base)
+    base = re.sub(r"\n{3,}", "\n\n", base).strip()
     used = {_sentence_key(s) for s in re.split(r"(?<=[.!?])\s+", base) if s.strip()}
     # Also mark shorter stems already covered in the prose
     base_low = base.lower()
@@ -1328,6 +1424,8 @@ def _terms_from_plan(plan, used: set[str] | None = None) -> list[dict]:
                 _reserve_sentence(s, used)
             # Honest notes can be a bit longer; keep room for the caveat.
             cap = 480 if not definitional else 420
+            # The term is shown next to its meaning, so drop a repeated "Term:" lead-in.
+            meaning = re.sub(rf"^\s*{re.escape(label)}\s*:\s*", "", meaning, flags=re.I) or meaning
             terms.append({"term": label, "meaning": meaning[:cap], "pages": pages})
             break
     return terms
@@ -1823,7 +1921,10 @@ def _sanitize_content(content: dict) -> dict:
     for key in ALLOWED_KEYS:
         value = _scrub(content.get(key))
         if _usable(value):
-            cleaned[key] = sanitize_structured(value)
+            if key == "title" and isinstance(value, str):
+                cleaned[key] = sanitize_label(value)
+            else:
+                cleaned[key] = sanitize_structured(value)
     return cleaned
 
 

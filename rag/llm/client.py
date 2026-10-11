@@ -1,4 +1,12 @@
-"""LLM client. OpenAI Responses API is primary when a key is configured; Ollama is the fallback."""
+"""LLM client.
+
+Which provider answers (resolve_provider):
+1. HISTORYBOT_LLM_PROVIDER ("ollama" or "openai"), when set. Dev/test override.
+2. Otherwise "openai" when OPENAI_API_KEY is configured (production behaviour).
+3. Otherwise LLM_PROVIDER (default "ollama").
+There is no automatic cross-provider fallback. A second provider is tried only when
+LLM_FALLBACK_PROVIDER names it explicitly (default "none"). Errors never include keys.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +16,8 @@ import urllib.error
 import urllib.request
 
 from .config import (
+    HISTORYBOT_LLM_PROVIDER,
+    LLM_FALLBACK_PROVIDER,
     LLM_PROVIDER,
     OLLAMA_BASE_URL,
     OLLAMA_MODEL,
@@ -15,6 +25,7 @@ from .config import (
     OPENAI_BASE_URL,
     OPENAI_MODEL,
     OPENAI_REASONING_EFFORT,
+    SUPPORTED_PROVIDERS,
 )
 
 last_provider = ""
@@ -25,30 +36,82 @@ class LlmError(RuntimeError):
     pass
 
 
+def resolve_provider() -> tuple[str, str]:
+    """(provider, reason). Names only, never keys."""
+    override = (HISTORYBOT_LLM_PROVIDER or "").strip().lower()
+    if override:
+        if override not in SUPPORTED_PROVIDERS:
+            raise LlmError(
+                f"HISTORYBOT_LLM_PROVIDER={override} is not supported. Use one of: {', '.join(SUPPORTED_PROVIDERS)}."
+            )
+        return override, "HISTORYBOT_LLM_PROVIDER override"
+    if OPENAI_API_KEY:
+        return "openai", "OPENAI_API_KEY is configured"
+    primary = (LLM_PROVIDER or "ollama").strip().lower()
+    if primary not in SUPPORTED_PROVIDERS:
+        raise LlmError(f"LLM_PROVIDER={primary} is not supported. Use one of: {', '.join(SUPPORTED_PROVIDERS)}.")
+    return primary, "LLM_PROVIDER (no OpenAI key configured)"
+
+
+def provider_plan() -> list[str]:
+    """Providers to try, in order. Raises LlmError for a bad setting. Never includes a key."""
+    primary, _reason = resolve_provider()
+    plan = [primary]
+    fallback = (LLM_FALLBACK_PROVIDER or "none").strip().lower()
+    if fallback not in ("", "none", "off", "false", "0"):
+        if fallback not in SUPPORTED_PROVIDERS:
+            raise LlmError(f"LLM_FALLBACK_PROVIDER={fallback} is not supported. Use none, ollama, or openai.")
+        if fallback != primary:
+            plan.append(fallback)
+    return plan
+
+
+def describe_provider() -> dict:
+    """Safe description for health checks and startup logs."""
+    try:
+        primary, reason = resolve_provider()
+        plan = provider_plan()
+    except LlmError as exc:
+        return {"llm_provider": "invalid", "reason": str(exc), "fallback": "none"}
+    return {
+        "llm_provider": primary,
+        "model": _model_for(primary),
+        "reason": reason,
+        "fallback": plan[1] if len(plan) > 1 else "none",
+    }
+
+
+def _model_for(provider: str) -> str:
+    return OPENAI_MODEL if provider == "openai" else OLLAMA_MODEL
+
+
+def _call(provider: str, messages: list[dict], temperature: float, max_tokens: int, timeout: int) -> str:
+    if provider == "openai":
+        if not OPENAI_API_KEY:
+            raise LlmError("LLM provider openai is selected but OPENAI_API_KEY is not set.")
+        return _openai_responses(messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout)
+    return _ollama_chat(messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout)
+
+
 def complete(messages: list[dict], temperature: float = 0.1, max_tokens: int = 500, timeout: int = 180) -> str:
     global last_provider, last_error
-    if OPENAI_API_KEY:
+    plan = provider_plan()
+    errors: list[str] = []
+    for index, provider in enumerate(plan):
         try:
-            text = _openai_responses(
-                messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout=timeout,
-            )
-            last_provider = "openai"
-            last_error = ""
-            print(f"llm_provider=openai model={OPENAI_MODEL}", file=sys.stderr)
-            return text
+            text = _call(provider, messages, temperature, max_tokens, timeout)
         except LlmError as exc:
-            last_error = _redact(str(exc))
-            print("llm_provider=ollama fallback=openai_failed", file=sys.stderr)
-    elif LLM_PROVIDER.lower() != "ollama":
-        raise LlmError(
-            f"LLM_PROVIDER={LLM_PROVIDER} is not enabled. Use ollama locally in this phase."
-        )
-    text = _ollama_chat(messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout)
-    last_provider = "ollama"
-    return text
+            message = _redact(str(exc))
+            errors.append(f"{provider}: {message}")
+            last_error = message
+            if index + 1 < len(plan):
+                print(f"llm_provider={provider} failed; trying configured fallback={plan[index + 1]}", file=sys.stderr)
+            continue
+        last_provider = provider
+        last_error = ""
+        print(f"llm_provider={provider} model={_model_for(provider)}", file=sys.stderr)
+        return text
+    raise LlmError("LLM unavailable (" + "; ".join(errors) + ")")
 
 
 def _openai_responses(messages: list[dict], temperature: float, max_tokens: int, timeout: int) -> str:
@@ -209,8 +272,12 @@ def _ollama_chat(messages: list[dict], temperature: float = 0.1, max_tokens: int
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise LlmError("Ollama request failed") from exc
+    except urllib.error.HTTPError as exc:
+        raise LlmError(f"Ollama HTTP {exc.code} for model {OLLAMA_MODEL}") from exc
+    except TimeoutError as exc:
+        raise LlmError("Ollama request timed out") from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise LlmError(f"Ollama is not reachable at {OLLAMA_BASE_URL}") from exc
     message = payload.get("message") if isinstance(payload, dict) else None
     text = str((message or {}).get("content") or "").strip()
     if not text:

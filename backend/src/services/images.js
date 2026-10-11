@@ -12,6 +12,10 @@ export function publicImage(row) {
     title: row.caption || row.topic,
     alt: row.alt_text || row.caption || row.topic,
     textbook_page_number: row.textbook_page_number,
+    media_kind: row.media_kind === "gif" ? "gif" : "image",
+    source: row.source || null,
+    license: row.license || null,
+    from_textbook: row.textbook_page_number != null,
   };
 }
 
@@ -45,76 +49,112 @@ function pageCompatible(imagePage, citedPages) {
   return false;
 }
 
-export async function findVerifiedImages(question, answer, sourcePages = []) {
+// At most this many images per answer: textbook figures on a cited page first, then
+// openly licensed images (no textbook page) that match the topic.
+const MAX_IMAGES = 2;
+
+export async function findVerifiedImages(question, answer, sourcePages = [], options = {}) {
+  const limit = Number.isFinite(options.limit) ? options.limit : MAX_IMAGES;
   const q = String(question || "").toLowerCase();
   const a = String(answer || "").toLowerCase();
   const blob = `${q} ${a}`;
   const cited = sourcePageSet(sourcePages);
   const [rows] = await pool.query(
-    `SELECT id, topic, person_name, caption, alt_text, textbook_page_number, file_path
-     FROM verified_images WHERE verification_status = 'verified'`
+    `SELECT id, topic, person_name, caption, alt_text, textbook_page_number, file_path, source, license, media_kind
+     FROM verified_images WHERE verification_status = 'verified'
+     ORDER BY (textbook_page_number IS NULL), created_at`
   );
-  const matched = [];
+  const textbook = [];
+  const external = [];
   for (const row of rows) {
     if (!matchesTopic(q, a, blob, row)) continue;
+    if (row.textbook_page_number == null) {
+      // Openly licensed image with no textbook page: the topic match is enough, so it can
+      // accompany a supplementary answer that cites no page.
+      external.push(row);
+      continue;
+    }
     if (!pageCompatible(row.textbook_page_number, cited)) continue;
-    matched.push(row);
+    textbook.push(row);
   }
-  return matched;
+  return [...textbook, ...external].slice(0, Math.max(0, limit));
 }
 
-function namedPerson(text) {
-  const value = String(text || "").toLowerCase();
-  if (/\bbaji\s*rao\b|\bbajirao\b/.test(value)) return "bajirao";
-  if (/\bshivaji\b/.test(value)) return "shivaji";
-  if (/\bbabur\b|\bbabar\b/.test(value)) return "babur";
-  if (/\bakbar\b/.test(value)) return "akbar";
-  if (/\bshah jahan\b|\bshahjahan\b/.test(value)) return "shahjahan";
-  if (/\baurangzeb\b/.test(value)) return "aurangzeb";
-  return "";
+const ENTITY_TESTS = [
+  ["shershah", /\bsher\s*shah(?:\s*suri)?\b|\bshershah\b/i],
+  ["shahjahan", /\bshah\s*jahan\b|\bshahjahan\b/i],
+  ["tajmahal", /\btaj\s*mahal\b/i],
+  ["humayun", /\bhumayun\b/i],
+  ["bajirao", /\bbaji\s*rao\b|\bbajirao\b/i],
+  ["shivaji", /\bshivaji\b/i],
+  ["babur", /\bbabur\b|\bbabar\b/i],
+  ["akbar", /\bakbar\b/i],
+  ["aurangzeb", /\baurangzeb\b/i],
+];
+
+function mentionedEntities(text) {
+  const value = String(text || "");
+  return ENTITY_TESTS.filter(([, pattern]) => pattern.test(value)).map(([key]) => key);
 }
 
 function imagePerson(row) {
-  const person = String(row.person_name || "").toLowerCase();
+  const fromName = mentionedEntities(row.person_name || "");
+  if (fromName.length) return fromName[0];
   const topic = String(row.topic || "").toLowerCase();
-  if (person) return namedPerson(person) || person.replace(/\s+/g, "");
+  if (topic.includes("panch")) return "";
+  if (topic.includes("taj")) return "tajmahal";
+  if (topic.includes("humayun")) return "humayun";
+  if (topic.includes("sher")) return "shershah";
   if (topic.includes("baji")) return "bajirao";
   if (topic.includes("shivaji") || topic.includes("maratha")) return "shivaji";
   if (topic.includes("akbar")) return "akbar";
   if (topic.includes("babur") || topic.includes("babar")) return "babur";
-  if (topic.includes("shah")) return "shahjahan";
   if (topic.includes("aurangzeb")) return "aurangzeb";
+  if (topic.includes("shah jahan") || topic.includes("shahjahan")) return "shahjahan";
   return "";
 }
 
-function matchesTopic(question, answer, blob, row) {
+// A pattern for a person named on an image row that is not in ENTITY_TESTS
+// (for example a future asset). Words may be separated by spaces or joined.
+function personNamePattern(name) {
+  const words = String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length || words.join("").length < 4) return null;
+  const escaped = words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`\\b${escaped.join("\\s*")}\\b`, "i");
+}
+
+export function imageMatchesTopic(question, answer, row) {
   const topic = String(row.topic || "").toLowerCase();
-  const asked = namedPerson(question) || namedPerson(answer);
+  const questionEntities = mentionedEntities(question);
+  const answerEntities = mentionedEntities(answer);
+  const asked = questionEntities.length ? questionEntities : answerEntities;
   const imgPerson = imagePerson(row);
+  const haystack = `${question || ""} ${answer || ""}`;
 
-  if (topic.includes("panch") || topic.includes("mahal") || topic.includes("taj")) {
-    return /\btaj\b/.test(answer) || /\btaj\b/.test(question);
+  if (topic.includes("panch")) {
+    return /\bpanch\b|\bfatehpur\b/i.test(haystack);
   }
-
-  // Strict entity match: if the student asked about a person, image must be that person.
-  if (asked) {
-    if (!imgPerson || imgPerson !== asked) return false;
-    // Require the asked name to appear in the question (preferred) or answer body.
-    if (asked === "bajirao") return /\bbaji\s*rao\b|\bbajirao\b/.test(question || blob);
-    if (asked === "shivaji") return /\bshivaji\b/.test(question || answer);
-    if (asked === "akbar") return /\bakbar\b/.test(question || answer);
-    if (asked === "babur") return /\bbabur\b|\bbabar\b/.test(question || answer);
-    if (asked === "shahjahan") return /\bshah jahan\b|\bshahjahan\b/.test(question || answer);
-    if (asked === "aurangzeb") return /\baurangzeb\b/.test(question || answer);
-    return blob.includes(asked);
+  const otherPerson = !imgPerson && row.person_name ? personNamePattern(row.person_name) : null;
+  if (otherPerson) {
+    // A person outside the built-in list: show only when the question names them,
+    // or, when the question names nobody known, when the answer does.
+    if (otherPerson.test(question || "")) return true;
+    if (questionEntities.length) return false;
+    return otherPerson.test(answer || "");
   }
+  if (asked.length) {
+    return Boolean(imgPerson) && asked.includes(imgPerson);
+  }
+  if (imgPerson) return answerEntities.includes(imgPerson);
+  return Boolean(topic) && topic.length > 3 && haystack.toLowerCase().includes(topic);
+}
 
-  // No clear asked person: only attach when image person is explicitly present in answer.
-  if (imgPerson === "akbar") return /\bakbar\b/.test(answer);
-  if (imgPerson === "bajirao") return /\bbaji\s*rao\b|\bbajirao\b/.test(answer);
-  if (imgPerson === "shivaji") return /\bshivaji\b/.test(answer) && !/\bmaratha kingdom map\b/.test(topic);
-  if (imgPerson === "babur") return /\bbabur\b|\bbabar\b/.test(answer);
-  return Boolean(topic) && blob.includes(topic);
+function matchesTopic(question, answer, _blob, row) {
+  return imageMatchesTopic(question, answer, row);
 }
 
 export async function getVerifiedImageRow(id) {

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { AppError } from "../utils/errors.js";
-import { newId, utcNow } from "../utils/ids.js";
+import { isUuid, newId, utcNow } from "../utils/ids.js";
 import { requireOwnedConversation, requireSession } from "../middleware/access.js";
 import { recordEvent } from "../services/analytics.js";
 import { generateEcontent, renderEcontentPdf } from "../services/ragClient.js";
@@ -22,9 +22,9 @@ const pdfSchema = z.object({
 export async function createEcontent(req, res, next) {
   try {
     const body = createSchema.parse(req.body);
-    await requireSession(body.session_id);
+    await requireSession(body.session_id, req.user);
     if (body.conversation_id) {
-      await requireOwnedConversation(body.conversation_id, body.session_id);
+      await requireOwnedConversation(body.conversation_id, body.session_id, req.user);
     }
     const language = body.language || "en";
     const rag = await generateEcontent({ topic: body.topic, language });
@@ -42,7 +42,7 @@ export async function createEcontent(req, res, next) {
     }
     const id = newId();
     const publicSourceList = publicSources(rag.sources);
-    const imageRows = await findVerifiedImages(`${body.topic} ${rag.title || ""}`);
+    const imageRows = await findVerifiedImages(body.topic, rag.title || "", publicSourceList, { limit: 3 });
     await pool.query(
       `INSERT INTO econtent_documents
         (id, session_id, conversation_id, topic, language, body_json, source_pages)
@@ -86,7 +86,7 @@ export async function createEcontent(req, res, next) {
 export async function getEcontent(req, res, next) {
   try {
     const sessionId = req.query.session_id;
-    const doc = await requireOwnedEcontent(req.params.econtentId, sessionId);
+    const doc = await requireOwnedEcontent(req.params.econtentId, sessionId, req.user);
     const body = parseJson(doc.body_json);
     res.json({
       id: doc.id,
@@ -105,9 +105,14 @@ export async function getEcontent(req, res, next) {
 export async function downloadEcontentPdf(req, res, next) {
   try {
     const body = pdfSchema.parse(req.body);
-    const doc = await requireOwnedEcontent(req.params.econtentId, body.session_id);
+    const doc = await requireOwnedEcontent(req.params.econtentId, body.session_id, req.user);
     const stored = parseJson(doc.body_json);
-    const imageRows = await findVerifiedImages(`${doc.topic} ${stored.title || ""}`);
+    const imageRows = await findVerifiedImages(
+      doc.topic,
+      stored.title || "",
+      parseJson(doc.source_pages) || [],
+      { limit: 3 }
+    );
     const pdf = await renderEcontentPdf(
       {
         title: stored.title || doc.topic,
@@ -135,8 +140,11 @@ export async function downloadEcontentPdf(req, res, next) {
   }
 }
 
-async function requireOwnedEcontent(econtentId, sessionId) {
-  const session = await requireSession(sessionId);
+async function requireOwnedEcontent(econtentId, sessionId, actor = null) {
+  const session = await requireSession(sessionId, actor);
+  if (!isUuid(econtentId)) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid e-content id.");
+  }
   const [rows] = await pool.query(
     `SELECT id, session_id, conversation_id, topic, language, body_json, source_pages, created_at
      FROM econtent_documents WHERE id = ?`,

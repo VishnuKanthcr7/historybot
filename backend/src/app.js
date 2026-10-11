@@ -9,6 +9,9 @@ import { errorHandler, AppError } from "./utils/errors.js";
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
+  // Behind a reverse proxy (nginx, a load balancer) set TRUST_PROXY=1 so rate limits use the
+  // client address instead of the proxy's. Off by default (direct connections).
+  if (config.trustProxy) app.set("trust proxy", config.trustProxy);
   app.use(
     helmet({
       crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -18,6 +21,7 @@ export function createApp() {
     cors({
       origin: config.corsOrigin,
       methods: ["GET", "POST", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "Accept"],
     })
   );
   app.use(express.json({ limit: "32kb" }));

@@ -12,7 +12,18 @@ try:
 except ImportError:
     pass
 
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip() or "ollama"
+# Provider selection (see rag/llm/client.py resolve_provider and docs/llm-provider.md):
+# 1. HISTORYBOT_LLM_PROVIDER, when set, wins. It is the explicit dev/test switch
+#    (the regression harnesses set it to "ollama" with OpenAI blocked).
+# 2. Otherwise production behaviour: OpenAI when OPENAI_API_KEY is configured.
+# 3. Otherwise LLM_PROVIDER (default "ollama").
+# LLM_PROVIDER alone does not override a configured OpenAI key; that keeps the
+# live site on OpenAI with the current .env.
+LLM_PROVIDER = (os.environ.get("LLM_PROVIDER", "ollama").strip() or "ollama").lower()
+HISTORYBOT_LLM_PROVIDER = os.environ.get("HISTORYBOT_LLM_PROVIDER", "").strip().lower()
+# No cross-provider fallback unless set explicitly: "none" (default), "ollama", or "openai".
+LLM_FALLBACK_PROVIDER = (os.environ.get("LLM_FALLBACK_PROVIDER", "none").strip() or "none").lower()
+SUPPORTED_PROVIDERS = ("ollama", "openai")
 OLLAMA_BASE_URL = (
     os.environ.get("OLLAMA_BASE_URL")
     or os.environ.get("OLLAMA_HOST")

@@ -411,7 +411,7 @@ def evidence_states_motive(
 
 
 def depth_prompt_extra(profile: DepthProfile, chunks: list[dict] | None = None, entity: str | None = None, question: str | None = None) -> str:
-    """Extra LLM instructions by depth — still textbook-only."""
+    """Extra LLM instructions by depth for the textbook part (supplementary text is labelled separately)."""
     bits = []
     if profile.depth == "short":
         bits.append(
@@ -431,8 +431,8 @@ def depth_prompt_extra(profile: DepthProfile, chunks: list[dict] | None = None, 
         bits.append(
             "Write a focused comparison from the textbook passages. "
             "You may combine facts about each side. "
-            "If a well-established point is needed and is not in the passages, "
-            "put it after a line that starts with Additional historical context:."
+            "Use only points the passages give. If the textbook does not give a point "
+            "for one side, say so in one short sentence instead of adding outside facts."
         )
     elif profile.depth == "why":
         bits.append(
@@ -448,7 +448,7 @@ def depth_prompt_extra(profile: DepthProfile, chunks: list[dict] | None = None, 
     elif profile.depth == "more":
         bits.append(
             "Add NEW textbook points not already covered. Prefer unused evidence. "
-            "Do not repeat the previous answer verbatim. If no new evidence remains, say so briefly."
+            "Do not repeat the previous answer verbatim. If no new evidence remains, do not stop: the system adds a labelled additional explanation."
         )
     elif profile.depth == "detail":
         bits.append(

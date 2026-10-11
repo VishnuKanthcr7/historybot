@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -25,6 +26,13 @@ except ImportError:
 from rag.engine.answer import answer_question
 from rag.engine.econtent import generate_econtent
 from rag.pdf.render import render_econtent_pdf
+
+_LOG = logging.getLogger("historybot.internal_api")
+
+
+def _log_failure(endpoint: str, exc: Exception) -> None:
+    # Type and short message only (no question text, no keys) so failures can be diagnosed.
+    print(f"HistoryBot RAG {endpoint} failed: {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
 
 app = FastAPI(title="HistoryBot internal RAG", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -88,7 +96,10 @@ def _public_sources(result: dict) -> list[dict]:
 @app.get("/internal/health")
 def health(x_internal_secret: str | None = Header(default=None)):
     _authorize(x_internal_secret)
-    return {"status": "ok"}
+    from rag.llm.client import describe_provider
+
+    # Provider names only; never keys.
+    return {"status": "ok", **describe_provider()}
 
 
 @app.post("/internal/query")
@@ -105,12 +116,14 @@ def query(body: QueryRequest, x_internal_secret: str | None = Header(default=Non
         result = answer_question(
             body.question, language=language, history=history, task_state=body.task_state
         )
-    except Exception:
+    except Exception as exc:
+        _log_failure("query", exc)
         raise HTTPException(status_code=502, detail="RAG engine failed.")
     payload = {
         "answer": result.get("answer"),
         "language": result.get("language", language),
         "grounded": bool(result.get("grounded")),
+        "used_supplementary": bool(result.get("used_supplementary")),
         "sources": _public_sources(result),
         "intent": result.get("intent"),
         "mode": result.get("mode"),
@@ -129,7 +142,8 @@ def econtent(body: EcontentRequest, x_internal_secret: str | None = Header(defau
     language = "kn" if body.language == "kn" else "en"
     try:
         result = generate_econtent(body.topic, language=language)
-    except Exception:
+    except Exception as exc:
+        _log_failure("econtent", exc)
         raise HTTPException(status_code=502, detail="E-content engine failed.")
     return {
         "title": result.get("title") or body.topic,
@@ -166,7 +180,8 @@ def econtent_pdf(body: PdfRequest, x_internal_secret: str | None = Header(defaul
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-    except Exception:
+    except Exception as exc:
+        _log_failure("pdf", exc)
         raise HTTPException(status_code=502, detail="PDF generation failed.")
     return Response(content=pdf_bytes, media_type="application/pdf")
 

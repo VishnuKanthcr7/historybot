@@ -1,4 +1,4 @@
-import { imageUrl } from "../services/api.js";
+import { ImageFigure } from "./ProtectedImage.jsx";
 import SourceCite from "./SourceCite.jsx";
 
 export default function EcontentPanel({ data, labels, language, onClose, onPdf, pdfLoading }) {
@@ -7,23 +7,23 @@ export default function EcontentPanel({ data, labels, language, onClose, onPdf, 
   const citations = content.section_citations || {};
   return (
     <aside className="max-h-[52vh] overflow-y-auto border-t border-rule bg-cream px-4 py-4 md:px-10" aria-label={labels.econtent}>
-      <div className="mx-auto flex max-w-2xl items-start justify-between gap-3">
-        <div>
+      <div className="mx-auto flex max-w-2xl flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-52">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brass">{labels.econtent}</p>
           <h2 className="mt-1 font-serif text-xl text-navy sm:text-2xl">{data.title}</h2>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {data.id ? (
             <button
               type="button"
-              className="min-h-10 border border-navy px-3 text-sm text-navy disabled:opacity-50"
+              className="min-h-11 border border-navy px-3 text-sm text-navy disabled:opacity-50"
               onClick={onPdf}
               disabled={pdfLoading}
             >
               {pdfLoading ? labels.pdfWorking : labels.downloadPdf}
             </button>
           ) : null}
-          <button type="button" className="min-h-10 border border-rule px-3 text-sm" onClick={onClose}>
+          <button type="button" className="min-h-11 border border-rule px-3 text-sm" onClick={onClose}>
             {labels.close}
           </button>
         </div>
@@ -35,6 +35,12 @@ export default function EcontentPanel({ data, labels, language, onClose, onPdf, 
           {section(labels.introduction, content.introduction, citations.Introduction)}
           {listSection(labels.objectives, content.learning_objectives)}
           {richSection(labels.detail, content.detailed_explanation, citations["Detailed explanation"])}
+          {content.additional_explanation ? (
+            <div className="border border-rule bg-paper p-3">
+              {richSection("Additional historical explanation", content.additional_explanation)}
+              <p className="mt-2 text-xs text-stone-600">General history to help you understand. Not from your textbook pages.</p>
+            </div>
+          ) : null}
           {namedList(labels.people, content.important_people, "name", "note", labels)}
           {namedList(labels.terms, content.important_terms, "term", "meaning", labels)}
           {namedList(labels.timeline, content.timeline, "when", "event", labels)}
@@ -45,10 +51,13 @@ export default function EcontentPanel({ data, labels, language, onClose, onPdf, 
           {section(labels.revision, content.revision)}
           {citationMap(labels.sectionPages, citations)}
           {(data.images || []).map((img) => (
-            <figure key={img.id} className="border border-rule bg-paper p-2">
-              <img src={imageUrl(img.id)} alt={img.alt} className="max-h-56 w-full object-contain" />
-              <figcaption className="mt-1 text-xs text-stone-600">{img.title}</figcaption>
-            </figure>
+            <ImageFigure key={img.id} img={img} className="max-h-56 w-full object-contain">
+              {img.media_kind === "gif" ? (
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-brass">
+                  Educational animation
+                </p>
+              ) : null}
+            </ImageFigure>
           ))}
           <SourceCite sources={data.sources} language={language} />
         </div>

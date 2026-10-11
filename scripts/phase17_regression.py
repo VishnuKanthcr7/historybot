@@ -71,7 +71,13 @@ def pack_pages_for(question: str, qtype: str, retrieval: str | None = None) -> t
 
 def is_refuse(answer: str) -> bool:
     low = (answer or "").lower()
-    return "not available in the provided textbook" in low or "not in the provided textbook" in low
+    # Current refusal wording is "This topic is not available in the textbook." (rag/prompts/tutor.py
+    # NOT_IN_TEXTBOOK); older builds said "...in the provided textbook". Both are refusals.
+    return (
+        "not available in the provided textbook" in low
+        or "not in the provided textbook" in low
+        or "not available in the textbook" in low
+    )
 
 
 def grade_case(case: dict, result: dict) -> dict:

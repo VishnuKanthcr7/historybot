@@ -1,0 +1,67 @@
+[
+  {
+    "topic": "Mughal Empire under Akbar (1605)",
+    "person_name": "Akbar",
+    "file_path": "data/images/commons-mughal-empire-1605-map.jpg",
+    "caption": "Map of the Mughal Empire in 1605, at the end of Akbar's reign (modern map).",
+    "alt_text": "Map showing the area of the Mughal Empire in 1605.",
+    "source": "Avantiputra7 via Wikimedia Commons (https://commons.wikimedia.org/wiki/File:Mughal_Empire,_1605.png)",
+    "license": "CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0); resized for the web",
+    "verified_by": "final-pass-commons-api",
+    "external": true,
+    "media_kind": "image",
+    "verification_status": "verified"
+  },
+  {
+    "topic": "Maratha power in the Peshwa period (Baji Rao era), map of 1760",
+    "person_name": "Baji Rao",
+    "file_path": "data/images/commons-maratha-confederacy-1760-map.jpg",
+    "caption": "Map of the Maratha Confederacy at its peak around 1760 (modern map).",
+    "alt_text": "Map showing the lands of the Maratha Confederacy around 1760.",
+    "source": "PadFoot2008 via Wikimedia Commons (https://commons.wikimedia.org/wiki/File:States_of_the_Maratha_Confederacy_at_peak_1760.png)",
+    "license": "CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0); resized for the web",
+    "verified_by": "final-pass-commons-api",
+    "external": true,
+    "media_kind": "image",
+    "verification_status": "verified"
+  },
+  {
+    "topic": "Buland Darwaza, Fatehpur Sikri (built by Akbar)",
+    "person_name": "Akbar",
+    "file_path": "data/images/commons-buland-darwaza-fatehpur-sikri.jpg",
+    "caption": "Buland Darwaza, the great gateway of Fatehpur Sikri, the city built by Akbar (modern photograph).",
+    "alt_text": "Photograph of the tall red sandstone Buland Darwaza gateway at Fatehpur Sikri.",
+    "source": "Marcin Białek via Wikimedia Commons (https://commons.wikimedia.org/wiki/File:Fatehput_Sikiri_Buland_Darwaza_gate_2010.jpg)",
+    "license": "CC BY-SA 3.0 (https://creativecommons.org/licenses/by-sa/3.0); resized for the web",
+    "verified_by": "final-pass-commons-api",
+    "external": true,
+    "media_kind": "image",
+    "verification_status": "verified"
+  },
+  {
+    "topic": "Raigad Fort, Shivaji's capital",
+    "person_name": "Shivaji",
+    "file_path": "data/images/commons-raigad-fort.jpg",
+    "caption": "Raigad Fort in Maharashtra, Shivaji's capital where he was crowned (modern photograph).",
+    "alt_text": "Photograph of the hill fort of Raigad in Maharashtra.",
+    "source": "Rajalakshendra via Wikimedia Commons (https://commons.wikimedia.org/wiki/File:Raigad_Fort,_Maharashtra_(2018).jpg)",
+    "license": "CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0); resized for the web",
+    "verified_by": "final-pass-commons-api",
+    "external": true,
+    "media_kind": "image",
+    "verification_status": "verified"
+  },
+  {
+    "topic": "Humayun's Tomb, Delhi",
+    "person_name": "Humayun",
+    "file_path": "data/images/commons-humayuns-tomb.jpg",
+    "caption": "Humayun's Tomb in Delhi, a Mughal monument (modern photograph).",
+    "alt_text": "Photograph of Humayun's Tomb, a large Mughal tomb with a white marble dome.",
+    "source": "Naveen R Gowda via Wikimedia Commons (https://commons.wikimedia.org/wiki/File:Humayun%27s_Tomb,_Delhi_1.jpg)",
+    "license": "CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0); resized for the web",
+    "verified_by": "final-pass-commons-api",
+    "external": true,
+    "media_kind": "image",
+    "verification_status": "verified"
+  }
+]

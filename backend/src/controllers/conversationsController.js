@@ -9,6 +9,8 @@ import { findVerifiedImages, publicImage } from "../services/images.js";
 import { publicSources } from "../utils/sources.js";
 import { config } from "../config/env.js";
 
+const SUPPLEMENT_LABEL_RE = /\*\*Additional historical explanation\*\*/;
+
 const createSchema = z.object({
   session_id: z.string().uuid(),
   title: z.string().max(255).optional(),
@@ -23,7 +25,7 @@ const messageSchema = z.object({
 export async function createConversation(req, res, next) {
   try {
     const body = createSchema.parse(req.body);
-    await requireSession(body.session_id);
+    await requireSession(body.session_id, req.user);
     const id = newId();
     const title = body.title?.trim() || "New chat";
     await pool.query(
@@ -51,7 +53,7 @@ export async function listConversations(req, res, next) {
     if (!sessionId) {
       throw new AppError(400, "VALIDATION_ERROR", "session_id is required.");
     }
-    await requireSession(sessionId);
+    await requireSession(sessionId, req.user);
     const [rows] = await pool.query(
       `SELECT id, title, created_at, updated_at
        FROM conversations
@@ -78,7 +80,7 @@ export async function getConversation(req, res, next) {
     if (!sessionId) {
       throw new AppError(400, "VALIDATION_ERROR", "session_id is required.");
     }
-    const { conversation } = await requireOwnedConversation(req.params.conversationId, sessionId);
+    const { conversation } = await requireOwnedConversation(req.params.conversationId, sessionId, req.user);
     const [messages] = await pool.query(
       `SELECT id, role, content, language, source_pages, retrieval_ok, created_at
        FROM messages WHERE conversation_id = ? ORDER BY created_at ASC`,
@@ -92,7 +94,8 @@ export async function getConversation(req, res, next) {
       if (row.role === "user") {
         previousUserContent = row.content || "";
       }
-      if (row.role === "assistant" && row.retrieval_ok) {
+      // Textbook-grounded answers and labelled supplementary history answers both get images.
+      if (row.role === "assistant" && (row.retrieval_ok || SUPPLEMENT_LABEL_RE.test(row.content || ""))) {
         images = (
           await findVerifiedImages(previousUserContent, row.content || "", sources)
         ).map(publicImage);
@@ -122,7 +125,7 @@ export async function getConversation(req, res, next) {
 export async function postMessage(req, res, next) {
   try {
     const body = messageSchema.parse(req.body);
-    const { conversation } = await requireOwnedConversation(req.params.conversationId, body.session_id);
+    const { conversation } = await requireOwnedConversation(req.params.conversationId, body.session_id, req.user);
     const language = body.language || "en";
     const userId = newId();
     await pool.query(
@@ -186,7 +189,7 @@ export async function postMessage(req, res, next) {
       metadata: { grounded: rag.grounded },
     });
 
-    const imageRows = rag.grounded
+    const imageRows = rag.grounded || rag.usedSupplementary
       ? await findVerifiedImages(body.message, rag.answer || "", publicSourceList)
       : [];
 

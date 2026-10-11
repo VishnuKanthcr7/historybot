@@ -6,6 +6,8 @@ import MessageList from "../components/MessageList.jsx";
 import ChatComposer from "../components/ChatComposer.jsx";
 import HistorySidebar from "../components/HistorySidebar.jsx";
 import EcontentPanel from "../components/EcontentPanel.jsx";
+import AccountMenu from "../components/AccountMenu.jsx";
+import { clearPendingQuestion } from "../pendingQuestion.js";
 
 export default function Chat() {
   const {
@@ -43,6 +45,7 @@ export default function Chat() {
     if (freshHandled.current) return;
     if (params.get("fresh") !== "1") return;
     freshHandled.current = true;
+    clearPendingQuestion();
     skipAutoRestore.current = true;
     restoreAttemptedFor.current = "";
     beginFreshChat();
@@ -61,6 +64,7 @@ export default function Chat() {
     const q = params.get("q");
     if (q) {
       pendingQuestion.current = true;
+      clearPendingQuestion();
       skipAutoRestore.current = true;
       restoreAttemptedFor.current = "";
       setParams({}, { replace: true });
@@ -136,7 +140,7 @@ export default function Chat() {
             Class 9 Social Science
           </span>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="chat-actions">
           <button
             type="button"
             onClick={handleNewChat}
@@ -148,7 +152,7 @@ export default function Chat() {
             type="button"
             disabled={econtentLoading || !lastUser || loading}
             onClick={() => requestEcontent(lastUser?.content)}
-            className="min-h-11 max-w-[11rem] truncate rounded-full border border-rule bg-cream px-3 text-sm text-navy transition hover:border-brass disabled:opacity-50 sm:max-w-none"
+            className="chat-module min-h-11 rounded-full border border-rule bg-cream px-3 text-sm text-navy transition hover:border-brass disabled:opacity-50"
             title={!lastUser ? "Ask a question first" : undefined}
           >
             {econtentLoading ? t.econtentWorking : t.makeEcontent}
@@ -165,6 +169,7 @@ export default function Chat() {
             <option value="en">{t.english}</option>
             <option value="kn">{t.kannada}</option>
           </select>
+          <AccountMenu />
         </div>
       </header>
 

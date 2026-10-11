@@ -19,6 +19,11 @@ export function errorHandler(err, _req, res, _next) {
       error: { code: err.code, message: err.message },
     });
   }
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({
+      error: { code: "PAYLOAD_TOO_LARGE", message: "Request is too large." },
+    });
+  }
   if (err?.type === "entity.parse.failed") {
     return res.status(400).json({
       error: { code: "INVALID_JSON", message: "Malformed JSON." },
