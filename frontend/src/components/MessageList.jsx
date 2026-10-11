@@ -32,7 +32,7 @@ export default function MessageList({ messages, loading, language, onAsk }) {
   }, [loading, messages, t.answerReady]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-5 md:px-8">
+    <div className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-5 md:px-8">
       {messages.length === 0 && !loading ? (
         <div className="mx-auto max-w-2xl pt-8 sm:pt-14">
           <p className="font-serif text-3xl text-navy">HistoryBot</p>

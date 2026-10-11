@@ -63,5 +63,31 @@
     "external": true,
     "media_kind": "image",
     "verification_status": "verified"
+  },
+  {
+    "topic": "Akbar (Mughal painting)",
+    "person_name": "Akbar",
+    "file_path": "data/images/commons-akbar-govardhan-miniature.jpg",
+    "caption": "Mughal painting of Akbar by the court artist Govardhan, c. 1630, made after his death (artistic depiction).",
+    "alt_text": "Mughal miniature painting of Emperor Akbar standing, wearing an orange turban and a white robe, holding prayer beads.",
+    "source": "Govardhan, Metropolitan Museum of Art, via Wikimedia Commons (https://commons.wikimedia.org/wiki/File:Govardhan._Akbar_With_Lion_and_Calf_ca._1630,_Metmuseum_(cropped).jpg)",
+    "license": "Public domain (Wikimedia Commons); cropped detail, resized for the web",
+    "verified_by": "targeted-pass-commons-api",
+    "external": true,
+    "media_kind": "image",
+    "verification_status": "verified"
+  },
+  {
+    "topic": "Shivaji (portrait painting)",
+    "person_name": "Shivaji",
+    "file_path": "data/images/commons-shivaji-british-museum.jpg",
+    "caption": "Painting of Shivaji, c. 1680s, now in the British Museum (artistic depiction).",
+    "alt_text": "Painted portrait of Shivaji in profile, wearing a turban with a plume and holding a sword, inside an oval frame.",
+    "source": "Unknown artist, British Museum, via Wikimedia Commons (https://commons.wikimedia.org/wiki/File:Shivaji_British_Museum.jpg)",
+    "license": "Public domain (Wikimedia Commons); resized for the web",
+    "verified_by": "targeted-pass-commons-api",
+    "external": true,
+    "media_kind": "image",
+    "verification_status": "verified"
   }
 ]

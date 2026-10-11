@@ -301,7 +301,7 @@ try:
     check("depth prompt evidence is larger than an ordinary prompt", len(_prompt) > len(_base_prompt) + 1500, (len(_prompt), len(_base_prompt)))
     check("depth request gets a larger token budget", _calls and _calls[0]["kw"].get("max_tokens", 0) >= 1400, _calls and _calls[0]["kw"])
     check("ordinary questions keep the old prompt (no depth block)", "deeper explanation of" not in _base_prompt and "Previous answer:" not in _base_prompt)
-    check("expanded answer is not cut back by post-processing", "## Who appointed the Mansabdars" in _res["answer"] and "Four ministers" in _res["answer"], _res["answer"])
+    check("expanded answer is not cut back by post-processing", "## Who Appointed the Mansabdars" in _res["answer"] and "Four ministers" in _res["answer"], _res["answer"])
     check("citations preserved on a depth answer", "Source: Class 9 Karnataka State Board" in _res["answer"] and "page" in _res["answer"].split("Source:")[-1], _res["answer"][-160:])
     check("no repetition retry when the answer is new", _res.get("depth_request", {}).get("retry") is False and len(_calls) == 1, _res.get("depth_request"))
     check("task state records a 'more' depth", (_res.get("task") or {}).get("depth") == "more", _res.get("task"))
@@ -312,7 +312,7 @@ try:
     _res = ans.answer_question("Can you tell me more about this, I mean the Mansabdari system?", "en", _HIST, None)
     check("repetition guard retries once with a 'new details' instruction",
           len(_calls) == 2 and "mostly repeated the previous answer" in _calls[1]["messages"][-1]["content"], len(_calls))
-    check("retry answer replaces the repeat", "## Who appointed the Mansabdars" in _res["answer"] and (_res.get("depth_request") or {}).get("retry") is True, _res.get("depth_request"))
+    check("retry answer replaces the repeat", "## Who Appointed the Mansabdars" in _res["answer"] and (_res.get("depth_request") or {}).get("retry") is True, _res.get("depth_request"))
     check("overlap of the repeated first draft is measured high", ((_res.get("depth_request") or {}).get("overlap_first") or 0) >= 0.5, _res.get("depth_request"))
 
     # Evidence exhausted: both drafts repeat -> honest note, still cited.
@@ -393,6 +393,19 @@ try:
     _calls.clear()
     _res = ans.answer_question("Who won the IPL cricket final?", "en", [], None)
     check("cricket still refused before any model call", not _calls and NOT_IN_TEXTBOOK in _res["answer"], _res["answer"][:120])
+    _calls.clear()
+    _res = ans.answer_question("What is the GDP of India?", "en", [], None)
+    check("GDP / current economic data refused before any model call", not _calls and NOT_IN_TEXTBOOK in _res["answer"], _res["answer"][:120])
+    _calls.clear()
+    _res = ans.answer_question("What is the inflation rate in India now?", "en", [], None)
+    check("inflation rate refused before any model call", not _calls and NOT_IN_TEXTBOOK in _res["answer"], _res["answer"][:120])
+    check("headings are title-cased", ans._title_case_headings("## how it worked\n## why it was important\n## Akbar's rule\ntext ## keep")
+          == "## How It Worked\n## Why It Was Important\n## Akbar's Rule\ntext ## keep")
+    _composed = ans._compose_sections("Intro.", "## background and key dates\nText.", "")
+    check("composed answer has title-case headings", "## Background and Key Dates" in _composed, _composed[:120])
+    from rag.prompts.tutor import FINAL_ANSWER_PROMPT as _FAP
+    check("prompt: person answers use the structured outline", "Who was X?" in _FAP and "Achievements and Importance" in _FAP and "Title Case" in _FAP)
+    check("prompt: 'briefly' stays short", "Briefly" in _FAP and "2 to 5 sentences with no headings" in _FAP)
     check("history vocabulary passes the domain gate", not ans._current_question_outside_domain("What was the Battle of Plassey?")
           and not ans._current_question_outside_domain("Explain the Kalinga war of Ashoka"))
     check("named non-textbook topic is detected (no textbook citation)",

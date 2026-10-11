@@ -172,6 +172,10 @@ OFF_DOMAIN_CLAUSES = (
     (r"chatgpt|openai", "that request"),
     # Sport, films and celebrities are outside Class 9 History and Social Science.
     (r"\bcricket\b|\bipl\b|\bfootball\b|\bbollywood\b|\bmovies?\b|\bfilm stars?\b|\bcelebrit", "that topic"),
+    # Current economic data (GDP, inflation, markets) needs live figures the textbook does not
+    # give; answering would mean inventing numbers.
+    (r"\bgdp\b|gross domestic product|\bgnp\b|inflation rate|\bsensex\b|\bnifty\b|stock market|share price"
+     r"|exchange rate|per capita income|national income|current population", "current economic figures"),
 )
 
 
@@ -970,7 +974,7 @@ def _decorate_student_answer(question: str, answer: str, off_labels: list[str] |
         parts.append(OUTSIDE_SOURCE_NOTE)
     if looks_like_roleplay(question):
         parts.append(ROLEPLAY_NOTE)
-    parts.append((answer or "").strip())
+    parts.append(_title_case_headings((answer or "").strip()))
     remaining = [label for label in (off_labels or []) if label not in {"Wikipedia", "NCERT", "the internet"}]
     if remaining:
         if len(remaining) == 1:
@@ -2192,7 +2196,26 @@ def _drop_prior_repeats(text: str, previous: str, keep_one: bool, near: float = 
     return result
 
 
+_HEADING_SMALL_WORDS = frozenset("a an and as at but by for in of on or the to vs".split())
+
+
+def _title_case_headings(text: str) -> str:
+    """'## how it worked' -> '## How It Worked'. Words that already have capitals are kept."""
+
+    def fix(match: re.Match) -> str:
+        words = match.group(2).split(" ")
+        out = []
+        for i, word in enumerate(words):
+            if word and word == word.lower() and (i == 0 or word not in _HEADING_SMALL_WORDS):
+                word = word[0].upper() + word[1:]
+            out.append(word)
+        return f"{match.group(1)} {' '.join(out)}"
+
+    return re.sub(r"(?m)^(#{1,4})[ \t]+(.+?)[ \t]*$", fix, text or "")
+
+
 def _compose_sections(textbook: str, supplement: str, revision: str) -> str:
+    textbook, supplement, revision = (_title_case_headings(part) for part in (textbook, supplement, revision))
     blocks = []
     if textbook.strip():
         blocks.append(f"**{TEXTBOOK_LABEL}**\n\n{textbook.strip()}")

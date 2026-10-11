@@ -49,35 +49,98 @@ function pageCompatible(imagePage, citedPages) {
   return false;
 }
 
-// At most this many images per answer: textbook figures on a cited page first, then
-// openly licensed images (no textbook page) that match the topic.
+// At most this many images per answer.
 const MAX_IMAGES = 2;
+
+const MAP_Q = /\bmaps?\b|\bkingdom\b|\bempire\b|\bterritor|\bexpan|\bborders?\b|\bextent\b|\bconquest|\bregions?\b/i;
+const PLACE_Q = /\bforts?\b|\bpalace|\btomb|\bmahal\b|\bdarwaza\b|\bgateway|\bmonument|\bmosque|\bbattle\s*(?:field|site)?\b|\bfatehpur\b|\bsikri\b|\braigad\b|\bcapital city\b|\bbuilding/i;
+const PERSON_Q = /^\s*(?:who\s+(?:was|were|is)|tell\s+me\s+about|about|describe|introduce|life\s+of|biography\s+of)\b/i;
+
+// What the question is mainly about: "person", "map", "place" or "general".
+export function classifyImageQuestion(question) {
+  const q = String(question || "");
+  if (/^\s*who\s+(?:was|were|is)\b/i.test(q)) return "person";
+  if (MAP_Q.test(q)) return "map";
+  if (PLACE_Q.test(q)) return "place";
+  if (PERSON_Q.test(q) && mentionedEntities(q).length) return "person";
+  return "general";
+}
+
+// What an image shows: "portrait" (a painting/figure of a person), "map" or "place".
+export function imageKind(row) {
+  const text = `${row.caption || ""} ${row.topic || ""} ${row.file_path || ""}`.toLowerCase();
+  if (/\bmap\b|-map\b/.test(text)) return "map";
+  if (/portrait|painting|miniature|depiction/.test(text)) return "portrait";
+  return "place";
+}
+
+// The question itself names what a textbook figure shows, so the figure may be used even
+// when the answer cites a different page (e.g. "Who was Akbar?" answered from pp. 7-10
+// can still show the Akbar figure from p. 3).
+function questionNamesFigure(question, row, kind, qKind) {
+  const q = String(question || "");
+  const person = imagePerson(row);
+  const asked = mentionedEntities(q);
+  if (kind === "portrait") return qKind === "person" && Boolean(person) && asked.includes(person);
+  if (kind === "map") return Boolean(person) && asked.includes(person) && MAP_Q.test(q);
+  if (String(row.topic || "").toLowerCase().includes("panch")) return /\bpanch\b/i.test(q);
+  return false;
+}
+
+const KIND_ORDER = {
+  person: ["portrait", "map", "place"],
+  map: ["map", "place", "portrait"],
+  place: ["place", "map", "portrait"],
+};
+
+export function selectImages(question, answer, rows, sourcePages = [], limit = MAX_IMAGES) {
+  const cited = sourcePageSet(sourcePages);
+  const qKind = classifyImageQuestion(question);
+  const candidates = [];
+  for (const row of rows) {
+    if (!imageMatchesTopic(question, answer, row)) continue;
+    const kind = imageKind(row);
+    const textbook = row.textbook_page_number != null;
+    // Textbook figures: on (or next to) a cited page, or named by the question itself.
+    if (textbook && !pageCompatible(row.textbook_page_number, cited) && !questionNamesFigure(question, row, kind, qKind)) {
+      continue;
+    }
+    candidates.push({ row, kind, textbook });
+  }
+  const order = KIND_ORDER[qKind];
+  const rank = (c) => (order ? order.indexOf(c.kind) * 2 : 0) + (c.textbook ? 0 : 1);
+  candidates.sort((x, y) => rank(x) - rank(y));
+  const picked = [];
+  let portraits = 0;
+  for (const c of candidates) {
+    if (picked.length >= Math.max(0, limit)) break;
+    if (c.kind === "portrait") {
+      // A portrait only for a person question about that exact person, and only one.
+      if (qKind === "person" && portraits === 0) {
+        const asked = mentionedEntities(question);
+        if (!asked.length || asked.includes(imagePerson(c.row))) {
+          picked.push(c.row);
+          portraits += 1;
+        }
+      } else if (qKind === "general" && portraits === 0) {
+        picked.push(c.row);
+        portraits += 1;
+      }
+      continue;
+    }
+    picked.push(c.row);
+  }
+  return picked;
+}
 
 export async function findVerifiedImages(question, answer, sourcePages = [], options = {}) {
   const limit = Number.isFinite(options.limit) ? options.limit : MAX_IMAGES;
-  const q = String(question || "").toLowerCase();
-  const a = String(answer || "").toLowerCase();
-  const blob = `${q} ${a}`;
-  const cited = sourcePageSet(sourcePages);
   const [rows] = await pool.query(
     `SELECT id, topic, person_name, caption, alt_text, textbook_page_number, file_path, source, license, media_kind
      FROM verified_images WHERE verification_status = 'verified'
      ORDER BY (textbook_page_number IS NULL), created_at`
   );
-  const textbook = [];
-  const external = [];
-  for (const row of rows) {
-    if (!matchesTopic(q, a, blob, row)) continue;
-    if (row.textbook_page_number == null) {
-      // Openly licensed image with no textbook page: the topic match is enough, so it can
-      // accompany a supplementary answer that cites no page.
-      external.push(row);
-      continue;
-    }
-    if (!pageCompatible(row.textbook_page_number, cited)) continue;
-    textbook.push(row);
-  }
-  return [...textbook, ...external].slice(0, Math.max(0, limit));
+  return selectImages(question, answer, rows, sourcePages, limit);
 }
 
 const ENTITY_TESTS = [
@@ -151,10 +214,6 @@ export function imageMatchesTopic(question, answer, row) {
   }
   if (imgPerson) return answerEntities.includes(imgPerson);
   return Boolean(topic) && topic.length > 3 && haystack.toLowerCase().includes(topic);
-}
-
-function matchesTopic(question, answer, _blob, row) {
-  return imageMatchesTopic(question, answer, row);
 }
 
 export async function getVerifiedImageRow(id) {

@@ -85,7 +85,11 @@ async function databaseMedia() {
     "Humayun was defeated and Akbar later became emperor.",
     [{ textbook_page_number: 4 }]
   );
-  check("Humayun has no approved image and does not borrow Akbar", humayun.length === 0);
+  check(
+    "Humayun does not borrow an Akbar image",
+    humayun.every((row) => !/akbar/i.test(`${row.topic} ${row.person_name || ""} ${row.caption || ""}`)),
+    humayun.map((row) => row.topic).join(" | ")
+  );
   const sher = await findVerifiedImages("Who was Sher Shah Suri?", "Sher Shah Suri defeated Humayun.", [
     { textbook_page_number: 4 },
   ]);
@@ -256,7 +260,9 @@ async function httpAccess() {
     const teacherBytes = new Uint8Array(await teacherImage.arrayBuffer());
     const imageMagic = (bytes) =>
       bytes.length >= 4 &&
-      ((bytes[0] === 0x89 && bytes[1] === 0x50) || (bytes[0] === 0x47 && bytes[1] === 0x49));
+      ((bytes[0] === 0x89 && bytes[1] === 0x50) ||
+        (bytes[0] === 0x47 && bytes[1] === 0x49) ||
+        (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff));
     check("Unauthenticated image access is rejected", anonImage.status === 401);
     check(
       "Authenticated student can load a textbook image",
