@@ -1,5 +1,35 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ImageFigure } from "./ProtectedImage.jsx";
+import { quizApi } from "../services/api.js";
 import SourceCite from "./SourceCite.jsx";
+
+function CheckpointButton({ topic }) {
+  const navigate = useNavigate();
+  const [state, setState] = useState("");
+  const start = async () => {
+    setState("Preparing…");
+    try {
+      const r = await quizApi.checkpoint(topic);
+      const started = await quizApi.start(r.quiz_id);
+      navigate(`/attempts/${started.attempt.id}`);
+    } catch (err) {
+      setState(err.code === "NO_QUESTIONS" ? "No checkpoint questions for this topic yet." : err.message);
+    }
+  };
+  return (
+    <>
+      <button type="button" className="min-h-11 border border-navy px-3 text-sm text-navy" onClick={start}>
+        Checkpoint quiz
+      </button>
+      {state ? (
+        <span className="basis-full text-xs text-muted" role="status">
+          {state}
+        </span>
+      ) : null}
+    </>
+  );
+}
 
 export default function EcontentPanel({ data, labels, language, onClose, onPdf, pdfLoading }) {
   if (!data) return null;
@@ -23,6 +53,7 @@ export default function EcontentPanel({ data, labels, language, onClose, onPdf, 
               {pdfLoading ? labels.pdfWorking : labels.downloadPdf}
             </button>
           ) : null}
+          {data.grounded && data.title && language !== "kn" ? <CheckpointButton topic={data.title} /> : null}
           <button type="button" className="min-h-11 border border-rule px-3 text-sm" onClick={onClose}>
             {labels.close}
           </button>

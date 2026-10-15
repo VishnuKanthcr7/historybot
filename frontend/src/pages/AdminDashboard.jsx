@@ -1,51 +1,82 @@
-import { useEffect, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { useState } from "react";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useApp } from "../context/AppContext.jsx";
-import { adminSummary } from "../services/api.js";
+import { Achievement, Overview, StudentsTable, TopicsAndTrends } from "../components/teacher/Analytics.jsx";
+import QuizManager from "../components/teacher/QuizManager.jsx";
+import QuestionBank from "../components/teacher/QuestionBank.jsx";
+import Reports from "../components/teacher/Reports.jsx";
+import { RangePicker, btn, istToday } from "../components/teacher/ui.jsx";
+
+const TABS = [
+  ["overview", "Overview"],
+  ["students", "Students"],
+  ["topics", "Topics & trends"],
+  ["achievement", "Achievement"],
+  ["quizzes", "Quizzes"],
+  ["questions", "Question bank"],
+  ["reports", "Reports"],
+];
+const RANGE_TABS = new Set(["overview", "students", "topics", "achievement", "reports"]);
 
 export default function AdminDashboard() {
-  const { user, ready } = useApp();
-  const [summary, setSummary] = useState(null);
-  const [error, setError] = useState("");
+  const { user, ready, logout } = useApp();
+  const [params, setParams] = useSearchParams();
+  const tab = TABS.some(([k]) => k === params.get("tab")) ? params.get("tab") : "overview";
+  const [range, setRange] = useState({ from: istToday(-29), to: istToday() });
 
-  useEffect(() => {
-    if (!ready || !user || user.role !== "admin") return;
-    let cancelled = false;
-    adminSummary()
-      .then((data) => {
-        if (!cancelled) setSummary(data);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message || "The dashboard could not be opened.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ready, user]);
-
-  if (!ready) {
-    return <p className="p-8 text-sm text-muted">Loading...</p>;
-  }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!ready) return <p className="p-8 text-sm text-muted">Loading...</p>;
+  if (!user) return <Navigate to="/teacher/login" replace />;
   if (user.role !== "admin") return <Navigate to="/" replace />;
 
   return (
-    <div className="min-h-screen bg-paper px-4 py-10 font-sans text-ink">
-      <div className="mx-auto max-w-2xl rounded-3xl border border-rule bg-cream p-6">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brass">Teacher</p>
-        <h1 className="mt-1 font-serif text-3xl text-navy">Dashboard</h1>
-        <p className="mt-3 text-sm">
-          Signed in as <strong>{user.display_name}</strong>
-        </p>
-        <p className="mt-4 text-sm leading-relaxed">{summary?.note || error || "Loading dashboard..."}</p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <Link to="/" className="min-h-11 rounded-full bg-navy px-4 py-2 text-sm text-cream">
-            Homepage
-          </Link>
-          <Link to="/chat?fresh=1" className="min-h-11 rounded-full border border-navy px-4 py-2 text-sm text-navy">
-            Start Learning
-          </Link>
-        </div>
+    <div className="min-h-dvh bg-paper px-3 py-6 font-sans text-ink sm:px-6">
+      <div className="mx-auto max-w-6xl">
+        <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brass">Teacher</p>
+            <h1 className="mt-1 font-serif text-3xl text-navy">Dashboard</h1>
+            <p className="text-sm text-muted">Signed in as {user.display_name}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/chat?fresh=1" className={`${btn} border border-navy text-navy`}>
+              Start Learning
+            </Link>
+            <Link to="/" className={`${btn} border border-rule bg-cream text-navy`}>
+              Homepage
+            </Link>
+            <button type="button" onClick={() => logout()} className={`${btn} border border-rule bg-cream text-navy`}>
+              Log out
+            </button>
+          </div>
+        </header>
+        <nav className="-mx-3 mb-4 overflow-x-auto px-3" aria-label="Dashboard sections">
+          <div role="tablist" className="flex min-w-max gap-2">
+            {TABS.map(([key, label]) => (
+              <button
+                key={key}
+                role="tab"
+                type="button"
+                aria-selected={tab === key}
+                onClick={() => setParams({ tab: key })}
+                className={`${btn} ${tab === key ? "bg-navy text-cream" : "border border-rule bg-cream text-navy"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </nav>
+        {RANGE_TABS.has(tab) ? (
+          <div className="mb-4">
+            <RangePicker range={range} onChange={setRange} />
+          </div>
+        ) : null}
+        {tab === "overview" ? <Overview range={range} /> : null}
+        {tab === "students" ? <StudentsTable range={range} /> : null}
+        {tab === "topics" ? <TopicsAndTrends range={range} /> : null}
+        {tab === "achievement" ? <Achievement range={range} /> : null}
+        {tab === "quizzes" ? <QuizManager /> : null}
+        {tab === "questions" ? <QuestionBank /> : null}
+        {tab === "reports" ? <Reports range={range} /> : null}
       </div>
     </div>
   );

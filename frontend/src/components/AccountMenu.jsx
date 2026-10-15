@@ -33,6 +33,14 @@ export default function AccountMenu({ variant = "chat", teacherLabel = "Teacher 
 
   return (
     <>
+      <Link to="/quizzes" className={className}>
+        Quizzes
+      </Link>
+      {home ? (
+        <Link to="/activities" className={className}>
+          Activities
+        </Link>
+      ) : null}
       {user.role === "admin" ? (
         <Link to="/admin" className={className}>
           Dashboard

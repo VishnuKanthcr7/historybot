@@ -1,0 +1,1253 @@
+[
+ {
+  "key": "ahom-founder",
+  "qtype": "fill_blank",
+  "topic": "Ahom dynasty",
+  "difficulty": "easy",
+  "prompt": "The Ahom dynasty was founded by ______ in 1228.",
+  "options": null,
+  "answer": [
+   "sukaphaa"
+  ],
+  "explanation": "The textbook says Sukaphaa founded the Ahom dynasty in 1228.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf3_tb1_02",
+  "source_excerpt": "The Ahom dynasty was founded by Sukaphaa in 1228.",
+  "status": "draft",
+  "textbook_page": 1,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "ahom-capital",
+  "qtype": "mcq",
+  "topic": "Ahom dynasty",
+  "difficulty": "easy",
+  "prompt": "What was the first capital of the Ahoms?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Guwahati"
+   },
+   {
+    "id": "b",
+    "text": "Charaideo"
+   },
+   {
+    "id": "c",
+    "text": "Itakhuli"
+   },
+   {
+    "id": "d",
+    "text": "Saraighat"
+   }
+  ],
+  "answer": "b",
+  "explanation": "The first Ahom capital was Charaideo.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf3_tb1_02",
+  "source_excerpt": "Their first capital was Charaideo.",
+  "status": "draft",
+  "textbook_page": 1,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "ahom-borphukan",
+  "qtype": "mcq",
+  "topic": "Ahom dynasty",
+  "difficulty": "medium",
+  "prompt": "What was the post of commander-in-chief of the Ahom army called?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Borphukan"
+   },
+   {
+    "id": "b",
+    "text": "Peshwa"
+   },
+   {
+    "id": "c",
+    "text": "Hawaldar"
+   },
+   {
+    "id": "d",
+    "text": "Mansabdar"
+   }
+  ],
+  "answer": "a",
+  "explanation": "Lachit became commander-in-chief; the post was called Borphukan.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf4_tb2_01",
+  "source_excerpt": "This post was called ‘Borphukan’.",
+  "status": "draft",
+  "textbook_page": 2,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "ahom-saraighat",
+  "qtype": "true_false",
+  "topic": "Ahom dynasty",
+  "difficulty": "medium",
+  "prompt": "The Ahoms won the naval battle at Saraighat in 1671.",
+  "options": null,
+  "answer": true,
+  "explanation": "At Saraighat in 1671 the Ahoms were victorious.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf4_tb2_02",
+  "source_excerpt": "a significant naval attack took place at Saraighat in 1671, the Ahoms were victorious.",
+  "status": "draft",
+  "textbook_page": 2,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "babur-panipat1",
+  "qtype": "mcq",
+  "topic": "Babur and the Mughal dynasty",
+  "difficulty": "easy",
+  "prompt": "Whom did Babur defeat in the First Battle of Panipat in 1526?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Hemu"
+   },
+   {
+    "id": "b",
+    "text": "Ibrahim Lodi"
+   },
+   {
+    "id": "c",
+    "text": "Rana Pratap"
+   },
+   {
+    "id": "d",
+    "text": "Sher Shah"
+   }
+  ],
+  "answer": "b",
+  "explanation": "Babur defeated Ibrahim Lodi, the Sultan of Delhi, in 1526 and founded the Mughal dynasty.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf5_tb3_04",
+  "source_excerpt": "He defeated the sultan of Delhi Ibrahim Lodi in the First Battle of Panipat in 1526",
+  "status": "published",
+  "textbook_page": 3,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "babur-language",
+  "qtype": "fill_blank",
+  "topic": "Babur and the Mughal dynasty",
+  "difficulty": "medium",
+  "prompt": "Babar wrote his autobiography in the ______ language.",
+  "options": null,
+  "answer": [
+   "turkish"
+  ],
+  "explanation": "The Baburnama was written in Turkish.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf5_tb3_02",
+  "source_excerpt": "Babar wrote his autobiography in the Turkish language.",
+  "status": "published",
+  "textbook_page": 3,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "babur-age",
+  "qtype": "true_false",
+  "topic": "Babur and the Mughal dynasty",
+  "difficulty": "easy",
+  "prompt": "Babur became king at the age of 11 years.",
+  "options": null,
+  "answer": true,
+  "explanation": "After his father's death, Babur became king at 11.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf5_tb3_04",
+  "source_excerpt": "Babur had to ascend the throne at the age of 11 years.",
+  "status": "published",
+  "textbook_page": 3,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "humayun-son",
+  "qtype": "true_false",
+  "topic": "Humayun",
+  "difficulty": "easy",
+  "prompt": "Humayun was the eldest son of Babur.",
+  "options": null,
+  "answer": true,
+  "explanation": "Humayun was the second Mughal emperor and Babur's eldest son.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf5_tb3_05",
+  "source_excerpt": "Humayun, the second emperor of the Mughal dynasty, was the eldest son of Babur.",
+  "status": "published",
+  "textbook_page": 3,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shershah-name",
+  "qtype": "mcq",
+  "topic": "Sher Shah and his administration",
+  "difficulty": "easy",
+  "prompt": "What was Sher Shah's original name?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Farid Khan"
+   },
+   {
+    "id": "b",
+    "text": "Bairam Khan"
+   },
+   {
+    "id": "c",
+    "text": "Asaf Khan"
+   },
+   {
+    "id": "d",
+    "text": "Bahar Khan"
+   }
+  ],
+  "answer": "a",
+  "explanation": "Sher Shah was born Farid Khan.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf6_tb4_02",
+  "source_excerpt": "His original name was Farid Khan.",
+  "status": "published",
+  "textbook_page": 4,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shershah-title",
+  "qtype": "mcq",
+  "topic": "Sher Shah and his administration",
+  "difficulty": "medium",
+  "prompt": "Which title did Sher Shah earn for his impartial justice?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Alamgir"
+   },
+   {
+    "id": "b",
+    "text": "Chatrapati"
+   },
+   {
+    "id": "c",
+    "text": "Sultan of fair justice"
+   },
+   {
+    "id": "d",
+    "text": "Shivaji II"
+   }
+  ],
+  "answer": "c",
+  "explanation": "For his impartial justice he was called the 'Sultan of fair justice'.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf7_tb5_02",
+  "source_excerpt": "Hence he had earned the title “Sultan of fair justice”.",
+  "status": "published",
+  "textbook_page": 5,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shershah-coin",
+  "qtype": "mcq",
+  "topic": "Sher Shah and his administration",
+  "difficulty": "medium",
+  "prompt": "Which silver coin did Sher Shah introduce?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Dam"
+   },
+   {
+    "id": "b",
+    "text": "Rupiya"
+   },
+   {
+    "id": "c",
+    "text": "Jital"
+   },
+   {
+    "id": "d",
+    "text": "Tanka"
+   }
+  ],
+  "answer": "b",
+  "explanation": "Sher Shah introduced the Dam (copper) and the Rupiya (silver).",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf7_tb5_02",
+  "source_excerpt": "Sher Shah introduced a new coin the Dam (Copper) and Rupiya (Silver) into circulation.",
+  "status": "published",
+  "textbook_page": 5,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shershah-sarais",
+  "qtype": "true_false",
+  "topic": "Sher Shah and his administration",
+  "difficulty": "medium",
+  "prompt": "Sher Shah built 1700 sarais (rest houses) along his highways.",
+  "options": null,
+  "answer": true,
+  "explanation": "Shade trees were planted and 1700 sarais were built along the highways.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf6_tb4_04",
+  "source_excerpt": "1700 sarais (rest houses of travellers) were constructed.",
+  "status": "published",
+  "textbook_page": 4,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shershah-court",
+  "qtype": "true_false",
+  "topic": "Sher Shah and his administration",
+  "difficulty": "hard",
+  "prompt": "Sher Shah held his court every Friday morning.",
+  "options": null,
+  "answer": false,
+  "explanation": "The textbook says he held his court every Wednesday evening.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf7_tb5_02",
+  "source_excerpt": "He conducted his court every Wednesday evening.",
+  "status": "published",
+  "textbook_page": 5,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "akbar-birth",
+  "qtype": "mcq",
+  "topic": "Akbar",
+  "difficulty": "easy",
+  "prompt": "Where was Akbar born?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Agra"
+   },
+   {
+    "id": "b",
+    "text": "Delhi"
+   },
+   {
+    "id": "c",
+    "text": "Amarkot"
+   },
+   {
+    "id": "d",
+    "text": "Kabul"
+   }
+  ],
+  "answer": "c",
+  "explanation": "Akbar was born in Amarkot in Sindh province.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf7_tb5_03",
+  "source_excerpt": "Akbar, was born in Amarkot in Sindh province.",
+  "status": "published",
+  "textbook_page": 5,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "akbar-age",
+  "qtype": "mcq",
+  "topic": "Akbar",
+  "difficulty": "medium",
+  "prompt": "How old was Akbar when he came to power?",
+  "options": [
+   {
+    "id": "a",
+    "text": "11 years"
+   },
+   {
+    "id": "b",
+    "text": "14 years"
+   },
+   {
+    "id": "c",
+    "text": "19 years"
+   },
+   {
+    "id": "d",
+    "text": "20 years"
+   }
+  ],
+  "answer": "b",
+  "explanation": "Akbar was only 14; Bairam Khan ruled on his behalf at first.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf7_tb5_04",
+  "source_excerpt": "When Akbar assumed power, he was only 14 years old.",
+  "status": "published",
+  "textbook_page": 5,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "akbar-panipat2",
+  "qtype": "mcq",
+  "topic": "Akbar",
+  "difficulty": "medium",
+  "prompt": "The Second Battle of Panipat (1556) was fought between the Mughals and whom?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Hemu"
+   },
+   {
+    "id": "b",
+    "text": "Ibrahim Lodi"
+   },
+   {
+    "id": "c",
+    "text": "Ahmed Shah Abdali"
+   },
+   {
+    "id": "d",
+    "text": "Rana Sangramsingh"
+   }
+  ],
+  "answer": "a",
+  "explanation": "Hemu fought the Mughals at Panipat in 1556.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf7_tb5_04",
+  "source_excerpt": "This led to the terrific battle at Panipat in 1556 between Hemu and the Mughals.",
+  "status": "published",
+  "textbook_page": 5,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "akbar-dinilahi",
+  "qtype": "fill_blank",
+  "topic": "Akbar",
+  "difficulty": "medium",
+  "prompt": "Akbar established a new religious order named ______ in 1582.",
+  "options": null,
+  "answer": [
+   "din-e-ilahi",
+   "din e ilahi",
+   "dine ilahi",
+   "din-i-ilahi",
+   "din i ilahi"
+  ],
+  "explanation": "Din-e-Ilahi was based on 'Peace with all' (sal-i-kul).",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf8_tb6_03",
+  "source_excerpt": "He established a new religious order named Din-e-Ilahi in 1582.",
+  "status": "published",
+  "textbook_page": 6,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "akbar-jizya",
+  "qtype": "true_false",
+  "topic": "Akbar",
+  "difficulty": "easy",
+  "prompt": "Akbar abolished the Jizya tax on Hindus.",
+  "options": null,
+  "answer": true,
+  "explanation": "This was part of Akbar's policy of tolerance.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf8_tb6_04",
+  "source_excerpt": "He abolished the ‘Jizya tax’ on Hindus.",
+  "status": "published",
+  "textbook_page": 6,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "akbar-mansab",
+  "qtype": "mcq",
+  "topic": "Mansabdari system",
+  "difficulty": "medium",
+  "prompt": "In Akbar's army, what were the supervisors of the ranks (mansabs) called?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Subhas"
+   },
+   {
+    "id": "b",
+    "text": "Mansabdars"
+   },
+   {
+    "id": "c",
+    "text": "Kotwals"
+   },
+   {
+    "id": "d",
+    "text": "Hawaldars"
+   }
+  ],
+  "answer": "b",
+  "explanation": "The ranks were mansabs and their supervisors were mansabdars.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf9_tb7_05",
+  "source_excerpt": "These were called ‘Mansabs’ and its supervisors were called Mansabdars.",
+  "status": "published",
+  "textbook_page": 7,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "akbar-dagh",
+  "qtype": "mcq",
+  "topic": "Mansabdari system",
+  "difficulty": "hard",
+  "prompt": "What was the department that stamped the horses called?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Diwan-e-Arij"
+   },
+   {
+    "id": "b",
+    "text": "dagh-mahali"
+   },
+   {
+    "id": "c",
+    "text": "Ibadat Khana"
+   },
+   {
+    "id": "d",
+    "text": "Daftar Khana"
+   }
+  ],
+  "answer": "b",
+  "explanation": "Horses were stamped by the dagh-mahali department.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf9_tb7_05",
+  "source_excerpt": "There was a separate department to stamp the horses known as ‘dagh-mahali’.",
+  "status": "published",
+  "textbook_page": 7,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "akbar-zabti",
+  "qtype": "true_false",
+  "topic": "Akbar's revenue system",
+  "difficulty": "medium",
+  "prompt": "Akbar brought the Zabti system into practice.",
+  "options": null,
+  "answer": true,
+  "explanation": "The Zabti system measured land with bamboo sticks and iron hooks.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf9_tb7_05",
+  "source_excerpt": "He brought the Zabti system into practice.",
+  "status": "published",
+  "textbook_page": 7,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "akbar-subhas",
+  "qtype": "true_false",
+  "topic": "Akbar's administration",
+  "difficulty": "medium",
+  "prompt": "Akbar's provinces were called 'Parganas'.",
+  "options": null,
+  "answer": false,
+  "explanation": "Akbar's provinces were called Subhas (subahs).",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf9_tb7_04",
+  "source_excerpt": "They were called ‘Subhas’.",
+  "status": "published",
+  "textbook_page": 7,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shahjahan-taj",
+  "qtype": "mcq",
+  "topic": "Shah Jahan and Mughal architecture",
+  "difficulty": "easy",
+  "prompt": "Who built the Taj Mahal?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Akbar"
+   },
+   {
+    "id": "b",
+    "text": "Shah Jahan"
+   },
+   {
+    "id": "c",
+    "text": "Jahangir"
+   },
+   {
+    "id": "d",
+    "text": "Aurangzeb"
+   }
+  ],
+  "answer": "b",
+  "explanation": "Shah Jahan built it in memory of his wife Mumtaz.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf10_tb8_04",
+  "source_excerpt": "Shah Jahan constructed the famous ‘Taj Mahal’ in Agra in memory of his beloved wife, Mumtaz.",
+  "status": "published",
+  "textbook_page": 8,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shahjahan-golden",
+  "qtype": "true_false",
+  "topic": "Shah Jahan and Mughal architecture",
+  "difficulty": "medium",
+  "prompt": "Shah Jahan's period is called the 'Golden Age of Mughal Art and Architecture'.",
+  "options": null,
+  "answer": true,
+  "explanation": "The Taj Mahal and the Red Fort are among his works.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf10_tb8_04",
+  "source_excerpt": "his period is referred to as the ‘Golden Age of Mughal Art and Architecture’.",
+  "status": "published",
+  "textbook_page": 8,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "aurangzeb-title",
+  "qtype": "mcq",
+  "topic": "Aurangzeb",
+  "difficulty": "medium",
+  "prompt": "Which title did Aurangzeb take when he seized power?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Badshah-i-Hind"
+   },
+   {
+    "id": "b",
+    "text": "Alamgir"
+   },
+   {
+    "id": "c",
+    "text": "Chatrapati"
+   },
+   {
+    "id": "d",
+    "text": "Sultan of fair justice"
+   }
+  ],
+  "answer": "b",
+  "explanation": "After imprisoning Shah Jahan he took the title Alamgir.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf11_tb9_02",
+  "source_excerpt": "he earned the title Alamgir",
+  "status": "published",
+  "textbook_page": 9,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "lit-ain",
+  "qtype": "mcq",
+  "topic": "Mughal literature",
+  "difficulty": "medium",
+  "prompt": "Who wrote Ain-i-Akbari and Akbarnama?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Badauni"
+   },
+   {
+    "id": "b",
+    "text": "Faizi"
+   },
+   {
+    "id": "c",
+    "text": "Abul Fazl"
+   },
+   {
+    "id": "d",
+    "text": "Todar Mal"
+   }
+  ],
+  "answer": "c",
+  "explanation": "Abul Fazl of Akbar's court wrote both in Persian.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf12_tb10_05",
+  "source_excerpt": "Abul Fazl, who was in Akbar’s court, wrote Ain-i-Akbari and Akbarnama in Persian.",
+  "status": "published",
+  "textbook_page": 10,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shivaji-mother",
+  "qtype": "fill_blank",
+  "topic": "Shivaji",
+  "difficulty": "easy",
+  "prompt": "Shivaji's mother was ______.",
+  "options": null,
+  "answer": [
+   "jijabai"
+  ],
+  "explanation": "Jijabai taught Shivaji honesty and sincerity.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf15_tb13_01",
+  "source_excerpt": "His mother, Jijabai, was a pious woman",
+  "status": "published",
+  "textbook_page": 13,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shivaji-born",
+  "qtype": "mcq",
+  "topic": "Shivaji",
+  "difficulty": "easy",
+  "prompt": "Where was Shivaji born?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Raigad"
+   },
+   {
+    "id": "b",
+    "text": "Shivneri"
+   },
+   {
+    "id": "c",
+    "text": "Torna"
+   },
+   {
+    "id": "d",
+    "text": "Agra"
+   }
+  ],
+  "answer": "b",
+  "explanation": "Shivaji was born at Shivneri in Pune district.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf15_tb13_01",
+  "source_excerpt": "Shivaji was born in Shivneri of Pune district.",
+  "status": "published",
+  "textbook_page": 13,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shivaji-guru",
+  "qtype": "mcq",
+  "topic": "Shivaji",
+  "difficulty": "medium",
+  "prompt": "Who was Shivaji's guru who trained him in armed warfare?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Dadoji Kondadeo"
+   },
+   {
+    "id": "b",
+    "text": "Shahaji Bhonsle"
+   },
+   {
+    "id": "c",
+    "text": "Jaisingh"
+   },
+   {
+    "id": "d",
+    "text": "Balaji Vishwanath"
+   }
+  ],
+  "answer": "a",
+  "explanation": "Dadoji Kondadeo trained him in warfare and the scriptures.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf15_tb13_02",
+  "source_excerpt": "Dadoji Kondadeo was Shivaji’s guru",
+  "status": "published",
+  "textbook_page": 13,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shivaji-purandar",
+  "qtype": "true_false",
+  "topic": "Shivaji",
+  "difficulty": "hard",
+  "prompt": "Under the Treaty of Purandar, Shivaji surrendered 23 forts.",
+  "options": null,
+  "answer": true,
+  "explanation": "He gave up 23 forts and land yielding 16 lakhs a year.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf15_tb13_04",
+  "source_excerpt": "Shivaji surrendered 23 of his forts",
+  "status": "published",
+  "textbook_page": 13,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shivaji-coronation",
+  "qtype": "mcq",
+  "topic": "Shivaji",
+  "difficulty": "medium",
+  "prompt": "Where did Shivaji's coronation take place in 1674?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Pune"
+   },
+   {
+    "id": "b",
+    "text": "Raigad"
+   },
+   {
+    "id": "c",
+    "text": "Pratapgad"
+   },
+   {
+    "id": "d",
+    "text": "Sinhagad"
+   }
+  ],
+  "answer": "b",
+  "explanation": "He was crowned at Raigad and given the title Chatrapati.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf16_tb14_01",
+  "source_excerpt": "Shivaji’s coronation took place in the year 1674 at Raigad.",
+  "status": "published",
+  "textbook_page": 14,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shivaji-ministers",
+  "qtype": "mcq",
+  "topic": "Shivaji's administration",
+  "difficulty": "medium",
+  "prompt": "What were the ministers in Shivaji's central government called?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Mansabdars"
+   },
+   {
+    "id": "b",
+    "text": "Ashapradhans"
+   },
+   {
+    "id": "c",
+    "text": "Peshwas"
+   },
+   {
+    "id": "d",
+    "text": "Deshmukhs"
+   }
+  ],
+  "answer": "b",
+  "explanation": "The Ashapradhans assisted the king.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf16_tb14_02",
+  "source_excerpt": "There were ministers known as Ashapradhans in the central government",
+  "status": "published",
+  "textbook_page": 14,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shivaji-ryotwari",
+  "qtype": "true_false",
+  "topic": "Shivaji's administration",
+  "difficulty": "medium",
+  "prompt": "Shivaji's revenue system was the Ryotwari system, which was favourable to farmers.",
+  "options": null,
+  "answer": true,
+  "explanation": "He also abolished the jahagir revenue system.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf16_tb14_02",
+  "source_excerpt": "Shivaji’s system of revenue collection was the Ryotwari system, favorable to farmers.",
+  "status": "published",
+  "textbook_page": 14,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "shivaji-language",
+  "qtype": "true_false",
+  "topic": "Shivaji's administration",
+  "difficulty": "easy",
+  "prompt": "Persian was the language of administration in Shivaji's kingdom.",
+  "options": null,
+  "answer": false,
+  "explanation": "Marathi was the language of administration under Shivaji (Persian was used by the Mughals).",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf16_tb14_02",
+  "source_excerpt": "Marathi was the language of administration.",
+  "status": "published",
+  "textbook_page": 14,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "peshwa-bajirao",
+  "qtype": "mcq",
+  "topic": "The Peshwas",
+  "difficulty": "medium",
+  "prompt": "How old was Baji Rao I when he became Peshwa?",
+  "options": [
+   {
+    "id": "a",
+    "text": "14"
+   },
+   {
+    "id": "b",
+    "text": "19"
+   },
+   {
+    "id": "c",
+    "text": "20"
+   },
+   {
+    "id": "d",
+    "text": "25"
+   }
+  ],
+  "answer": "b",
+  "explanation": "Baji Rao I was only 19 when appointed Peshwa.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf17_tb15_04",
+  "source_excerpt": "Although he was only 19 years old, he was an unparalleled warrior.",
+  "status": "published",
+  "textbook_page": 15,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "panipat3",
+  "qtype": "mcq",
+  "topic": "The Peshwas",
+  "difficulty": "hard",
+  "prompt": "Who was defeated in the Third Battle of Panipat in 1761?",
+  "options": [
+   {
+    "id": "a",
+    "text": "Ahmed Shah Abdali"
+   },
+   {
+    "id": "b",
+    "text": "Balaji Baji Rao"
+   },
+   {
+    "id": "c",
+    "text": "Madhav Rao I"
+   },
+   {
+    "id": "d",
+    "text": "Shahu"
+   }
+  ],
+  "answer": "b",
+  "explanation": "The Maratha army under Balaji Baji Rao lost to Ahmed Shah Abdali.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf18_tb16_03",
+  "source_excerpt": "Balaji Baji Rao fought with his army in the Third Battle of Panipat in 1761 and was defeated.",
+  "status": "published",
+  "textbook_page": 16,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "match-rulers",
+  "qtype": "match",
+  "topic": "Mughal and Maratha rulers",
+  "difficulty": "medium",
+  "prompt": "Match each ruler with what the textbook says about them.",
+  "options": {
+   "left": [
+    {
+     "id": "l1",
+     "text": "Sher Shah"
+    },
+    {
+     "id": "l2",
+     "text": "Akbar"
+    },
+    {
+     "id": "l3",
+     "text": "Shah Jahan"
+    },
+    {
+     "id": "l4",
+     "text": "Aurangzeb"
+    },
+    {
+     "id": "l5",
+     "text": "Shivaji"
+    }
+   ],
+   "right": [
+    {
+     "id": "r2",
+     "text": "Founded Din-e-Ilahi"
+    },
+    {
+     "id": "r3",
+     "text": "Built the Taj Mahal"
+    },
+    {
+     "id": "r1",
+     "text": "Sultan of fair justice"
+    },
+    {
+     "id": "r5",
+     "text": "Given the title Chatrapati"
+    },
+    {
+     "id": "r4",
+     "text": "Took the title Alamgir"
+    }
+   ]
+  },
+  "answer": {
+   "l1": "r1",
+   "l2": "r2",
+   "l3": "r3",
+   "l4": "r4",
+   "l5": "r5"
+  },
+  "explanation": "Each pair comes from the textbook chapter.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf7_tb5_02",
+  "source_excerpt": "“Sultan of fair justice” | He established a new religious order named Din-e-Ilahi in 1582. | Shah Jahan constructed the famous ‘Taj Mahal’ | he earned the title Alamgir | There he was given the title Chatrapati",
+  "status": "published",
+  "extra_sources": [
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf7_tb5_02",
+    "excerpt": "“Sultan of fair justice”"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf8_tb6_03",
+    "excerpt": "He established a new religious order named Din-e-Ilahi in 1582."
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf10_tb8_04",
+    "excerpt": "Shah Jahan constructed the famous ‘Taj Mahal’"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf11_tb9_02",
+    "excerpt": "he earned the title Alamgir"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf16_tb14_02",
+    "excerpt": "There he was given the title Chatrapati"
+   }
+  ],
+  "textbook_page": 5,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "match-books",
+  "qtype": "match",
+  "topic": "Mughal literature",
+  "difficulty": "medium",
+  "prompt": "Match each book with its author.",
+  "options": {
+   "left": [
+    {
+     "id": "l1",
+     "text": "Baburnama"
+    },
+    {
+     "id": "l2",
+     "text": "Tuzk-i-Jahangiri"
+    },
+    {
+     "id": "l3",
+     "text": "Akbarnama"
+    },
+    {
+     "id": "l4",
+     "text": "Ramacharitamanas"
+    },
+    {
+     "id": "l5",
+     "text": "Sursagar"
+    }
+   ],
+   "right": [
+    {
+     "id": "r2",
+     "text": "Jahangir"
+    },
+    {
+     "id": "r3",
+     "text": "Abul Fazl"
+    },
+    {
+     "id": "r4",
+     "text": "Tulsidas"
+    },
+    {
+     "id": "r5",
+     "text": "Surdas"
+    },
+    {
+     "id": "r1",
+     "text": "Babur"
+    }
+   ]
+  },
+  "answer": {
+   "l1": "r1",
+   "l2": "r2",
+   "l3": "r3",
+   "l4": "r4",
+   "l5": "r5"
+  },
+  "explanation": "Babur and Jahangir wrote autobiographies; Abul Fazl was Akbar's court historian.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf12_tb10_05",
+  "source_excerpt": "Babur and Jahangir were scholars and they wrote their autobiographies, Baburnama and Tuzk-i-Jahangiri. | Baburnama and Tuzk-i-Jahangiri. | wrote Ain-i-Akbari and Akbarnama in Persian | Ramacharitamanas by Tulsidas | Sursagar by Surdas",
+  "status": "published",
+  "extra_sources": [
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf12_tb10_05",
+    "excerpt": "Babur and Jahangir were scholars and they wrote their autobiographies, Baburnama and Tuzk-i-Jahangiri."
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf12_tb10_05",
+    "excerpt": "Baburnama and Tuzk-i-Jahangiri."
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf12_tb10_05",
+    "excerpt": "wrote Ain-i-Akbari and Akbarnama in Persian"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf13_tb11_01",
+    "excerpt": "Ramacharitamanas by Tulsidas"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf13_tb11_01",
+    "excerpt": "Sursagar by Surdas"
+   }
+  ],
+  "textbook_page": 10,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "order-battles",
+  "qtype": "order",
+  "topic": "Timeline",
+  "difficulty": "medium",
+  "prompt": "Put these events in time order (earliest first).",
+  "options": [
+   {
+    "id": "i5",
+    "text": "Third Battle of Panipat (1761)"
+   },
+   {
+    "id": "i4",
+    "text": "Shivaji's coronation at Raigad (1674)"
+   },
+   {
+    "id": "i2",
+    "text": "Second Battle of Panipat (1556)"
+   },
+   {
+    "id": "i3",
+    "text": "Akbar founds Din-e-Ilahi (1582)"
+   },
+   {
+    "id": "i1",
+    "text": "First Battle of Panipat (1526)"
+   }
+  ],
+  "answer": [
+   "i1",
+   "i2",
+   "i3",
+   "i4",
+   "i5"
+  ],
+  "explanation": "1526 → 1556 → 1582 → 1674 → 1761.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf5_tb3_04",
+  "source_excerpt": "First Battle of Panipat in 1526 | battle at Panipat in 1556 | Din-e-Ilahi in 1582 | coronation took place in the year 1674 at Raigad | Third Battle of Panipat in 1761",
+  "status": "published",
+  "extra_sources": [
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf5_tb3_04",
+    "excerpt": "First Battle of Panipat in 1526"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf7_tb5_04",
+    "excerpt": "battle at Panipat in 1556"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf8_tb6_03",
+    "excerpt": "Din-e-Ilahi in 1582"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf16_tb14_01",
+    "excerpt": "coronation took place in the year 1674 at Raigad"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf18_tb16_03",
+    "excerpt": "Third Battle of Panipat in 1761"
+   }
+  ],
+  "textbook_page": 3,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "order-mughals",
+  "qtype": "order",
+  "topic": "Timeline",
+  "difficulty": "easy",
+  "prompt": "Put these Mughal emperors in the order they ruled (first to last).",
+  "options": [
+   {
+    "id": "i3",
+    "text": "Akbar"
+   },
+   {
+    "id": "i5",
+    "text": "Shah Jahan"
+   },
+   {
+    "id": "i1",
+    "text": "Babur"
+   },
+   {
+    "id": "i4",
+    "text": "Jahangir"
+   },
+   {
+    "id": "i2",
+    "text": "Humayun"
+   }
+  ],
+  "answer": [
+   "i1",
+   "i2",
+   "i3",
+   "i4",
+   "i5"
+  ],
+  "explanation": "Babur → Humayun → Akbar → Jahangir → Shah Jahan.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf5_tb3_04",
+  "source_excerpt": "established the Mughal dynasty in India | Humayun, the second emperor of the Mughal dynasty | Humayun was his father. | After Akbar, his elder son Jahangir ruled | Shahjahan became the king after the death of his father.",
+  "status": "published",
+  "extra_sources": [
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf5_tb3_04",
+    "excerpt": "established the Mughal dynasty in India"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf5_tb3_05",
+    "excerpt": "Humayun, the second emperor of the Mughal dynasty"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf7_tb5_04",
+    "excerpt": "Humayun was his father."
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf10_tb8_02",
+    "excerpt": "After Akbar, his elder son Jahangir ruled"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf10_tb8_02",
+    "excerpt": "Shahjahan became the king after the death of his father."
+   }
+  ],
+  "textbook_page": 3,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ },
+ {
+  "key": "order-ahom",
+  "qtype": "order",
+  "topic": "Timeline",
+  "difficulty": "hard",
+  "prompt": "Put these Ahom events in time order (earliest first).",
+  "options": [
+   {
+    "id": "i4",
+    "text": "Last Ahom–Mughal battle (1682)"
+   },
+   {
+    "id": "i1",
+    "text": "Sukaphaa founds the Ahom dynasty (1228)"
+   },
+   {
+    "id": "i2",
+    "text": "Udayaditya Singha becomes king (1670)"
+   },
+   {
+    "id": "i3",
+    "text": "Ahom victory at Saraighat (1671)"
+   }
+  ],
+  "answer": [
+   "i1",
+   "i2",
+   "i3",
+   "i4"
+  ],
+  "explanation": "1228 → 1670 → 1671 → 1682.",
+  "source_chunk_id": "ktbs2026_en_ch17_pdf3_tb1_02",
+  "source_excerpt": "founded by Sukaphaa in 1228 | Udayaditya Singha ascended the throne in 1670 | Saraighat in 1671 | In 1682, under the rule of Gadadhar Singha, the last battle took place",
+  "status": "draft",
+  "extra_sources": [
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf3_tb1_02",
+    "excerpt": "founded by Sukaphaa in 1228"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf4_tb2_02",
+    "excerpt": "Udayaditya Singha ascended the throne in 1670"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf4_tb2_02",
+    "excerpt": "Saraighat in 1671"
+   },
+   {
+    "chunk_id": "ktbs2026_en_ch17_pdf5_tb3_01",
+    "excerpt": "In 1682, under the rule of Gadadhar Singha, the last battle took place"
+   }
+  ],
+  "textbook_page": 1,
+  "source_document": "KTBS Class 9 Social Science Part 2 (English) 2026-27, Chapter 17"
+ }
+]

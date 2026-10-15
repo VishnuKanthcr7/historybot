@@ -24,10 +24,11 @@ function friendlyMessage(code, fallback) {
     case "INVALID_JSON":
       return "Please enter a valid question.";
     case "VALIDATION_ERROR":
-      return "Please enter a valid question.";
+      return fallback && fallback !== "Invalid request." ? fallback : "Please enter a valid question.";
     case "SESSION_NOT_FOUND":
     case "CONVERSATION_NOT_FOUND":
     case "FORBIDDEN":
+      if (fallback && /teacher|admin/i.test(fallback)) return fallback;
       return "This chat could not be opened. Start a new chat to continue.";
     case "RATE_LIMITED":
       return fallback || "Too many attempts. Please wait a moment.";
@@ -233,6 +234,69 @@ export async function fetchProtectedImage(id) {
 
 export function checkHealth() {
   return request("/health");
+}
+
+// ---------- Quizzes and activities (students) ----------
+function qs(params = {}) {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") sp.set(k, String(v));
+  const text = sp.toString();
+  return text ? `?${text}` : "";
+}
+
+export const quizApi = {
+  list: (filters) => request(`/quizzes${qs(filters)}`),
+  start: (quizId) => request(`/quizzes/${quizId}/attempts`, { method: "POST", body: JSON.stringify({}) }),
+  attempt: (attemptId) => request(`/attempts/${attemptId}`),
+  autosave: (attemptId, responses) =>
+    request(`/attempts/${attemptId}/autosave`, { method: "POST", body: JSON.stringify({ responses }) }),
+  submit: (attemptId, responses) =>
+    request(`/attempts/${attemptId}/submit`, { method: "POST", body: JSON.stringify({ responses }) }),
+  history: () => request("/me/quiz-history"),
+  revision: () => request("/activities/revision", { method: "POST", body: JSON.stringify({}) }),
+  checkpoint: (topic) => request("/activities/checkpoint", { method: "POST", body: JSON.stringify({ topic }) }),
+};
+
+// ---------- Teacher tools ----------
+const post = (path, body) => request(path, { method: "POST", body: JSON.stringify(body || {}) });
+export const teacherApi = {
+  questions: (filters) => request(`/teacher/questions${qs(filters)}`),
+  createQuestion: (body) => post("/teacher/questions", body),
+  updateQuestion: (id, body) => post(`/teacher/questions/${id}`, body),
+  questionStatus: (id, status, reviewNote) => post(`/teacher/questions/${id}/status`, { status, review_note: reviewNote }),
+  passages: (filters) => request(`/teacher/passages${qs(filters)}`),
+  draftFromPassage: (body) => post("/teacher/questions/draft-from-passage", body),
+  quizzes: () => request("/teacher/quizzes"),
+  quiz: (id) => request(`/teacher/quizzes/${id}`),
+  createQuiz: (body) => post("/teacher/quizzes", body),
+  updateQuiz: (id, body) => post(`/teacher/quizzes/${id}`, body),
+  quizStatus: (id, status) => post(`/teacher/quizzes/${id}/status`, { status }),
+  results: (id) => request(`/teacher/quizzes/${id}/results`),
+  overview: (range) => request(`/teacher/analytics/overview${qs(range)}`),
+  students: (params) => request(`/teacher/analytics/students${qs(params)}`),
+  student: (id) => request(`/teacher/analytics/students/${id}`),
+  topics: (range) => request(`/teacher/analytics/topics${qs(range)}`),
+  timeseries: (params) => request(`/teacher/analytics/timeseries${qs(params)}`),
+  achievement: (params) => request(`/teacher/analytics/achievement${qs(params)}`),
+};
+
+export async function downloadReportCsv(kind, params) {
+  const tokenHeaders = authHeaders();
+  let response;
+  try {
+    response = await fetch(`${BASE}/teacher/reports/${kind}.csv${qs(params)}`, {
+      headers: { Accept: "text/csv", ...tokenHeaders },
+    });
+  } catch {
+    throw new ApiError("NETWORK", friendlyMessage("NETWORK"), 0);
+  }
+  if (!response.ok) {
+    handleUnauthorized(response.status, Boolean(tokenHeaders.Authorization));
+    const data = await response.json().catch(() => ({}));
+    const code = data?.error?.code || "INTERNAL_ERROR";
+    throw new ApiError(code, friendlyMessage(code, data?.error?.message), response.status);
+  }
+  return response.blob();
 }
 
 export { API_BASE_URL, BASE as API_BASE };

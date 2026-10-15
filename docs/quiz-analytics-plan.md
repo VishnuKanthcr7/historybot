@@ -1,0 +1,18 @@
+# Quiz engine, activities and teacher analytics — plan (Oct 2026)
+
+## Audit (HEAD 3155f5e)
+- Backend: Express (ESM, mysql2, zod). Routes in `backend/src/routes/v1.js`: auth (register = student only, login, logout, me), sessions, conversations/messages (chat via RAG), econtent + PDF, images, `GET /admin/summary` (stub). RBAC: `requireAuth`, `requireAdmin` (teacher = role `admin`). CORS allows GET/POST/OPTIONS only, so all new mutations use POST.
+- Schema: 001–004 (`anonymous_sessions`, `conversations`, `messages`, `analytics_events` keyed by session, `verified_images`, `users`, `auth_sessions`, `ai_usage`). No quiz tables, no migration log.
+- Analytics: `recordEvent` writes SESSION_STARTED / QUESTION_ASKED / ANSWER_GENERATED / E_CONTENT_GENERATED / PDF_DOWNLOADED by session, no user id. No dashboard metrics.
+- Frontend: React/Vite; `/admin` shows a one-card stub. No quiz code anywhere.
+- Tests: smoke, privacy, auth-media, module-flow, ai-usage (Node, against a test backend on :3100), Python RAG unit/provider suites with a fake model.
+
+## Design
+- Migration `scripts/sql/005_quizzes_analytics.sql` + `backend/scripts/migrate-quiz.mjs` (mysqldump first; additive; recorded in `schema_migrations`). Tables: `quiz_questions` (bank: mcq, true_false, match, order, fill_blank; topic, difficulty, source document, textbook page, chunk id, excerpt, status draft/published/archived, review metadata), `quizzes` (mode practice/assessment, activity type, pre/post flag, time limit, attempt limit, reveal setting, availability window, status, optional `owner_user_id` for personal revision/checkpoint quizzes), `quiz_items`, `quiz_attempts`, `quiz_answers`. `analytics_events` gains a nullable `user_id` (FK, cascade); quiz events store ids and scores only.
+- Scoring is server-side only (`services/quizScoring.js`): the client sends responses, never scores. Submit runs in a transaction with `SELECT … FOR UPDATE`; a second submit returns 409. Time limit = server deadline + 30 s grace; late submissions are scored from the last server autosave. Answer keys are never sent before submission; in assessment mode reveal follows `reveal_answers` (after submit / after the quiz closes / never).
+- Seed: 41 questions written from Chapter 17 passages (`data/quiz/seed_questions.json`), each with chunk id, page and a verbatim excerpt. The seeder publishes a question only if every excerpt is found verbatim in the passage; the Ahom set is deliberately left as drafts for teacher review. No AI generation.
+- Teacher drafting from passages: search the textbook passages, pick a sentence, get a deterministic fill-in-the-blank or true/false draft, edit, publish.
+- Activities reuse the engine via `activity_type`: history_challenge, beat_the_clock (timed), timeline (order), match_figure (match), find_correct, revision (personal quiz built from the student's missed topics), checkpoint (personal quiz for a topic).
+- Teacher dashboard: overview (definitions + date range), students table (no chat text, no emails in CSV), student profile, topic analytics, performance over time with n, achievement statistics (mean/median/distribution; pre/post only for quizzes flagged pre/post; descriptive, no causal claims). Quiz metrics show "tracking began <migration date>"; logins are not attendance.
+- Exports: CSV for attempts/students/topics with formula-injection guard and pseudonymous ids.
+- Not implemented (by design): digital-attitude and social-engagement scales (need validated instruments from the researcher), collaboration features, public leaderboard, student messaging, class/section membership (all teachers see all students).

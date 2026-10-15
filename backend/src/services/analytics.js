@@ -17,3 +17,16 @@ export async function recordEvent({ sessionId, conversationId, eventType, topicT
     ]
   );
 }
+
+// Learner events for quizzes and activities: user id, ids and scores only (never chat text).
+// A failure to record an event never breaks the student's request.
+export async function recordUserEvent(userId, eventType, metadata) {
+  try {
+    await pool.query(
+      `INSERT INTO analytics_events (id, user_id, event_type, metadata_json) VALUES (?, ?, ?, ?)`,
+      [newId(), userId, eventType, metadata ? JSON.stringify(metadata) : null]
+    );
+  } catch (err) {
+    console.warn("analytics_event_failed", err?.code || "error");
+  }
+}
