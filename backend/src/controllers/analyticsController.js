@@ -5,6 +5,8 @@ import { mean, median } from "../services/quizScoring.js";
 import { toCsv } from "../services/csv.js";
 import { requireUuid } from "../services/quizData.js";
 import { studentTopicStats } from "./quizController.js";
+import { pairedT } from "../services/stats.js";
+import { questionnaireCsv } from "./researchController.js";
 
 // Dates are school days in India (IST, UTC+05:30); the database stores UTC.
 const IST = "+05:30";
@@ -33,83 +35,157 @@ export function parseRange(query) {
   return { from, to, start, end };
 }
 
-async function quizTrackingBegan() {
+async function migrationApplied(id) {
   try {
-    const [rows] = await pool.query("SELECT applied_at FROM schema_migrations WHERE id = '005_quizzes_analytics'");
+    const [rows] = await pool.query("SELECT applied_at FROM schema_migrations WHERE id = ?", [id]);
     return rows[0]?.applied_at || null;
   } catch {
     return null;
   }
 }
 
+const quizTrackingBegan = () => migrationApplied("005_quizzes_analytics");
+const progressTrackingBegan = () => migrationApplied("006_progress_research");
+
+function trackingNote(began, range, what) {
+  if (!began) return `${what}: data not available (tracking has not started).`;
+  return range.start < new Date(began) ? `${what}: tracking began ${istDate(new Date(began))}; earlier days have no data.` : null;
+}
+
+// Abandoned = an untimed attempt still in progress more than 24 hours after it started (never submitted).
+const ABANDON_HOURS = 24;
+
 const round1 = (x) => (x == null || Number.isNaN(x) ? null : Math.round(x * 10) / 10);
 
 export const DEFINITIONS = {
-  students_total: "Student accounts that exist (role student), regardless of activity.",
-  active_students: "Students with at least one chat question or one submitted quiz/activity in the date range. Not attendance.",
-  chat_questions: "Questions students typed in chat in the date range (count only; chat text is never shown here).",
-  modules_generated: "Learning modules (e-content) students generated in the date range.",
-  quiz_attempts: "Quiz and activity attempts submitted in the date range.",
-  mean_percent: "Average score of submitted attempts in the date range (all attempts, equal weight).",
-  sign_ins: "Not available: past sign-ins are not stored. Sign-ins would not measure attendance anyway.",
+  students_total: "Student accounts that exist now (role student), regardless of activity.",
+  registered_in_range: "Student accounts created in the date range.",
+  active_students: "Students with at least one chat question, opened module, or submitted quiz/activity/questionnaire in the date range. Not attendance.",
+  sign_ins: "Successful sign-ins in the date range (recorded since progress tracking began). A sign-in is not attendance.",
+  chat_questions: "Questions students typed in chat in the date range (count only; chat text is never shown).",
+  modules_generated: "Learning modules students generated in the date range.",
+  modules_opened: "Distinct student-module pairs first opened in the date range (refreshing does not count again).",
+  modules_completed: "Modules marked complete in the date range: the student clicked 'Mark complete' or submitted the module's checkpoint quiz. Opening or downloading is not completion.",
+  pdf_downloads: "Module PDF downloads by students in the date range (each download counts).",
+  quiz_attempts: "Quiz and activity attempts finished (submitted or timed out) in the date range.",
+  timed_out: "Finished attempts closed by the timer (scored from the last autosave).",
+  abandoned: "Untimed attempts still in progress more than 24 hours after they started (started in the date range).",
+  assessments_submitted: "Finished attempts on teacher quizzes in assessment mode in the date range.",
+  mean_percent: "Average achievement: mean percent of the FIRST finished attempt per student per teacher assessment in the date range. Practice and personal activities are excluded.",
+  practice_mean_percent: "Mean percent of all finished practice quizzes and activities in the date range.",
 };
+
+const round2 = (x) => (x == null || Number.isNaN(x) ? null : Math.round(x * 100) / 100);
+
+async function one(sql, params) {
+  const [[row]] = await pool.query(sql, params);
+  return row;
+}
+
+export async function overviewData(range) {
+  const quizBegan = await quizTrackingBegan();
+  const progressBegan = await progressTrackingBegan();
+  const P = [range.start, range.end];
+  const students = await one("SELECT COUNT(*) AS n, SUM(created_at >= ? AND created_at < ?) AS new_n FROM users WHERE role = 'student'", P);
+  const chat = await one(
+    `SELECT COUNT(*) AS n FROM messages m
+     JOIN conversations c ON c.id = m.conversation_id JOIN anonymous_sessions s ON s.id = c.session_id
+     JOIN users u ON u.id = s.user_id AND u.role = 'student'
+     WHERE m.role = 'user' AND m.created_at >= ? AND m.created_at < ?`,
+    P
+  );
+  const generated = await one(
+    `SELECT COUNT(*) AS n FROM econtent_documents d JOIN anonymous_sessions s ON s.id = d.session_id
+     JOIN users u ON u.id = s.user_id AND u.role = 'student' WHERE d.created_at >= ? AND d.created_at < ?`,
+    P
+  );
+  const progress = await one(
+    `SELECT SUM(p.first_opened_at >= ? AND p.first_opened_at < ?) AS opened, SUM(p.completed_at >= ? AND p.completed_at < ?) AS completed
+     FROM module_progress p JOIN users u ON u.id = p.user_id AND u.role = 'student'`,
+    [...P, ...P]
+  );
+  const events = await one(
+    `SELECT SUM(e.event_type = 'USER_SIGNED_IN') AS sign_ins, SUM(e.event_type = 'PDF_DOWNLOADED') AS pdf
+     FROM analytics_events e
+     LEFT JOIN anonymous_sessions s ON s.id = e.session_id
+     JOIN users u ON u.id = COALESCE(e.user_id, s.user_id) AND u.role = 'student'
+     WHERE e.event_type IN ('USER_SIGNED_IN', 'PDF_DOWNLOADED') AND e.created_at >= ? AND e.created_at < ?`,
+    P
+  );
+  const quiz = await one(
+    `SELECT COUNT(*) AS n, SUM(a.end_reason = 'timed_out') AS timed_out,
+            SUM(z.mode = 'assessment' AND z.owner_user_id IS NULL) AS assessments,
+            AVG(IF(z.mode = 'practice' OR z.owner_user_id IS NOT NULL, a.percent, NULL)) AS practice_mean
+     FROM quiz_attempts a JOIN quizzes z ON z.id = a.quiz_id JOIN users u ON u.id = a.user_id AND u.role = 'student'
+     WHERE a.status = 'submitted' AND a.submitted_at >= ? AND a.submitted_at < ?`,
+    P
+  );
+  const achievementRow = await one(
+    `SELECT AVG(a.percent) AS mean, COUNT(*) AS n FROM quiz_attempts a JOIN quizzes z ON z.id = a.quiz_id
+     JOIN users u ON u.id = a.user_id AND u.role = 'student'
+     WHERE a.status = 'submitted' AND a.submitted_at >= ? AND a.submitted_at < ? AND z.mode = 'assessment' AND z.owner_user_id IS NULL
+       AND a.attempt_no = (SELECT MIN(b.attempt_no) FROM quiz_attempts b WHERE b.quiz_id = a.quiz_id AND b.user_id = a.user_id AND b.status = 'submitted')`,
+    P
+  );
+  const abandoned = await one(
+    `SELECT COUNT(*) AS n FROM quiz_attempts a JOIN users u ON u.id = a.user_id AND u.role = 'student'
+     WHERE a.status = 'in_progress' AND a.deadline_at IS NULL AND a.started_at >= ? AND a.started_at < ?
+       AND a.started_at < UTC_TIMESTAMP(3) - INTERVAL ${ABANDON_HOURS} HOUR`,
+    P
+  );
+  const active = await one(
+    `SELECT COUNT(*) AS n FROM users u WHERE u.role = 'student' AND (
+       EXISTS (SELECT 1 FROM quiz_attempts a WHERE a.user_id = u.id AND a.status = 'submitted' AND a.submitted_at >= ? AND a.submitted_at < ?)
+       OR EXISTS (SELECT 1 FROM messages m JOIN conversations c ON c.id = m.conversation_id
+                  JOIN anonymous_sessions s ON s.id = c.session_id
+                  WHERE s.user_id = u.id AND m.role = 'user' AND m.created_at >= ? AND m.created_at < ?)
+       OR EXISTS (SELECT 1 FROM module_progress p WHERE p.user_id = u.id AND p.last_opened_at >= ? AND p.last_opened_at < ?)
+       OR EXISTS (SELECT 1 FROM research_responses r WHERE r.user_id = u.id AND r.status = 'submitted' AND r.submitted_at >= ? AND r.submitted_at < ?))`,
+    [...P, ...P, ...P, ...P]
+  );
+  const num = (x) => Number(x || 0);
+  return {
+    range: { from: range.from, to: range.to, timezone: "IST (UTC+05:30)", inclusive: true },
+    data_as_of: new Date().toISOString(),
+    tracking: {
+      quiz_tracking_began: quizBegan,
+      progress_tracking_began: progressBegan,
+      chat_tracking: "Chat counts come from stored messages since the app started.",
+    },
+    cards: {
+      students_total: num(students.n),
+      registered_in_range: num(students.new_n),
+      active_students: num(active.n),
+      sign_ins: progressBegan ? num(events.sign_ins) : null,
+      chat_questions: num(chat.n),
+      modules_generated: num(generated.n),
+      modules_opened: progressBegan ? num(progress.opened) : null,
+      modules_completed: progressBegan ? num(progress.completed) : null,
+      pdf_downloads: num(events.pdf),
+      quiz_attempts: num(quiz.n),
+      timed_out: num(quiz.timed_out),
+      abandoned: num(abandoned.n),
+      assessments_submitted: num(quiz.assessments),
+      mean_percent: achievementRow.mean == null ? null : round1(Number(achievementRow.mean)),
+      mean_percent_n: num(achievementRow.n),
+      practice_mean_percent: quiz.practice_mean == null ? null : round1(Number(quiz.practice_mean)),
+    },
+    notes: {
+      quiz: trackingNote(quizBegan, range, "Quizzes"),
+      progress: trackingNote(progressBegan, range, "Sign-ins and module opened/completed"),
+      pdf: "PDF downloads before progress tracking began were recorded per session and are included when the session belongs to a student.",
+    },
+    definitions: DEFINITIONS,
+    not_implemented: [
+      "Digital-attitude and social-engagement: questionnaire shells exist in Research; results appear only after the researcher's approved items are published.",
+      "Collaboration features: not built (no research requirement found).",
+    ],
+  };
+}
 
 export async function overview(req, res, next) {
   try {
-    const range = parseRange(req.query);
-    const began = await quizTrackingBegan();
-    const [[students]] = await pool.query("SELECT COUNT(*) AS n FROM users WHERE role = 'student'");
-    const [[chat]] = await pool.query(
-      `SELECT COUNT(*) AS n, COUNT(DISTINCT s.user_id) AS users FROM messages m
-       JOIN conversations c ON c.id = m.conversation_id JOIN anonymous_sessions s ON s.id = c.session_id
-       JOIN users u ON u.id = s.user_id AND u.role = 'student'
-       WHERE m.role = 'user' AND m.created_at >= ? AND m.created_at < ?`,
-      [range.start, range.end]
-    );
-    const [[modules]] = await pool.query(
-      `SELECT COUNT(*) AS n FROM analytics_events e JOIN anonymous_sessions s ON s.id = e.session_id
-       JOIN users u ON u.id = s.user_id AND u.role = 'student'
-       WHERE e.event_type = 'E_CONTENT_GENERATED' AND e.created_at >= ? AND e.created_at < ?`,
-      [range.start, range.end]
-    );
-    const [[quiz]] = await pool.query(
-      `SELECT COUNT(*) AS n, AVG(a.percent) AS mean_percent, COUNT(DISTINCT a.user_id) AS users
-       FROM quiz_attempts a JOIN users u ON u.id = a.user_id AND u.role = 'student'
-       WHERE a.status = 'submitted' AND a.submitted_at >= ? AND a.submitted_at < ?`,
-      [range.start, range.end]
-    );
-    const [[active]] = await pool.query(
-      `SELECT COUNT(*) AS n FROM users u WHERE u.role = 'student' AND (
-         EXISTS (SELECT 1 FROM quiz_attempts a WHERE a.user_id = u.id AND a.status = 'submitted' AND a.submitted_at >= ? AND a.submitted_at < ?)
-         OR EXISTS (SELECT 1 FROM messages m JOIN conversations c ON c.id = m.conversation_id
-                    JOIN anonymous_sessions s ON s.id = c.session_id
-                    WHERE s.user_id = u.id AND m.role = 'user' AND m.created_at >= ? AND m.created_at < ?))`,
-      [range.start, range.end, range.start, range.end]
-    );
-    const quizNote =
-      began && range.start < new Date(began)
-        ? `Quiz tracking began ${istDate(new Date(began))}; earlier days have no quiz data.`
-        : null;
-    res.json({
-      range: { from: range.from, to: range.to, timezone: "IST (UTC+05:30)" },
-      tracking: { quiz_tracking_began: began, chat_tracking: "Chat counts come from stored messages since the app started." },
-      cards: {
-        students_total: Number(students.n),
-        active_students: Number(active.n),
-        chat_questions: Number(chat.n),
-        modules_generated: Number(modules.n),
-        quiz_attempts: Number(quiz.n),
-        mean_percent: quiz.mean_percent == null ? null : round1(Number(quiz.mean_percent)),
-        sign_ins: null,
-      },
-      notes: { quiz: quizNote, sign_ins: DEFINITIONS.sign_ins },
-      definitions: DEFINITIONS,
-      not_implemented: [
-        "Digital-attitude scale: not implemented (needs a validated instrument from the researcher).",
-        "Social-engagement scale: not implemented (needs a validated instrument from the researcher).",
-        "Collaboration features: assessed only, not built.",
-      ],
-    });
+    res.json(await overviewData(parseRange(req.query)));
   } catch (err) {
     next(err);
   }
@@ -121,6 +197,7 @@ const SORTS = {
   chat_questions: "chat_questions",
   quiz_attempts: "quiz_attempts",
   mean_percent: "mean_percent",
+  modules_completed: "modules_completed",
   last_active: "last_active",
 };
 
@@ -149,12 +226,14 @@ async function studentRows(range, f, { paginate = true } = {}) {
          AND a.submitted_at >= ? AND a.submitted_at < ?) AS quiz_attempts,
       (SELECT AVG(a.percent) FROM quiz_attempts a WHERE a.user_id = u.id AND a.status = 'submitted'
          AND a.submitted_at >= ? AND a.submitted_at < ?) AS mean_percent,
+      (SELECT COUNT(*) FROM module_progress p WHERE p.user_id = u.id AND p.completed_at >= ? AND p.completed_at < ?) AS modules_completed,
       GREATEST(
         COALESCE((SELECT MAX(m.created_at) FROM messages m JOIN conversations c ON c.id = m.conversation_id
            JOIN anonymous_sessions s ON s.id = c.session_id WHERE s.user_id = u.id AND m.role = 'user'), '1970-01-01'),
-        COALESCE((SELECT MAX(a.submitted_at) FROM quiz_attempts a WHERE a.user_id = u.id), '1970-01-01')) AS last_active
+        COALESCE((SELECT MAX(a.submitted_at) FROM quiz_attempts a WHERE a.user_id = u.id), '1970-01-01'),
+        COALESCE((SELECT MAX(p.last_opened_at) FROM module_progress p WHERE p.user_id = u.id), '1970-01-01')) AS last_active
     FROM users u WHERE ${where.join(" AND ")}`;
-  const rangeParams = [range.start, range.end, range.start, range.end, range.start, range.end];
+  const rangeParams = [range.start, range.end, range.start, range.end, range.start, range.end, range.start, range.end];
   const activityFilter =
     f.activity === "active" ? "WHERE (chat_questions + quiz_attempts) > 0" : f.activity === "inactive" ? "WHERE (chat_questions + quiz_attempts) = 0" : "";
   const [[{ n }]] = await pool.query(`SELECT COUNT(*) AS n FROM (${base}) t ${activityFilter}`, [...rangeParams, ...params]);
@@ -173,6 +252,7 @@ async function studentRows(range, f, { paginate = true } = {}) {
       chat_questions: Number(r.chat_questions),
       quiz_attempts: Number(r.quiz_attempts),
       mean_percent: r.mean_percent == null ? null : round1(Number(r.mean_percent)),
+      modules_completed: Number(r.modules_completed),
       last_active: new Date(r.last_active).getUTCFullYear() <= 1970 ? null : r.last_active,
     })),
   };
@@ -324,22 +404,7 @@ export async function achievement(req, res, next) {
       quizId ? [range.start, range.end, quizId] : [range.start, range.end]
     );
     const overall = stats(rows.map((r) => Number(r.percent)));
-    const pre = rows.filter((r) => r.assessment_phase === "pre");
-    const post = rows.filter((r) => r.assessment_phase === "post");
-    let prePost = { available: false, note: "Pre/post comparison appears only when the teacher marks one quiz as a pre-test and another as a post-test." };
-    if (pre.length && post.length) {
-      const preBy = new Map();
-      for (const r of pre) preBy.set(r.user_id, Number(r.percent));
-      const pairs = post.filter((r) => preBy.has(r.user_id)).map((r) => ({ pre: preBy.get(r.user_id), post: Number(r.percent) }));
-      prePost = {
-        available: true,
-        pre: stats(pre.map((r) => Number(r.percent))),
-        post: stats(post.map((r) => Number(r.percent))),
-        paired_n: pairs.length,
-        mean_change: pairs.length ? round1(mean(pairs.map((p) => p.post - p.pre))) : null,
-        note: "Descriptive only. A change between pre- and post-test does not show what caused it.",
-      };
-    }
+    const prePost = await prePostData(range);
     res.json({
       range: { from: range.from, to: range.to },
       basis: "First submitted attempt per student per quiz (teacher quizzes only).",
@@ -351,7 +416,68 @@ export async function achievement(req, res, next) {
   }
 }
 
+// ---------- Pre/post (teacher-designated pairs only) ----------
+// A post-test counts only when the teacher linked it to a pre-test (quizzes.pre_quiz_id).
+// Basis: each student's FIRST finished attempt on each quiz. Post-test attempts are filtered by the date range;
+// pre-test attempts may be from any earlier date. Only students with both are compared (matched pairs).
+export async function prePostData(range) {
+  const [pairs] = await pool.query(
+    `SELECT post.id AS post_id, post.title AS post_title, pre.id AS pre_id, pre.title AS pre_title
+     FROM quizzes post JOIN quizzes pre ON pre.id = post.pre_quiz_id
+     WHERE post.owner_user_id IS NULL AND post.status <> 'draft' ORDER BY post.created_at`
+  );
+  const firstAttempts = async (quizId, filterRange) => {
+    const [rows] = await pool.query(
+      `SELECT a.user_id, a.percent, a.submitted_at FROM quiz_attempts a JOIN users u ON u.id = a.user_id AND u.role = 'student'
+       WHERE a.quiz_id = ? AND a.status = 'submitted'
+         AND a.attempt_no = (SELECT MIN(b.attempt_no) FROM quiz_attempts b WHERE b.quiz_id = a.quiz_id AND b.user_id = a.user_id AND b.status = 'submitted')
+         ${filterRange ? "AND a.submitted_at >= ? AND a.submitted_at < ?" : ""}`,
+      filterRange ? [quizId, range.start, range.end] : [quizId]
+    );
+    return new Map(rows.map((r) => [r.user_id, Number(r.percent)]));
+  };
+  const out = [];
+  for (const pair of pairs) {
+    const post = await firstAttempts(pair.post_id, true);
+    const pre = await firstAttempts(pair.pre_id, false);
+    const matched = [...post.keys()].filter((id) => pre.has(id));
+    const preVals = matched.map((id) => pre.get(id));
+    const postVals = matched.map((id) => post.get(id));
+    const gains = matched.map((id) => post.get(id) - pre.get(id));
+    const avg = (v) => (v.length ? round2(v.reduce((x, y) => x + y, 0) / v.length) : null);
+    out.push({
+      pre_quiz: { id: pair.pre_id, title: pair.pre_title },
+      post_quiz: { id: pair.post_id, title: pair.post_title },
+      paired_n: matched.length,
+      mean_pre: avg(preVals),
+      mean_post: avg(postVals),
+      mean_gain: avg(gains),
+      paired_t: pairedT(gains),
+      unmatched: {
+        pre_only: [...pre.keys()].filter((id) => !post.has(id)).map(studentRef).sort(),
+        post_only: [...post.keys()].filter((id) => !pre.has(id)).map(studentRef).sort(),
+      },
+      matched_students: matched.map((id) => ({ student_ref: studentRef(id), pre: pre.get(id), post: post.get(id), gain: round2(post.get(id) - pre.get(id)) })),
+    });
+  }
+  return {
+    available: out.length > 0,
+    pairs: out,
+    method:
+      "Matched students only (first finished attempt on each quiz). Paired t-test reported as a descriptive statistic; it does not show what caused any change.",
+    note: out.length ? null : "No pre/post pair yet. Create a quiz with phase 'post' and link it to its pre-test.",
+  };
+}
+
 // ---------- CSV reports ----------
+// "2026-10-15 14:05:09 IST": exports show the school's time zone.
+export function istStamp(d) {
+  if (!d) return "";
+  const t = new Date(d);
+  if (Number.isNaN(t.getTime())) return "";
+  return `${new Date(t.getTime() + 330 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ")} IST`;
+}
+
 function studentRef(id) {
   return `S-${String(id).replace(/-/g, "").slice(0, 8)}`;
 }
@@ -365,25 +491,36 @@ export async function reportCsv(req, res, next) {
     let rows;
     if (kind === "attempts") {
       const [data] = await pool.query(
-        `SELECT a.user_id, u.display_name, z.title, z.topic, z.activity_type, z.mode, z.assessment_phase, a.attempt_no,
+        `SELECT a.user_id, u.display_name, z.title, z.topic, z.activity_type, z.mode, z.assessment_phase, a.attempt_no, a.end_reason,
                 a.score_points, a.max_points, a.percent, a.duration_sec, a.submitted_at
          FROM quiz_attempts a JOIN quizzes z ON z.id = a.quiz_id JOIN users u ON u.id = a.user_id AND u.role = 'student'
          WHERE a.status = 'submitted' AND a.submitted_at >= ? AND a.submitted_at < ? ORDER BY a.submitted_at`,
         [range.start, range.end]
       );
-      header = ["student_ref", ...(withNames ? ["student_name"] : []), "quiz", "topic", "activity_type", "mode", "phase", "attempt_no", "score", "max_score", "percent", "duration_sec", "submitted_at_utc"];
+      header = ["student_ref", ...(withNames ? ["student_name"] : []), "quiz", "topic", "activity_type", "mode", "phase", "attempt_no", "end_reason", "score", "max_score", "percent", "duration_sec", "submitted_at_ist"];
       rows = data.map((r) => [
         studentRef(r.user_id), ...(withNames ? [r.display_name] : []), r.title, r.topic, r.activity_type, r.mode, r.assessment_phase,
-        r.attempt_no, Number(r.score_points), Number(r.max_points), Number(r.percent), r.duration_sec, r.submitted_at,
+        r.attempt_no, r.end_reason || "submitted", Number(r.score_points), Number(r.max_points), Number(r.percent), r.duration_sec, istStamp(r.submitted_at),
       ]);
     } else if (kind === "students") {
       const { rows: data } = await studentRows(range, { sort: "name", dir: "asc", page: 1, size: 100, activity: "all" }, { paginate: false });
-      header = ["student_ref", ...(withNames ? ["student_name"] : []), "joined_utc", "chat_questions", "quiz_attempts", "mean_percent", "last_active_utc"];
-      rows = data.map((r) => [studentRef(r.id), ...(withNames ? [r.display_name] : []), r.joined, r.chat_questions, r.quiz_attempts, r.mean_percent, r.last_active]);
+      header = ["student_ref", ...(withNames ? ["student_name"] : []), "joined_ist", "chat_questions", "quiz_attempts", "mean_percent", "modules_completed", "last_active_ist"];
+      rows = data.map((r) => [studentRef(r.id), ...(withNames ? [r.display_name] : []), istStamp(r.joined), r.chat_questions, r.quiz_attempts, r.mean_percent, r.modules_completed, istStamp(r.last_active)]);
     } else if (kind === "topics") {
       const data = await topicRows(range);
       header = ["topic", "answers", "students", "attempts", "accuracy_percent"];
       rows = data.map((r) => [r.topic, r.answered, r.students, r.attempts, r.accuracy]);
+    } else if (kind === "prepost") {
+      const data = await prePostData(range);
+      header = ["pre_quiz", "post_quiz", "student_ref", "status", "pre_percent", "post_percent", "gain"];
+      rows = [];
+      for (const pair of data.pairs) {
+        for (const m of pair.matched_students) rows.push([pair.pre_quiz.title, pair.post_quiz.title, m.student_ref, "matched", m.pre, m.post, m.gain]);
+        for (const ref of pair.unmatched.pre_only) rows.push([pair.pre_quiz.title, pair.post_quiz.title, ref, "pre_only", "", "", ""]);
+        for (const ref of pair.unmatched.post_only) rows.push([pair.pre_quiz.title, pair.post_quiz.title, ref, "post_only", "", "", ""]);
+      }
+    } else if (kind === "questionnaires") {
+      ({ header, rows } = await questionnaireCsv(range, req.query.instrument_id));
     } else {
       throw new AppError(404, "NOT_FOUND", "Unknown report.");
     }

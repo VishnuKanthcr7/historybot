@@ -3,6 +3,8 @@ import { pool } from "../db/pool.js";
 import { AppError } from "../utils/errors.js";
 import { newId } from "../utils/ids.js";
 import { recordUserEvent } from "../services/analytics.js";
+import { markModuleCompleted } from "../services/moduleProgress.js";
+import { requireOwnedEcontent } from "./econtentController.js";
 import {
   revealedQuestion,
   sanitizeResponses,
@@ -103,10 +105,36 @@ async function finalizeAttempt(conn, attempt, quiz, responses, { late }) {
   const duration = Math.max(0, Math.round((submittedAt - new Date(attempt.started_at)) / 1000));
   await conn.query(
     `UPDATE quiz_attempts SET status = 'submitted', submitted_at = ?, score_points = ?, max_points = ?, percent = ?,
-       duration_sec = ? WHERE id = ?`,
-    [submittedAt, result.score, result.max, result.percent, duration, attempt.id]
+       duration_sec = ?, end_reason = ? WHERE id = ?`,
+    [submittedAt, result.score, result.max, result.percent, duration, late ? "timed_out" : "submitted", attempt.id]
   );
   return result;
+}
+
+// After the scoring transaction commits: one terminal event per attempt (idempotent key), and a checkpoint
+// quiz linked to a learning module marks that module complete. Never changes the score.
+async function afterFinalize(attempt, quiz, result, late) {
+  await recordUserEvent(
+    attempt.user_id,
+    late ? "QUIZ_TIMED_OUT" : "QUIZ_SUBMITTED",
+    {
+      quiz_id: quiz.id,
+      attempt_id: attempt.id,
+      attempt_no: attempt.attempt_no,
+      activity_type: quiz.activity_type,
+      mode: quiz.mode,
+      phase: quiz.assessment_phase,
+      percent: result.percent,
+    },
+    `end:${attempt.id}`
+  );
+  if (quiz.activity_type === "checkpoint" && quiz.source_econtent_id && quiz.owner_user_id === attempt.user_id) {
+    try {
+      await markModuleCompleted(attempt.user_id, quiz.source_econtent_id, "checkpoint");
+    } catch (err) {
+      console.warn("module_completion_failed", err?.code || "error");
+    }
+  }
 }
 
 async function buildResult(attemptId, userId) {
@@ -197,11 +225,13 @@ async function expireIfNeeded(attemptId) {
     await conn.beginTransaction();
     const [rows] = await conn.query("SELECT * FROM quiz_attempts WHERE id = ? FOR UPDATE", [attemptId]);
     const attempt = rows[0];
+    let done = null;
     if (attempt && attempt.status === "in_progress" && deadlinePassed(attempt)) {
       const quiz = await getQuiz(attempt.quiz_id, conn);
-      await finalizeAttempt(conn, attempt, quiz, parseJson(attempt.autosave_json, {}), { late: true });
+      done = { quiz, result: await finalizeAttempt(conn, attempt, quiz, parseJson(attempt.autosave_json, {}), { late: true }) };
     }
     await conn.commit();
+    if (done) await afterFinalize(attempt, done.quiz, done.result, true);
   } catch (err) {
     await conn.rollback();
     throw err;
@@ -228,8 +258,9 @@ export async function startAttempt(req, res, next) {
       res.json({ resumed: true, ...(await inProgressPayload(open[0], quiz)) });
       return;
     }
+    let expired = null;
     if (open.length) {
-      await finalizeAttempt(conn, open[0], quiz, parseJson(open[0].autosave_json, {}), { late: true });
+      expired = await finalizeAttempt(conn, open[0], quiz, parseJson(open[0].autosave_json, {}), { late: true });
     }
     const [[{ n }]] = await conn.query(
       "SELECT COUNT(*) AS n FROM quiz_attempts WHERE quiz_id = ? AND user_id = ?",
@@ -237,6 +268,7 @@ export async function startAttempt(req, res, next) {
     );
     if (quiz.max_attempts && Number(n) >= quiz.max_attempts) {
       await conn.commit();
+      if (expired) await afterFinalize(open[0], quiz, expired, true);
       throw new AppError(409, "ATTEMPT_LIMIT", "You have used all attempts for this quiz.");
     }
     const items = await getQuizItems(quiz.id, conn);
@@ -250,7 +282,13 @@ export async function startAttempt(req, res, next) {
       [id, quiz.id, req.user.id, Number(n) + 1, now, deadline, JSON.stringify(items.map((q) => q.id)), JSON.stringify({})]
     );
     await conn.commit();
-    await recordUserEvent(req.user.id, "QUIZ_STARTED", { quiz_id: quiz.id, attempt_id: id, activity_type: quiz.activity_type });
+    if (expired) await afterFinalize(open[0], quiz, expired, true);
+    await recordUserEvent(
+      req.user.id,
+      "QUIZ_STARTED",
+      { quiz_id: quiz.id, attempt_id: id, attempt_no: Number(n) + 1, activity_type: quiz.activity_type },
+      `start:${id}`
+    );
     const [rows] = await pool.query("SELECT * FROM quiz_attempts WHERE id = ?", [id]);
     res.status(201).json({ resumed: false, ...(await inProgressPayload(rows[0], quiz)) });
   } catch (err) {
@@ -329,13 +367,7 @@ export async function submitAttempt(req, res, next) {
     const responses = late ? parseJson(attempt.autosave_json, {}) : body.responses;
     const result = await finalizeAttempt(conn, attempt, quiz, responses, { late });
     await conn.commit();
-    await recordUserEvent(req.user.id, "QUIZ_SUBMITTED", {
-      quiz_id: quiz.id,
-      attempt_id: attempt.id,
-      activity_type: quiz.activity_type,
-      percent: result.percent,
-      late,
-    });
+    await afterFinalize(attempt, quiz, result, late);
     res.json({ late, ...(await buildResult(attempt.id, req.user.id)) });
   } catch (err) {
     try {
@@ -400,16 +432,16 @@ export async function myQuizHistory(req, res, next) {
   }
 }
 
-async function createPersonalQuiz(user, { title, description, topic, activityType, questionIds, timeLimit = null }) {
+async function createPersonalQuiz(user, { title, description, topic, activityType, questionIds, timeLimit = null, econtentId = null }) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     const id = newId();
     await conn.query(
       `INSERT INTO quizzes (id, title, description, topic, difficulty, mode, activity_type, time_limit_sec, max_attempts,
-         reveal_answers, status, owner_user_id, created_by, published_at)
-       VALUES (?,?,?,?, 'mixed', 'practice', ?, ?, NULL, 'after_submit', 'published', ?, NULL, UTC_TIMESTAMP(3))`,
-      [id, title, description, topic.slice(0, 120), activityType, timeLimit, user.id]
+         reveal_answers, status, owner_user_id, created_by, published_at, source_econtent_id)
+       VALUES (?,?,?,?, 'mixed', 'practice', ?, ?, NULL, 'after_submit', 'published', ?, NULL, UTC_TIMESTAMP(3), ?)`,
+      [id, title, description, topic.slice(0, 120), activityType, timeLimit, user.id, econtentId]
     );
     let position = 1;
     for (const qid of questionIds) {
@@ -417,7 +449,7 @@ async function createPersonalQuiz(user, { title, description, topic, activityTyp
       position += 1;
     }
     await conn.commit();
-    await recordUserEvent(user.id, "ACTIVITY_CREATED", { quiz_id: id, activity_type: activityType, questions: questionIds.length });
+    await recordUserEvent(user.id, "ACTIVITY_CREATED", { quiz_id: id, activity_type: activityType, questions: questionIds.length }, `activity:${id}`);
     return id;
   } catch (err) {
     await conn.rollback();
@@ -462,12 +494,18 @@ export async function createRevisionChallenge(req, res, next) {
   }
 }
 
-const checkpointBody = z.object({ topic: z.string().trim().min(2).max(160) });
+const checkpointBody = z.object({
+  topic: z.string().trim().min(2).max(160),
+  // Optional link to the student's own module: submitting the checkpoint then marks that module complete.
+  econtent_id: z.string().uuid().optional(),
+  session_id: z.string().uuid().optional(),
+});
 
 // Module checkpoint: up to 6 published questions about the module's topic.
 export async function createCheckpoint(req, res, next) {
   try {
-    const { topic } = checkpointBody.parse(req.body || {});
+    const { topic, econtent_id: econtentId, session_id: sessionId } = checkpointBody.parse(req.body || {});
+    if (econtentId) await requireOwnedEcontent(econtentId, sessionId, req.user);
     const words = topic
       .toLowerCase()
       .replace(/[^a-z\s]/g, " ")
@@ -488,6 +526,7 @@ export async function createCheckpoint(req, res, next) {
       topic,
       activityType: "checkpoint",
       questionIds: rows.map((r) => r.id),
+      econtentId: econtentId || null,
     });
     res.status(201).json({ quiz_id: id, question_count: rows.length });
   } catch (err) {

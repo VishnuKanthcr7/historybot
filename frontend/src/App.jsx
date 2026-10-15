@@ -8,6 +8,7 @@ import RequireUser from "./components/RequireUser.jsx";
 import Quizzes from "./pages/Quizzes.jsx";
 import QuizPlayer from "./pages/QuizPlayer.jsx";
 import Activities from "./pages/Activities.jsx";
+import { QuestionnaireList, QuestionnairePlayer } from "./pages/Questionnaires.jsx";
 
 export default function App() {
   return (
@@ -22,6 +23,8 @@ export default function App() {
         <Route path="/quizzes" element={<Quizzes />} />
         <Route path="/activities" element={<Activities />} />
         <Route path="/attempts/:attemptId" element={<QuizPlayer />} />
+        <Route path="/questionnaires" element={<QuestionnaireList />} />
+        <Route path="/questionnaires/:instrumentId" element={<QuestionnairePlayer />} />
       </Route>
       <Route path="/admin" element={<AdminDashboard />} />
       <Route path="*" element={<Navigate to="/" replace />} />

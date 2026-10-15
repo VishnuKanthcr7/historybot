@@ -262,11 +262,16 @@ export function AppProvider({ children }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${(econtent.title || "historybot").slice(0, 40)}.pdf`;
+      // Same pattern as the server's file name: "historybot-<title>.pdf", no characters that file systems reject.
+      const slug = String(econtent.title || "")
+        .replace(/[^\p{L}\p{N}\p{M}]+/gu, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 60);
+      link.download = `historybot-${slug || "module"}.pdf`;
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       setError(err.message || "PDF download failed.");
     } finally {

@@ -63,6 +63,26 @@ export function istToday(offsetDays = 0) {
   return new Date(Date.now() + 330 * 60000 + offsetDays * 86400000).toISOString().slice(0, 10);
 }
 
+// All dates are shown in the school's time zone (IST), whatever the viewer's device zone is.
 export function fmtDate(value) {
-  return value ? new Date(value).toLocaleDateString() : "—";
+  return value ? new Date(value).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" }) : "—";
+}
+
+export function fmtDateTime(value) {
+  return value
+    ? `${new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })} IST`
+    : "—";
+}
+
+// Wide tables scroll inside their card on small screens instead of widening the page.
+export function TableWrap({ children, label }) {
+  return (
+    <div className="-mx-1 max-w-full overflow-x-auto px-1" role="region" aria-label={label} tabIndex={0}>
+      {children}
+    </div>
+  );
+}
+
+export function Empty({ children }) {
+  return <p className="rounded-2xl border border-dashed border-rule p-4 text-sm text-muted">{children}</p>;
 }

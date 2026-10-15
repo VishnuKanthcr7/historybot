@@ -78,6 +78,7 @@ export function publicQuiz(quiz) {
     available_until: quiz.available_until,
     status: quiz.status,
     personal: Boolean(quiz.owner_user_id),
+    pre_quiz_id: quiz.pre_quiz_id || null,
   };
 }
 

@@ -33,6 +33,7 @@ export async function createConversation(req, res, next) {
       [id, body.session_id, title]
     );
     await recordEvent({
+      userId: req.user?.id,
       sessionId: body.session_id,
       conversationId: id,
       eventType: "NEW_CHAT",
@@ -141,6 +142,7 @@ export async function postMessage(req, res, next) {
       [conversation.id]
     );
     await recordEvent({
+      userId: req.user?.id,
       sessionId: body.session_id,
       conversationId: conversation.id,
       eventType: "QUESTION_ASKED",
@@ -181,6 +183,7 @@ export async function postMessage(req, res, next) {
       ]
     );
     await recordEvent({
+      userId: req.user?.id,
       sessionId: body.session_id,
       conversationId: conversation.id,
       eventType: "ANSWER_GENERATED",

@@ -98,7 +98,7 @@ function questionOut(row) {
 }
 
 const listQ = z.object({
-  status: z.enum(["draft", "published", "archived"]).optional(),
+  status: z.enum(["draft", "needs_review", "published", "archived"]).optional(),
   topic: z.string().max(120).optional(),
   q: z.string().max(100).optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -166,7 +166,7 @@ export async function createQuestion(req, res, next) {
 export async function updateQuestion(req, res, next) {
   try {
     const current = await getQuestion(req.params.questionId);
-    if (current.status !== "draft") {
+    if (current.status !== "draft" && current.status !== "needs_review") {
       throw new AppError(409, "NOT_DRAFT", "Only draft questions can be edited. Archive it and create a new one.");
     }
     const b = questionBody.parse(req.body || {});
@@ -174,7 +174,8 @@ export async function updateQuestion(req, res, next) {
     if (problem) throw new AppError(400, "VALIDATION_ERROR", problem);
     await pool.query(
       `UPDATE quiz_questions SET qtype=?, prompt=?, options_json=?, answer_json=?, explanation=?, topic=?, difficulty=?,
-         textbook_page=?, source_excerpt=COALESCE(?, source_excerpt), updated_at=UTC_TIMESTAMP(3) WHERE id=? AND status='draft'`,
+         textbook_page=?, source_excerpt=COALESCE(?, source_excerpt), updated_at=UTC_TIMESTAMP(3)
+       WHERE id=? AND status IN ('draft', 'needs_review')`,
       [
         b.qtype, b.prompt, b.options == null ? null : JSON.stringify(b.options), JSON.stringify(b.answer), b.explanation, b.topic,
         b.difficulty, b.textbook_page ?? current.textbook_page, b.source_excerpt ?? null, current.id,
@@ -186,7 +187,10 @@ export async function updateQuestion(req, res, next) {
   }
 }
 
-const statusBody = z.object({ status: z.enum(["draft", "published", "archived"]), review_note: z.string().max(500).optional() });
+const statusBody = z.object({
+  status: z.enum(["draft", "needs_review", "published", "archived"]),
+  review_note: z.string().max(500).optional(),
+});
 
 export async function setQuestionStatus(req, res, next) {
   try {
@@ -201,7 +205,7 @@ export async function setQuestionStatus(req, res, next) {
       });
       if (problem) throw new AppError(400, "VALIDATION_ERROR", problem);
     }
-    if (status === "draft" && q.status === "published") {
+    if ((status === "draft" || status === "needs_review") && q.status === "published") {
       const [[{ n }]] = await pool.query("SELECT COUNT(*) AS n FROM quiz_answers WHERE question_id = ?", [q.id]);
       if (Number(n) > 0) throw new AppError(409, "IN_USE", "This question already has student answers. Archive it instead.");
     }
@@ -307,7 +311,21 @@ const quizBody = z.object({
   available_from: z.string().datetime({ offset: true }).nullable().optional(),
   available_until: z.string().datetime({ offset: true }).nullable().optional(),
   question_ids: z.array(z.string().uuid()).max(60).default([]),
+  // A post-test is compared only with the pre-test the teacher links here (matched students).
+  pre_quiz_id: z.string().uuid().nullable().optional(),
+}).refine((b) => !(b.available_from && b.available_until) || new Date(b.available_until) > new Date(b.available_from), {
+  message: "The closing time must be after the opening time.",
 });
+
+async function checkPreQuiz(b, selfId = null) {
+  if (b.assessment_phase !== "post" || !b.pre_quiz_id) return null;
+  if (b.pre_quiz_id === selfId) throw new AppError(400, "VALIDATION_ERROR", "A quiz cannot be its own pre-test.");
+  const pre = await getQuiz(b.pre_quiz_id);
+  if (pre.owner_user_id || pre.assessment_phase !== "pre") {
+    throw new AppError(400, "VALIDATION_ERROR", "The linked quiz must be a teacher quiz marked as a pre-test.");
+  }
+  return pre.id;
+}
 
 async function teacherQuizSummary(where = "z.owner_user_id IS NULL", params = []) {
   const [rows] = await pool.query(
@@ -362,15 +380,16 @@ export async function createTeacherQuiz(req, res, next) {
   const conn = await pool.getConnection();
   try {
     const b = quizBody.parse(req.body || {});
+    const preId = await checkPreQuiz(b);
     await conn.beginTransaction();
     const id = newId();
     await conn.query(
       `INSERT INTO quizzes (id, title, description, topic, difficulty, mode, activity_type, assessment_phase, time_limit_sec,
-         max_attempts, reveal_answers, available_from, available_until, status, created_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'draft', ?)`,
+         max_attempts, reveal_answers, available_from, available_until, status, created_by, pre_quiz_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'draft', ?, ?)`,
       [
         id, b.title, b.description, b.topic, b.difficulty, b.mode, b.activity_type, b.assessment_phase, b.time_limit_sec ?? null,
-        b.max_attempts ?? null, b.reveal_answers, dt(b.available_from), dt(b.available_until), req.user.id,
+        b.max_attempts ?? null, b.reveal_answers, dt(b.available_from), dt(b.available_until), req.user.id, preId,
       ]
     );
     await setItems(conn, id, b.question_ids);
@@ -398,6 +417,7 @@ export async function updateTeacherQuiz(req, res, next) {
   try {
     const quiz = await ownTeacherQuiz(req.params.quizId, req.user);
     const b = quizBody.parse(req.body || {});
+    const preId = await checkPreQuiz(b, quiz.id);
     const [[{ n }]] = await conn.query("SELECT COUNT(*) AS n FROM quiz_attempts WHERE quiz_id = ?", [quiz.id]);
     const items = await getQuizItems(quiz.id, conn);
     const sameItems = items.map((i) => i.id).join(",") === [...new Set(b.question_ids)].join(",");
@@ -407,11 +427,11 @@ export async function updateTeacherQuiz(req, res, next) {
     await conn.beginTransaction();
     await conn.query(
       `UPDATE quizzes SET title=?, description=?, topic=?, difficulty=?, mode=?, activity_type=?, assessment_phase=?,
-         time_limit_sec=?, max_attempts=?, reveal_answers=?, available_from=?, available_until=?, updated_at=UTC_TIMESTAMP(3)
+         time_limit_sec=?, max_attempts=?, reveal_answers=?, available_from=?, available_until=?, pre_quiz_id=?, updated_at=UTC_TIMESTAMP(3)
        WHERE id=?`,
       [
         b.title, b.description, b.topic, b.difficulty, b.mode, b.activity_type, b.assessment_phase, b.time_limit_sec ?? null,
-        b.max_attempts ?? null, b.reveal_answers, dt(b.available_from), dt(b.available_until), quiz.id,
+        b.max_attempts ?? null, b.reveal_answers, dt(b.available_from), dt(b.available_until), preId, quiz.id,
       ]
     );
     if (!sameItems) await setItems(conn, quiz.id, b.question_ids);
@@ -429,15 +449,20 @@ export async function updateTeacherQuiz(req, res, next) {
   }
 }
 
+const quizStatusBody = z.object({ status: z.enum(["draft", "published", "archived"]) });
+
 export async function setQuizStatus(req, res, next) {
   try {
     const quiz = await ownTeacherQuiz(req.params.quizId, req.user);
-    const { status } = statusBody.parse(req.body || {});
+    const { status } = quizStatusBody.parse(req.body || {});
     if (status === "published") {
       const items = await getQuizItems(quiz.id);
       if (!items.length) throw new AppError(400, "VALIDATION_ERROR", "Add at least one question before publishing.");
       if (items.some((q) => q.status !== "published")) {
         throw new AppError(400, "VALIDATION_ERROR", "Publish (review) every question in the quiz first.");
+      }
+      if (quiz.assessment_phase === "post" && !quiz.pre_quiz_id) {
+        throw new AppError(400, "VALIDATION_ERROR", "Link this post-test to its pre-test before publishing.");
       }
     }
     await pool.query(

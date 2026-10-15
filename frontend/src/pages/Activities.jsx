@@ -52,6 +52,9 @@ export default function Activities() {
           <Link to="/quizzes" className={`${btn} border border-navy text-navy`}>
             Quizzes
           </Link>
+          <Link to="/questionnaires" className={`${btn} border border-navy text-navy`}>
+            Questionnaires
+          </Link>
           <Link to="/chat" className={`${btn} border border-rule bg-cream text-navy`}>
             Back to learning
           </Link>

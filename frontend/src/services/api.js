@@ -254,7 +254,17 @@ export const quizApi = {
     request(`/attempts/${attemptId}/submit`, { method: "POST", body: JSON.stringify({ responses }) }),
   history: () => request("/me/quiz-history"),
   revision: () => request("/activities/revision", { method: "POST", body: JSON.stringify({}) }),
-  checkpoint: (topic) => request("/activities/checkpoint", { method: "POST", body: JSON.stringify({ topic }) }),
+  checkpoint: (topic, econtentId, sessionId) =>
+    request("/activities/checkpoint", {
+      method: "POST",
+      body: JSON.stringify(econtentId ? { topic, econtent_id: econtentId, session_id: sessionId } : { topic }),
+    }),
+  completeModule: (econtentId, sessionId) =>
+    request(`/econtent/${econtentId}/complete`, { method: "POST", body: JSON.stringify({ session_id: sessionId }) }),
+  questionnaires: () => request("/questionnaires"),
+  questionnaire: (id) => request(`/questionnaires/${id}`),
+  saveQuestionnaire: (id, answers, submit) =>
+    request(`/questionnaires/${id}/responses`, { method: "POST", body: JSON.stringify({ answers, submit }) }),
 };
 
 // ---------- Teacher tools ----------
@@ -278,6 +288,12 @@ export const teacherApi = {
   topics: (range) => request(`/teacher/analytics/topics${qs(range)}`),
   timeseries: (params) => request(`/teacher/analytics/timeseries${qs(params)}`),
   achievement: (params) => request(`/teacher/analytics/achievement${qs(params)}`),
+  instruments: () => request("/teacher/instruments"),
+  instrument: (id) => request(`/teacher/instruments/${id}`),
+  createInstrument: (body) => post("/teacher/instruments", body),
+  updateInstrument: (id, body) => post(`/teacher/instruments/${id}`, body),
+  instrumentStatus: (id, status) => post(`/teacher/instruments/${id}/status`, { status }),
+  instrumentResults: (id, range) => request(`/teacher/instruments/${id}/results${qs(range)}`),
 };
 
 export async function downloadReportCsv(kind, params) {

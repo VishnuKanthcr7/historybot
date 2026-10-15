@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { quizApi } from "../services/api.js";
-import { ACTIVITY_LABELS, PageShell, formatSeconds } from "../components/quiz/QuestionInput.jsx";
+import { ACTIVITY_LABELS, PageShell, formatSeconds, QuizBadges } from "../components/quiz/QuestionInput.jsx";
 
 const btn = "inline-flex min-h-11 items-center rounded-full px-4 text-sm";
 
@@ -12,7 +12,7 @@ export function QuizCard({ quiz, onStart, busy }) {
     <article className="flex flex-col rounded-3xl border border-rule bg-cream p-4">
       <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold uppercase tracking-wide">
         <span className="rounded-full bg-navy/10 px-2 py-0.5 text-navy">{ACTIVITY_LABELS[quiz.activity_type] || "Quiz"}</span>
-        <span className="rounded-full bg-brass/15 px-2 py-0.5 text-navydeep">{quiz.mode === "assessment" ? "Assessment" : "Practice"}</span>
+        <QuizBadges quiz={quiz} />
         <span className="rounded-full border border-rule px-2 py-0.5 text-muted">{quiz.difficulty}</span>
       </div>
       <h2 className="mt-2 font-serif text-lg text-navy">{quiz.title}</h2>

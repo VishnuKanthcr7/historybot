@@ -19,6 +19,7 @@ export async function createSession(req, res, next) {
       [id, language, req.user.id]
     );
     await recordEvent({
+      userId: req.user?.id,
       sessionId: id,
       eventType: "SESSION_STARTED",
       language,

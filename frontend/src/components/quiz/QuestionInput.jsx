@@ -253,3 +253,23 @@ export function PageShell({ eyebrow, title, children, actions }) {
     </div>
   );
 }
+
+// Clear labels for how a quiz counts: practice vs assessment, pre/post-test, and draft (teacher only).
+export function QuizBadges({ quiz, showStatus = false }) {
+  const badges = [];
+  if (showStatus && quiz.status && quiz.status !== "published") {
+    badges.push([quiz.status === "draft" ? "Draft (students cannot see)" : "Archived", "border border-dashed border-muted text-muted"]);
+  }
+  badges.push(quiz.mode === "assessment" ? ["Assessment", "bg-navy text-cream"] : ["Practice", "bg-brass/15 text-navydeep"]);
+  if (quiz.assessment_phase === "pre") badges.push(["Pre-test", "bg-sky-100 text-sky-900"]);
+  if (quiz.assessment_phase === "post") badges.push(["Post-test", "bg-violet-100 text-violet-900"]);
+  return (
+    <>
+      {badges.map(([text, cls]) => (
+        <span key={text} className={`rounded-full px-2 py-0.5 ${cls}`}>
+          {text}
+        </span>
+      ))}
+    </>
+  );
+}

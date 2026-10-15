@@ -7,6 +7,7 @@ import { recordEvent } from "../services/analytics.js";
 import { generateEcontent, renderEcontentPdf } from "../services/ragClient.js";
 import { findVerifiedImages, publicImage } from "../services/images.js";
 import { publicSources } from "../utils/sources.js";
+import { markModuleCompleted, markModuleOpened, markModulePdf, moduleProgress } from "../services/moduleProgress.js";
 
 const createSchema = z.object({
   session_id: z.string().uuid(),
@@ -62,14 +63,17 @@ export async function createEcontent(req, res, next) {
       ]
     );
     await recordEvent({
+      userId: req.user?.id,
       sessionId: body.session_id,
       conversationId: body.conversation_id || null,
       eventType: "E_CONTENT_GENERATED",
       topicText: body.topic,
       language,
     });
+    await markModuleOpened(req.user.id, id);
     res.status(201).json({
       id,
+      progress: await moduleProgress(req.user.id, id),
       grounded: true,
       title: rag.title,
       language,
@@ -88,8 +92,10 @@ export async function getEcontent(req, res, next) {
     const sessionId = req.query.session_id;
     const doc = await requireOwnedEcontent(req.params.econtentId, sessionId, req.user);
     const body = parseJson(doc.body_json);
+    await markModuleOpened(req.user.id, doc.id);
     res.json({
       id: doc.id,
+      progress: await moduleProgress(req.user.id, doc.id),
       title: body.title || doc.topic,
       language: doc.language,
       content: body.content || null,
@@ -123,24 +129,25 @@ export async function downloadEcontentPdf(req, res, next) {
       imageRows
     );
     await recordEvent({
+      userId: req.user?.id,
       sessionId: body.session_id,
       conversationId: doc.conversation_id,
       eventType: "PDF_DOWNLOADED",
       topicText: doc.topic,
       language: doc.language,
     });
-    const safeName = String(stored.title || doc.topic || "historybot")
-      .replace(/[^\w\u0C80-\u0CFF-]+/g, "-")
-      .slice(0, 40);
+    await markModulePdf(req.user.id, doc.id);
+    const { ascii, utf8 } = pdfFileNames(stored.title || doc.topic);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${safeName || "historybot"}.pdf"`);
+    // ASCII filename for every browser, plus an RFC 5987 UTF-8 name so Kannada titles survive.
+    res.setHeader("Content-Disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${utf8}`);
     res.send(pdf);
   } catch (err) {
     next(err);
   }
 }
 
-async function requireOwnedEcontent(econtentId, sessionId, actor = null) {
+export async function requireOwnedEcontent(econtentId, sessionId, actor = null) {
   const session = await requireSession(sessionId, actor);
   if (!isUuid(econtentId)) {
     throw new AppError(400, "VALIDATION_ERROR", "Invalid e-content id.");
@@ -167,4 +174,27 @@ function parseJson(value) {
   } catch {
     return null;
   }
+}
+
+// Explicit "Mark complete" by the student who owns the module (idempotent).
+export async function completeEcontent(req, res, next) {
+  try {
+    const body = pdfSchema.parse(req.body || {});
+    const doc = await requireOwnedEcontent(req.params.econtentId, body.session_id, req.user);
+    await markModuleCompleted(req.user.id, doc.id, "explicit");
+    res.json({ id: doc.id, progress: await moduleProgress(req.user.id, doc.id) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Header-safe PDF file names: "historybot-<title>.pdf". Non-Latin titles fall back to "historybot-module".
+export function pdfFileNames(title) {
+  const words = String(title || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  const ascii = words.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/, "");
+  const unicode = String(title || "").replace(/[^\p{L}\p{N}\p{M}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return {
+    ascii: `historybot-${ascii || "module"}.pdf`,
+    utf8: encodeURIComponent(`historybot-${unicode || "module"}.pdf`),
+  };
 }

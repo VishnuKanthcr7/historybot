@@ -1,45 +1,114 @@
 import { useEffect, useState } from "react";
 import { teacherApi } from "../../services/api.js";
-import { Bars, Card, ErrorText, btn, field, fmtDate } from "./ui.jsx";
+import { Bars, Card, Empty, ErrorText, TableWrap, btn, field, fmtDate, fmtDateTime } from "./ui.jsx";
 
-const CARD_LABELS = {
-  students_total: "Students",
-  active_students: "Active students",
-  chat_questions: "Chat questions",
-  modules_generated: "Learning modules",
-  quiz_attempts: "Quiz attempts",
-  mean_percent: "Mean quiz score",
-  sign_ins: "Sign-ins",
-};
+// Headline cards first, then the detail cards. Every value comes from the API; null means "not available".
+const HEADLINE = [
+  ["registered_in_range", "Registered (in range)"],
+  ["active_students", "Active students"],
+  ["modules_completed", "Modules completed"],
+  ["assessments_submitted", "Assessments submitted"],
+  ["mean_percent", "Average achievement"],
+];
+const DETAIL = [
+  ["students_total", "Student accounts (all time)"],
+  ["sign_ins", "Sign-ins"],
+  ["chat_questions", "Chat questions"],
+  ["modules_generated", "Modules generated"],
+  ["modules_opened", "Modules opened"],
+  ["pdf_downloads", "PDF downloads"],
+  ["quiz_attempts", "Quiz/activity attempts finished"],
+  ["timed_out", "Timed out"],
+  ["abandoned", "Abandoned"],
+  ["practice_mean_percent", "Practice mean score"],
+];
+
+function StatCard({ label, value, percent, definition, n, strong }) {
+  return (
+    <div className={`min-w-0 rounded-3xl border p-4 ${strong ? "border-navy/40 bg-cream" : "border-rule bg-cream"}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="mt-1 font-serif text-3xl text-navy" data-testid="stat-value">
+        {value == null ? "—" : percent ? `${value}%` : value}
+      </p>
+      {n != null ? <p className="text-xs text-muted">n = {n}</p> : null}
+      <p className="mt-1 text-xs leading-snug text-muted">{value == null && !percent ? "Data not available. " : ""}{definition}</p>
+    </div>
+  );
+}
+
+function Trend({ range }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    setData(null);
+    teacherApi.timeseries({ ...range, bucket: "day" }).then(setData).catch(() => setData({ series: [] }));
+  }, [range]);
+  if (!data) return <p className="text-sm text-muted">Loading…</p>;
+  if (!data.series.length) return <Empty>No chat questions or quiz attempts in this date range.</Empty>;
+  const max = Math.max(1, ...data.series.map((d) => d.quiz_attempts + d.chat_questions));
+  return (
+    <>
+      <div className="flex h-32 items-end gap-1" role="img" aria-label="Daily activity: chat questions and quiz attempts">
+        {data.series.map((d) => (
+          <div key={d.bucket} className="flex min-w-0 flex-1 flex-col justify-end" title={`${d.bucket}: ${d.chat_questions} chat, ${d.quiz_attempts} quiz (n students ${d.quiz_students})`}>
+            <div className="bg-brass/70" style={{ height: `${(d.chat_questions / max) * 100}%` }} />
+            <div className="bg-navy" style={{ height: `${(d.quiz_attempts / max) * 100}%` }} />
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 flex flex-wrap gap-3 text-xs text-muted">
+        <span><span className="mr-1 inline-block h-2 w-3 bg-navy align-middle" />Quiz attempts</span>
+        <span><span className="mr-1 inline-block h-2 w-3 bg-brass/70 align-middle" />Chat questions</span>
+        <span>{data.series[0].bucket} to {data.series[data.series.length - 1].bucket} (IST days with activity)</span>
+      </p>
+    </>
+  );
+}
 
 export function Overview({ range }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   useEffect(() => {
     setData(null);
+    setError("");
     teacherApi.overview(range).then(setData).catch((e) => setError(e.message));
   }, [range]);
   if (error) return <ErrorText>{error}</ErrorText>;
   if (!data) return <p className="text-sm text-muted">Loading…</p>;
+  const pct = new Set(["mean_percent", "practice_mean_percent"]);
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {Object.entries(CARD_LABELS).map(([key, label]) => {
-          const v = data.cards[key];
-          return (
-            <div key={key} className="rounded-3xl border border-rule bg-cream p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
-              <p className="mt-1 font-serif text-3xl text-navy">{v == null ? "—" : key === "mean_percent" ? `${v}%` : v}</p>
-              <p className="mt-1 text-xs leading-snug text-muted">{v == null && key !== "mean_percent" ? "Data not available" : data.definitions[key]}</p>
-            </div>
-          );
-        })}
+      <p className="text-xs text-muted" data-testid="data-as-of">
+        Data as of {fmtDateTime(data.data_as_of)} · {data.range.from} to {data.range.to} inclusive (IST)
+      </p>
+      <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-5" data-testid="headline-cards">
+        {HEADLINE.map(([key, label]) => (
+          <StatCard
+            key={key}
+            strong
+            label={label}
+            value={data.cards[key]}
+            percent={pct.has(key)}
+            definition={data.definitions[key]}
+            n={key === "mean_percent" ? data.cards.mean_percent_n : null}
+          />
+        ))}
       </div>
-      {data.notes.quiz ? <p className="rounded-2xl bg-brass/10 p-3 text-sm">{data.notes.quiz}</p> : null}
+      {[data.notes.quiz, data.notes.progress].filter(Boolean).map((n) => (
+        <p key={n} className="rounded-2xl bg-brass/10 p-3 text-sm">{n}</p>
+      ))}
+      <Card title="Activity over time">
+        <Trend range={range} />
+      </Card>
+      <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-5">
+        {DETAIL.map(([key, label]) => (
+          <StatCard key={key} label={label} value={data.cards[key]} percent={pct.has(key)} definition={data.definitions[key]} />
+        ))}
+      </div>
       <Card title="About these numbers">
         <ul className="list-disc space-y-1 pl-5 text-sm">
-          <li>Quiz tracking began {data.tracking.quiz_tracking_began ? fmtDate(data.tracking.quiz_tracking_began) : "—"}. {data.tracking.chat_tracking}</li>
-          <li>{data.notes.sign_ins}</li>
+          <li>Quiz tracking began {fmtDate(data.tracking.quiz_tracking_began)}; sign-in and module progress tracking began {fmtDate(data.tracking.progress_tracking_began)}. {data.tracking.chat_tracking}</li>
+          <li>{data.notes.pdf}</li>
+          <li>Logins and sign-ins are not attendance.</li>
           {data.not_implemented.map((n) => (
             <li key={n}>{n}</li>
           ))}
@@ -118,6 +187,7 @@ const COLS = [
   ["chat_questions", "Chat questions"],
   ["quiz_attempts", "Quiz attempts"],
   ["mean_percent", "Mean score"],
+  ["modules_completed", "Modules done"],
   ["last_active", "Last active"],
 ];
 
@@ -154,9 +224,43 @@ export function StudentsTable({ range }) {
             <option value="active">Active in range</option>
             <option value="inactive">No activity in range</option>
           </select>
+          <label className="sr-only" htmlFor="st-sort">
+            Sort students
+          </label>
+          <select
+            id="st-sort"
+            className={`${field} sm:hidden`}
+            value={`${q.sort}:${q.dir}`}
+            onChange={(e) => {
+              const [sort, dir] = e.target.value.split(":");
+              setQ({ ...q, sort, dir, page: 1 });
+            }}
+          >
+            {COLS.flatMap(([key, label]) => [
+              <option key={`${key}:asc`} value={`${key}:asc`}>{label} (low to high)</option>,
+              <option key={`${key}:desc`} value={`${key}:desc`}>{label} (high to low)</option>,
+            ])}
+          </select>
         </div>
         <ErrorText>{error}</ErrorText>
-        <div className="overflow-x-auto">
+        {/* Phones: one card per student. Wider screens: the sortable table. */}
+        <ul className="space-y-2 sm:hidden" aria-label="Students">
+          {(data?.students || []).map((s) => (
+            <li key={s.id} className="rounded-2xl border border-rule p-3 text-sm">
+              <button type="button" className="min-h-9 text-left font-medium text-navy underline" onClick={() => setOpen(s.id)}>
+                {s.display_name}
+              </button>
+              <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                <dt className="text-muted">Chat questions</dt><dd className="tabular-nums">{s.chat_questions}</dd>
+                <dt className="text-muted">Quiz attempts</dt><dd className="tabular-nums">{s.quiz_attempts}</dd>
+                <dt className="text-muted">Mean score</dt><dd className="tabular-nums">{s.mean_percent == null ? "—" : `${s.mean_percent}%`}</dd>
+                <dt className="text-muted">Modules done</dt><dd className="tabular-nums">{s.modules_completed}</dd>
+                <dt className="text-muted">Last active</dt><dd>{fmtDate(s.last_active)}</dd>
+              </dl>
+            </li>
+          ))}
+        </ul>
+        <div className="hidden overflow-x-auto sm:block">
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="text-xs uppercase text-muted">
               <tr>
@@ -173,7 +277,7 @@ export function StudentsTable({ range }) {
               {(data?.students || []).map((s) => (
                 <tr key={s.id} className="border-t border-rule">
                   <td className="py-2 pr-2">
-                    <button type="button" className="text-left text-navy underline" onClick={() => setOpen(s.id)}>
+                    <button type="button" className="min-h-9 py-1 text-left text-navy underline" onClick={() => setOpen(s.id)}>
                       {s.display_name}
                     </button>
                   </td>
@@ -181,6 +285,7 @@ export function StudentsTable({ range }) {
                   <td className="py-2 pr-2 tabular-nums">{s.chat_questions}</td>
                   <td className="py-2 pr-2 tabular-nums">{s.quiz_attempts}</td>
                   <td className="py-2 pr-2 tabular-nums">{s.mean_percent == null ? "—" : `${s.mean_percent}%`}</td>
+                  <td className="py-2 pr-2 tabular-nums">{s.modules_completed}</td>
                   <td className="py-2 pr-2">{fmtDate(s.last_active)}</td>
                 </tr>
               ))}
@@ -340,27 +445,34 @@ export function Achievement({ range }) {
           <p className="text-sm text-muted">Loading…</p>
         )}
       </Card>
-      <Card title="Pre-test / post-test">
+      <Card title="Pre-test / post-test (matched students)" className="lg:col-span-2">
         {!data ? null : data.pre_post.available ? (
-          <div className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <h3 className="text-sm font-semibold">Pre-test</h3>
-                <StatBlock s={data.pre_post.pre} />
+          <div className="space-y-4">
+            {data.pre_post.pairs.map((p) => (
+              <div key={p.post_quiz.id} className="rounded-2xl border border-rule p-3" data-testid="prepost-pair">
+                <p className="text-sm font-semibold">
+                  {p.pre_quiz.title} → {p.post_quiz.title}
+                </p>
+                <dl className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                  <div><dt className="text-xs text-muted">Paired n</dt><dd data-testid="paired-n" className="font-serif text-2xl text-navy">{p.paired_n}</dd></div>
+                  <div><dt className="text-xs text-muted">Mean pre</dt><dd data-testid="mean-pre" className="font-serif text-2xl text-navy">{p.mean_pre ?? "—"}{p.mean_pre != null ? "%" : ""}</dd></div>
+                  <div><dt className="text-xs text-muted">Mean post</dt><dd data-testid="mean-post" className="font-serif text-2xl text-navy">{p.mean_post ?? "—"}{p.mean_post != null ? "%" : ""}</dd></div>
+                  <div><dt className="text-xs text-muted">Mean gain</dt><dd data-testid="mean-gain" className="font-serif text-2xl text-navy">{p.mean_gain ?? "—"}</dd></div>
+                </dl>
+                <p className="mt-2 text-xs text-muted">
+                  Paired t-test (descriptive):{" "}
+                  {p.paired_t.t != null ? `t = ${p.paired_t.t}, df = ${p.paired_t.df}, p = ${p.paired_t.p}` : p.paired_t.note}
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  Not matched — pre-test only: {p.unmatched.pre_only.length ? p.unmatched.pre_only.join(", ") : "none"}; post-test only:{" "}
+                  {p.unmatched.post_only.length ? p.unmatched.post_only.join(", ") : "none"}
+                </p>
               </div>
-              <div>
-                <h3 className="text-sm font-semibold">Post-test</h3>
-                <StatBlock s={data.pre_post.post} />
-              </div>
-            </div>
-            <p className="text-sm">
-              Students with both: <strong>{data.pre_post.paired_n}</strong>
-              {data.pre_post.mean_change != null ? ` · mean change ${data.pre_post.mean_change} points` : ""}
-            </p>
-            <p className="text-xs text-muted">{data.pre_post.note}</p>
+            ))}
+            <p className="text-xs text-muted">{data.pre_post.method}</p>
           </div>
         ) : (
-          <p className="text-sm text-muted">{data.pre_post.note}</p>
+          <Empty>{data.pre_post.note}</Empty>
         )}
       </Card>
     </div>

@@ -5,6 +5,7 @@ import { Achievement, Overview, StudentsTable, TopicsAndTrends } from "../compon
 import QuizManager from "../components/teacher/QuizManager.jsx";
 import QuestionBank from "../components/teacher/QuestionBank.jsx";
 import Reports from "../components/teacher/Reports.jsx";
+import Research from "../components/teacher/Research.jsx";
 import { RangePicker, btn, istToday } from "../components/teacher/ui.jsx";
 
 const TABS = [
@@ -14,9 +15,10 @@ const TABS = [
   ["achievement", "Achievement"],
   ["quizzes", "Quizzes"],
   ["questions", "Question bank"],
+  ["research", "Research"],
   ["reports", "Reports"],
 ];
-const RANGE_TABS = new Set(["overview", "students", "topics", "achievement", "reports"]);
+const RANGE_TABS = new Set(["overview", "students", "topics", "achievement", "research", "reports"]);
 
 export default function AdminDashboard() {
   const { user, ready, logout } = useApp();
@@ -76,6 +78,7 @@ export default function AdminDashboard() {
         {tab === "achievement" ? <Achievement range={range} /> : null}
         {tab === "quizzes" ? <QuizManager /> : null}
         {tab === "questions" ? <QuestionBank /> : null}
+        {tab === "research" ? <Research range={range} /> : null}
         {tab === "reports" ? <Reports range={range} /> : null}
       </div>
     </div>

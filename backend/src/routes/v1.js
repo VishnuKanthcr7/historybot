@@ -7,7 +7,18 @@ import {
   listConversations,
   postMessage,
 } from "../controllers/conversationsController.js";
-import { createEcontent, downloadEcontentPdf, getEcontent } from "../controllers/econtentController.js";
+import { completeEcontent, createEcontent, downloadEcontentPdf, getEcontent } from "../controllers/econtentController.js";
+import {
+  createInstrument,
+  getInstrumentTeacher,
+  getQuestionnaire,
+  instrumentResults,
+  listInstruments,
+  listQuestionnaires,
+  saveQuestionnaire,
+  setInstrumentStatus,
+  updateInstrument,
+} from "../controllers/researchController.js";
 import { getImage } from "../controllers/imagesController.js";
 import { login, logout, me, register } from "../controllers/authController.js";
 import { adminSummary } from "../controllers/adminController.js";
@@ -74,6 +85,7 @@ router.post("/conversations/:conversationId/messages", requireAuth, aiBurstLimit
 router.post("/econtent", requireAuth, aiBurstLimiter, aiDailyLimiter, createEcontent);
 router.get("/econtent/:econtentId", requireAuth, getEcontent);
 router.post("/econtent/:econtentId/pdf", requireAuth, downloadEcontentPdf);
+router.post("/econtent/:econtentId/complete", requireAuth, completeEcontent);
 router.get("/images/:imageId", requireAuth, getImage);
 router.post("/auth/register", authLimiter, register);
 router.post("/auth/login", authLimiter, login);
@@ -111,3 +123,14 @@ router.get("/teacher/analytics/topics", requireAdmin, topics);
 router.get("/teacher/analytics/timeseries", requireAdmin, timeseries);
 router.get("/teacher/analytics/achievement", requireAdmin, achievement);
 router.get("/teacher/reports/:kind.csv", requireAdmin, reportCsv);
+
+// Research questionnaires: students answer published ones; teachers build, approve, publish and analyse.
+router.get("/questionnaires", requireAuth, listQuestionnaires);
+router.get("/questionnaires/:instrumentId", requireAuth, getQuestionnaire);
+router.post("/questionnaires/:instrumentId/responses", requireAuth, saveQuestionnaire);
+router.get("/teacher/instruments", requireAdmin, listInstruments);
+router.post("/teacher/instruments", requireAdmin, createInstrument);
+router.get("/teacher/instruments/:instrumentId", requireAdmin, getInstrumentTeacher);
+router.post("/teacher/instruments/:instrumentId", requireAdmin, updateInstrument);
+router.post("/teacher/instruments/:instrumentId/status", requireAdmin, setInstrumentStatus);
+router.get("/teacher/instruments/:instrumentId/results", requireAdmin, instrumentResults);

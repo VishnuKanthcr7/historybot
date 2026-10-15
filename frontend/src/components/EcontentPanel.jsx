@@ -1,16 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ImageFigure } from "./ProtectedImage.jsx";
 import { quizApi } from "../services/api.js";
+import { useApp } from "../context/AppContext.jsx";
 import SourceCite from "./SourceCite.jsx";
 
-function CheckpointButton({ topic }) {
+// Submitting this checkpoint marks the module complete (the quiz is linked to the module).
+function CheckpointButton({ topic, econtentId, sessionId }) {
   const navigate = useNavigate();
   const [state, setState] = useState("");
   const start = async () => {
     setState("Preparing…");
     try {
-      const r = await quizApi.checkpoint(topic);
+      const r = await quizApi.checkpoint(topic, econtentId, sessionId);
       const started = await quizApi.start(r.quiz_id);
       navigate(`/attempts/${started.attempt.id}`);
     } catch (err) {
@@ -31,7 +33,43 @@ function CheckpointButton({ topic }) {
   );
 }
 
+// Explicit completion. Opening or downloading a module does not count as completing it.
+function CompleteButton({ econtentId, sessionId, initial }) {
+  const [done, setDone] = useState(Boolean(initial?.completed));
+  const [state, setState] = useState("");
+  useEffect(() => setDone(Boolean(initial?.completed)), [econtentId, initial?.completed]);
+  const mark = async () => {
+    setState("Saving…");
+    try {
+      const r = await quizApi.completeModule(econtentId, sessionId);
+      setDone(Boolean(r.progress?.completed));
+      setState("");
+    } catch (err) {
+      setState(err.message);
+    }
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className="min-h-11 border border-navy px-3 text-sm text-navy disabled:opacity-60"
+        onClick={mark}
+        disabled={done}
+        aria-pressed={done}
+      >
+        {done ? "Completed ✓" : "Mark complete"}
+      </button>
+      {state ? (
+        <span className="basis-full text-xs text-muted" role="status">
+          {state}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 export default function EcontentPanel({ data, labels, language, onClose, onPdf, pdfLoading }) {
+  const { sessionId } = useApp();
   if (!data) return null;
   const content = data.content || {};
   const citations = content.section_citations || {};
@@ -53,7 +91,10 @@ export default function EcontentPanel({ data, labels, language, onClose, onPdf, 
               {pdfLoading ? labels.pdfWorking : labels.downloadPdf}
             </button>
           ) : null}
-          {data.grounded && data.title && language !== "kn" ? <CheckpointButton topic={data.title} /> : null}
+          {data.id ? <CompleteButton econtentId={data.id} sessionId={sessionId} initial={data.progress} /> : null}
+          {data.grounded && data.title && language !== "kn" ? (
+            <CheckpointButton topic={data.title} econtentId={data.id} sessionId={sessionId} />
+          ) : null}
           <button type="button" className="min-h-11 border border-rule px-3 text-sm" onClick={onClose}>
             {labels.close}
           </button>

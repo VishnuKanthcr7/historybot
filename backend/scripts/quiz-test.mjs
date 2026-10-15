@@ -201,7 +201,14 @@ async function main() {
   // ---- assessment mode reveal rules ----
   const assess = await api("POST", "/teacher/quizzes", { token: T1.token, body: { title: `Post-test ${stamp}`, topic: "Test topic", mode: "assessment", assessment_phase: "post", reveal_answers: "after_close", max_attempts: 1, question_ids: qids.slice(0, 3) } });
   created.quizzes.push(assess.data.quiz.id);
-  await api("POST", `/teacher/quizzes/${assess.data.quiz.id}/status`, { token: T1.token, body: { status: "published" } });
+  const unlinked = await api("POST", `/teacher/quizzes/${assess.data.quiz.id}/status`, { token: T1.token, body: { status: "published" } });
+  check("post-test cannot be published before it is linked to a pre-test", unlinked.status >= 400, `status=${unlinked.status}`);
+  const pre = await api("POST", "/teacher/quizzes", { token: T1.token, body: { title: `Pre-test ${stamp}`, topic: "Test topic", mode: "assessment", assessment_phase: "pre", reveal_answers: "after_close", max_attempts: 1, question_ids: qids.slice(0, 3) } });
+  created.quizzes.push(pre.data.quiz.id);
+  const linkBody = { title: `Post-test ${stamp}`, topic: "Test topic", mode: "assessment", assessment_phase: "post", pre_quiz_id: pre.data.quiz.id, reveal_answers: "after_close", max_attempts: 1, question_ids: qids.slice(0, 3) };
+  await api("POST", `/teacher/quizzes/${assess.data.quiz.id}`, { token: T1.token, body: linkBody });
+  const linked = await api("POST", `/teacher/quizzes/${assess.data.quiz.id}/status`, { token: T1.token, body: { status: "published" } });
+  check("linked post-test can be published", linked.status === 200, `status=${linked.status}`);
   const as = await api("POST", `/quizzes/${assess.data.quiz.id}/attempts`, { token: A.token });
   const asSubmit = await api("POST", `/attempts/${as.data.attempt.id}/submit`, { token: A.token, body: { responses: resp } });
   check("assessment hides answers while open", asSubmit.data.reveal === false && asSubmit.data.questions.every((q) => !("answer" in q)) && Boolean(asSubmit.data.reveal_note));
@@ -244,7 +251,7 @@ async function main() {
     [new Date(`${today}T00:00:00+05:30`), new Date(new Date(`${today}T00:00:00+05:30`).getTime() + 86400000)]
   );
   check("overview quiz attempts match the database for today", ov.status === 200 && ov.data.cards.quiz_attempts === Number(dbToday.n), `${ov.data.cards?.quiz_attempts} vs ${dbToday.n}`);
-  check("overview has definitions and tracking date; sign-ins not faked", Boolean(ov.data.definitions?.active_students) && Boolean(ov.data.tracking?.quiz_tracking_began) && ov.data.cards.sign_ins === null);
+  check("overview has definitions and tracking dates; sign-ins are a real count", Boolean(ov.data.definitions?.active_students) && Boolean(ov.data.tracking?.quiz_tracking_began) && Boolean(ov.data.tracking?.progress_tracking_began) && Number.isInteger(ov.data.cards.sign_ins));
   const [[dbStudents]] = await pool.query("SELECT COUNT(*) AS n FROM users WHERE role = 'student'");
   check("overview student total matches the database", ov.data.cards.students_total === Number(dbStudents.n));
   const emptyRange = await api("GET", "/teacher/analytics/overview?from=2020-01-01&to=2020-01-31", { token: T1.token });

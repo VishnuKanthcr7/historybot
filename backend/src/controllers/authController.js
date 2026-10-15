@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AppError } from "../utils/errors.js";
+import { recordUserEvent } from "../services/analytics.js";
 import {
   authenticate,
   bearerToken,
@@ -44,6 +45,7 @@ export async function register(req, res, next) {
     });
     const token = await issueToken(user.id);
     const sessionId = await ensureLearningSession(user.id);
+    await recordUserEvent(user.id, "USER_REGISTERED", null, `register:${user.id}`);
     res.status(201).json({
       token,
       user: publicUser(user),
@@ -63,6 +65,8 @@ export async function login(req, res, next) {
     }
     const token = await issueToken(user.id);
     const sessionId = await ensureLearningSession(user.id);
+    // A sign-in is recorded as an event; it is not attendance.
+    await recordUserEvent(user.id, "USER_SIGNED_IN");
     res.json({
       token,
       user,

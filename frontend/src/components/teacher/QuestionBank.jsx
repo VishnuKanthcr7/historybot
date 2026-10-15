@@ -241,7 +241,7 @@ function PassageDrafter({ onDraft }) {
                 {p.sentences.map((s) => (
                   <li key={s} className="flex items-start justify-between gap-2 text-sm">
                     <span>{s}</span>
-                    <button type="button" onClick={() => draft(p, s)} className="shrink-0 rounded-full border border-navy px-3 py-1 text-xs text-navy">
+                    <button type="button" onClick={() => draft(p, s)} className="shrink-0 min-h-9 rounded-full border border-navy px-3 py-1 text-xs text-navy">
                       Draft
                     </button>
                   </li>
@@ -256,6 +256,14 @@ function PassageDrafter({ onDraft }) {
     </Card>
   );
 }
+
+const STATUS_LABEL = { draft: "Draft", needs_review: "Needs review", published: "Published", archived: "Archived" };
+const STATUS_STYLE = {
+  draft: "bg-brass/20 text-navydeep",
+  needs_review: "bg-red-100 text-red-800",
+  published: "bg-green-100 text-green-800",
+  archived: "bg-rule text-muted",
+};
 
 export default function QuestionBank() {
   const [filters, setFilters] = useState({ status: "", topic: "", q: "", page: 1, size: 25 });
@@ -308,6 +316,7 @@ export default function QuestionBank() {
           <select className={field} aria-label="Status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value, page: 1 })}>
             <option value="">Any status</option>
             <option value="draft">Draft</option>
+            <option value="needs_review">Needs review</option>
             <option value="published">Published</option>
             <option value="archived">Archived</option>
           </select>
@@ -324,7 +333,7 @@ export default function QuestionBank() {
           {(data?.questions || []).map((q) => (
             <li key={q.id} className="rounded-2xl border border-rule p-3 text-sm">
               <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold uppercase">
-                <span className={`rounded-full px-2 py-0.5 ${q.status === "published" ? "bg-green-100 text-green-800" : q.status === "draft" ? "bg-brass/20 text-navydeep" : "bg-rule text-muted"}`}>{q.status}</span>
+                <span className={`rounded-full px-2 py-0.5 ${STATUS_STYLE[q.status] || "bg-rule text-muted"}`}>{STATUS_LABEL[q.status] || q.status}</span>
                 <span className="rounded-full border border-rule px-2 py-0.5 text-muted">{TYPES[q.qtype]}</span>
                 <span className="text-muted">{q.topic}</span>
                 {q.textbook_page ? <span className="text-muted">· p. {q.textbook_page}</span> : null}
@@ -335,23 +344,28 @@ export default function QuestionBank() {
                 <span className="text-muted">Answer: </span>
                 {answerText(q, q.answer)}
               </p>
+              {q.review_note && q.status !== "published" ? (
+                <p className={`mt-1 rounded-xl px-2 py-1 text-xs ${q.status === "needs_review" ? "bg-red-50 text-red-800" : "text-muted"}`}>
+                  Review note: {q.review_note}
+                </p>
+              ) : null}
               <div className="mt-2 flex flex-wrap gap-2">
-                {q.status === "draft" ? (
+                {q.status === "draft" || q.status === "needs_review" ? (
                   <>
-                    <button type="button" className="rounded-full border border-navy px-3 py-1 text-xs text-navy" onClick={() => setEditing(q)}>
+                    <button type="button" className="min-h-9 rounded-full border border-navy px-3 py-1 text-xs text-navy" onClick={() => setEditing(q)}>
                       Edit
                     </button>
-                    <button type="button" className="rounded-full bg-navy px-3 py-1 text-xs text-cream" onClick={() => setStatus(q, "published")}>
+                    <button type="button" className="min-h-9 rounded-full bg-navy px-3 py-1 text-xs text-cream" onClick={() => setStatus(q, "published")}>
                       Review &amp; publish
                     </button>
                   </>
                 ) : null}
                 {q.status !== "archived" ? (
-                  <button type="button" className="rounded-full border border-rule px-3 py-1 text-xs" onClick={() => setStatus(q, "archived")}>
+                  <button type="button" className="min-h-9 rounded-full border border-rule px-3 py-1 text-xs" onClick={() => setStatus(q, "archived")}>
                     Archive
                   </button>
                 ) : (
-                  <button type="button" className="rounded-full border border-rule px-3 py-1 text-xs" onClick={() => setStatus(q, "draft")}>
+                  <button type="button" className="min-h-9 rounded-full border border-rule px-3 py-1 text-xs" onClick={() => setStatus(q, "draft")}>
                     Back to draft
                   </button>
                 )}

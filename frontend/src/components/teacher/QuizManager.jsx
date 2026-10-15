@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { teacherApi } from "../../services/api.js";
-import { ACTIVITY_LABELS, answerText, formatSeconds } from "../quiz/QuestionInput.jsx";
+import { ACTIVITY_LABELS, QuizBadges, answerText, formatSeconds } from "../quiz/QuestionInput.jsx";
 import { Bars, Card, ErrorText, btn, field, fmtDate } from "./ui.jsx";
 
 const EMPTY = {
@@ -17,6 +17,7 @@ const EMPTY = {
   available_from: "",
   available_until: "",
   question_ids: [],
+  pre_quiz_id: "",
 };
 
 const toLocalInput = (v) => (v ? new Date(new Date(v).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
@@ -24,6 +25,7 @@ const toLocalInput = (v) => (v ? new Date(new Date(v).getTime() - new Date().get
 function QuizForm({ initial, onSaved, onCancel }) {
   const [f, setF] = useState(initial || EMPTY);
   const [bank, setBank] = useState([]);
+  const [preTests, setPreTests] = useState([]);
   const [topicFilter, setTopicFilter] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -32,7 +34,11 @@ function QuizForm({ initial, onSaved, onCancel }) {
       .questions({ size: 100 })
       .then((d) => setBank(d.questions.filter((q) => q.status !== "archived")))
       .catch((e) => setError(e.message));
-  }, []);
+    teacherApi
+      .quizzes()
+      .then((d) => setPreTests(d.quizzes.filter((q) => q.assessment_phase === "pre" && q.id !== initial?.id)))
+      .catch(() => setPreTests([]));
+  }, [initial?.id]);
   const set = (patch) => setF({ ...f, ...patch });
   const toggle = (id) => set({ question_ids: f.question_ids.includes(id) ? f.question_ids.filter((x) => x !== id) : [...f.question_ids, id] });
   const save = async (e) => {
@@ -53,6 +59,7 @@ function QuizForm({ initial, onSaved, onCancel }) {
       available_from: f.available_from ? new Date(f.available_from).toISOString() : null,
       available_until: f.available_until ? new Date(f.available_until).toISOString() : null,
       question_ids: f.question_ids,
+      pre_quiz_id: f.assessment_phase === "post" && f.pre_quiz_id ? f.pre_quiz_id : null,
     };
     try {
       const r = f.id ? await teacherApi.updateQuiz(f.id, body) : await teacherApi.createQuiz(body);
@@ -117,6 +124,20 @@ function QuizForm({ initial, onSaved, onCancel }) {
             <option value="post">Post-test</option>
           </select>
         </label>
+        {f.assessment_phase === "post" ? (
+          <label className={label}>
+            Linked pre-test (required to publish)
+            <select className={field} value={f.pre_quiz_id || ""} onChange={(e) => set({ pre_quiz_id: e.target.value })}>
+              <option value="">Choose the pre-test…</option>
+              {preTests.map((q) => (
+                <option key={q.id} value={q.id}>
+                  {q.title}
+                </option>
+              ))}
+            </select>
+            {!preTests.length ? <span className="text-xs text-muted">Create a quiz marked Pre-test first.</span> : null}
+          </label>
+        ) : null}
         <label className={label}>
           Time limit (minutes)
           <input className={field} type="number" min="0.5" step="0.5" value={f.time_min} onChange={(e) => set({ time_min: e.target.value })} placeholder="None" />
@@ -306,6 +327,7 @@ export default function QuizManager({ onChanged }) {
           available_from: toLocalInput(d.quiz.available_from),
           available_until: toLocalInput(d.quiz.available_until),
           question_ids: d.questions.map((x) => x.id),
+          pre_quiz_id: d.quiz.pre_quiz_id || "",
         },
       });
     } catch (err) {
@@ -357,9 +379,11 @@ export default function QuizManager({ onChanged }) {
                   <tr key={q.id} className="border-t border-rule align-top">
                     <td className="py-2 pr-2">
                       <span className="font-medium">{q.title}</span>
+                      <span className="mt-1 flex flex-wrap gap-1 text-[11px] font-semibold uppercase">
+                        <QuizBadges quiz={q} showStatus />
+                      </span>
                       <span className="block text-xs text-muted">
-                        {ACTIVITY_LABELS[q.activity_type]} · {q.mode}
-                        {q.assessment_phase !== "none" ? ` · ${q.assessment_phase}-test` : ""}
+                        {ACTIVITY_LABELS[q.activity_type]}
                         {q.time_limit_sec ? ` · ${formatSeconds(q.time_limit_sec)}` : ""}
                         {q.max_attempts ? ` · ${q.max_attempts} attempt(s)` : ""} · by {q.created_by_name || "—"}
                       </span>
@@ -372,24 +396,24 @@ export default function QuizManager({ onChanged }) {
                     <td className="py-2 pr-2">{q.mean_percent == null ? "—" : `${q.mean_percent}%`}</td>
                     <td className="py-2">
                       <div className="flex flex-wrap gap-1">
-                        <button type="button" className="rounded-full border border-rule px-3 py-1 text-xs" onClick={() => setPanel({ kind: "preview", id: q.id })}>
+                        <button type="button" className="min-h-9 rounded-full border border-rule px-3 py-1 text-xs" onClick={() => setPanel({ kind: "preview", id: q.id })}>
                           Preview
                         </button>
-                        <button type="button" className="rounded-full border border-rule px-3 py-1 text-xs" onClick={() => setPanel({ kind: "results", id: q.id })}>
+                        <button type="button" className="min-h-9 rounded-full border border-rule px-3 py-1 text-xs" onClick={() => setPanel({ kind: "results", id: q.id })}>
                           Results
                         </button>
                         {q.mine ? (
                           <>
-                            <button type="button" className="rounded-full border border-navy px-3 py-1 text-xs text-navy" onClick={() => edit(q)}>
+                            <button type="button" className="min-h-9 rounded-full border border-navy px-3 py-1 text-xs text-navy" onClick={() => edit(q)}>
                               Edit
                             </button>
                             {q.status !== "published" ? (
-                              <button type="button" className="rounded-full bg-navy px-3 py-1 text-xs text-cream" onClick={() => status(q, "published")}>
+                              <button type="button" className="min-h-9 rounded-full bg-navy px-3 py-1 text-xs text-cream" onClick={() => status(q, "published")}>
                                 Publish
                               </button>
                             ) : null}
                             {q.status !== "archived" ? (
-                              <button type="button" className="rounded-full border border-rule px-3 py-1 text-xs" onClick={() => status(q, "archived")}>
+                              <button type="button" className="min-h-9 rounded-full border border-rule px-3 py-1 text-xs" onClick={() => status(q, "archived")}>
                                 Archive
                               </button>
                             ) : null}

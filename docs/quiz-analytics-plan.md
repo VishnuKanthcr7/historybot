@@ -16,3 +16,10 @@
 - Teacher dashboard: overview (definitions + date range), students table (no chat text, no emails in CSV), student profile, topic analytics, performance over time with n, achievement statistics (mean/median/distribution; pre/post only for quizzes flagged pre/post; descriptive, no causal claims). Quiz metrics show "tracking began <migration date>"; logins are not attendance.
 - Exports: CSV for attempts/students/topics with formula-injection guard and pseudonymous ids.
 - Not implemented (by design): digital-attitude and social-engagement scales (need validated instruments from the researcher), collaboration features, public leaderboard, student messaging, class/section membership (all teachers see all students).
+
+## Update — migration 006 (production readiness)
+- Adds idempotent events, user sign-in and registration events, module open and complete tracking, and `end_reason` (submitted or timed out; abandoned is derived after 24 h).
+- Pre/post now requires an explicit pre-test link and uses matched pairs (paired t, labelled descriptive).
+- Adds questionnaire instruments, with the Digital Attitude and Social Engagement shells in draft awaiting researcher items. Collaboration is still not built; see `docs/research-features.md`.
+- Adds the question status `needs_review` and the audit script (`docs/question-bank-audit.md`).
+- The overview now has "data as of", trend, mobile student cards and IST dates.

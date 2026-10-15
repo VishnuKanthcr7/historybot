@@ -306,7 +306,7 @@ export default function QuizPlayer() {
         )}
       </nav>
       <div className="mt-3 text-right">
-        <button type="button" onClick={() => setConfirming(true)} className="text-sm text-navy underline">
+        <button type="button" onClick={() => setConfirming(true)} className="inline-flex min-h-11 items-center px-2 text-sm text-navy underline">
           Finish and submit
         </button>
       </div>

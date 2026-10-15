@@ -754,3 +754,32 @@ body {
     transition: none;
   }
 }
+
+/* Accessibility (Oct 2026 pass) */
+/* Brass text on ivory was about 2.9:1; this darker brass keeps the identity and meets WCAG AA (about 5:1). */
+.text-brass {
+  color: #86601f;
+}
+
+/* Inputs and buttons inside cards get the same visible focus ring as links. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="tab"]:focus-visible,
+[role="region"]:focus-visible {
+  outline: 3px solid #5c2e20;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

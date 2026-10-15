@@ -132,7 +132,7 @@
   "qtype": "fill_blank",
   "topic": "Babur and the Mughal dynasty",
   "difficulty": "medium",
-  "prompt": "Babar wrote his autobiography in the ______ language.",
+  "prompt": "Babur wrote his autobiography in the ______ language.",
   "options": null,
   "answer": [
    "turkish"
@@ -477,7 +477,7 @@
    },
    {
     "id": "b",
-    "text": "dagh-mahali"
+    "text": "Dagh-mahali"
    },
    {
     "id": "c",
