@@ -99,3 +99,11 @@ With `--apply`, flagged drafts become `needs_review`. The audit never publishes 
 - A pre-test can be linked by only one post-test (409 otherwise).
 - A post-test cannot be published until its pre-test is linked and published.
 - The Research tab shows, for each pair: both statuses, the number of pre- and post-test takers, the matched n, the unmatched counts and the limitations.
+
+## Kannada support (limitation, 15 Oct 2026)
+
+- The Kannada edition of the Class 9 textbook PDF is set in legacy Nudi fonts: its text layer contains no Unicode Kannada characters, so it cannot be indexed or quoted faithfully.
+- Because of this the RAG service refuses Kannada chat answers and Kannada learning modules (`KANNADA_UNAVAILABLE` / `kannada_corpus_unavailable`) rather than machine-translating or inventing content.
+- The interface menus are translated. The language selector reads "ಕನ್ನಡ (menus only)", and the chat shows a note asking students to ask questions in English.
+- PDF export uses ReportLab, which does not shape Kannada conjuncts. A shaping engine (e.g. HarfBuzz via uharfbuzz) is not installed, and is not needed until a Unicode Kannada source exists.
+- To lift the limitation: obtain a Unicode Kannada textbook (or convert Nudi → Unicode with a verified converter), re-index it, then add shaped PDF output and check it by eye against the printed book.

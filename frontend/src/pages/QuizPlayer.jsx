@@ -39,7 +39,7 @@ function Results({ data, onRetry, retryBusy, error }) {
           <Link to="/quizzes" className={`${btn} border border-navy text-navy`}>
             All quizzes
           </Link>
-          <Link to="/quizzes?tab=history" className={`${btn} border border-rule text-navy`}>
+          <Link to="/quizzes?tab=history" className={`${btn} border border-navy text-navy`}>
             My results
           </Link>
           {onRetry ? (

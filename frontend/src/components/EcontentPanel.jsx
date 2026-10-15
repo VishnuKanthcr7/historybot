@@ -21,7 +21,7 @@ function CheckpointButton({ topic, econtentId, sessionId }) {
   };
   return (
     <>
-      <button type="button" className="min-h-11 border border-navy px-3 text-sm text-navy" onClick={start}>
+      <button type="button" className="min-h-11 rounded-full border border-navy px-4 text-sm text-navy" onClick={start}>
         Checkpoint quiz
       </button>
       {state ? (
@@ -52,7 +52,7 @@ function CompleteButton({ econtentId, sessionId, initial }) {
     <>
       <button
         type="button"
-        className="min-h-11 border border-navy px-3 text-sm text-navy disabled:opacity-60"
+        className="min-h-11 rounded-full border border-navy px-4 text-sm text-navy disabled:opacity-60"
         onClick={mark}
         disabled={done}
         aria-pressed={done}
@@ -84,7 +84,7 @@ export default function EcontentPanel({ data, labels, language, onClose, onPdf, 
           {data.id ? (
             <button
               type="button"
-              className="min-h-11 border border-navy px-3 text-sm text-navy disabled:opacity-50"
+              className="min-h-11 rounded-full border border-navy px-4 text-sm text-navy disabled:opacity-50"
               onClick={onPdf}
               disabled={pdfLoading}
             >
@@ -95,7 +95,7 @@ export default function EcontentPanel({ data, labels, language, onClose, onPdf, 
           {data.grounded && data.title && language !== "kn" ? (
             <CheckpointButton topic={data.title} econtentId={data.id} sessionId={sessionId} />
           ) : null}
-          <button type="button" className="min-h-11 border border-rule px-3 text-sm" onClick={onClose}>
+          <button type="button" className="min-h-11 rounded-full border border-rule px-4 text-sm" onClick={onClose}>
             {labels.close}
           </button>
         </div>
