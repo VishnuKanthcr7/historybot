@@ -231,11 +231,12 @@ async function studentRows(range, f, { paginate = true } = {}) {
       (SELECT AVG(a.percent) FROM quiz_attempts a WHERE a.user_id = u.id AND a.status = 'submitted'
          AND a.submitted_at >= ? AND a.submitted_at < ?) AS mean_percent,
       (SELECT COUNT(*) FROM module_progress p WHERE p.user_id = u.id AND p.completed_at >= ? AND p.completed_at < ?) AS modules_completed,
-      GREATEST(
+      -- CAST: GREATEST over mixed DATETIME/string arguments returns a string, which the driver would not read as UTC.
+      CAST(GREATEST(
         COALESCE((SELECT MAX(m.created_at) FROM messages m JOIN conversations c ON c.id = m.conversation_id
            JOIN anonymous_sessions s ON s.id = c.session_id WHERE s.user_id = u.id AND m.role = 'user'), '1970-01-01'),
         COALESCE((SELECT MAX(a.submitted_at) FROM quiz_attempts a WHERE a.user_id = u.id), '1970-01-01'),
-        COALESCE((SELECT MAX(p.last_opened_at) FROM module_progress p WHERE p.user_id = u.id), '1970-01-01')) AS last_active
+        COALESCE((SELECT MAX(p.last_opened_at) FROM module_progress p WHERE p.user_id = u.id), '1970-01-01')) AS DATETIME) AS last_active
     FROM users u WHERE ${where.join(" AND ")}`;
   const rangeParams = [range.start, range.end, range.start, range.end, range.start, range.end, range.start, range.end];
   const activityFilter =

@@ -191,6 +191,12 @@ export default function Chat() {
               {error}
             </p>
           ) : null}
+          {language === "kn" ? (
+            <p className="mx-3 mt-3 rounded-2xl border border-brass/40 bg-cream px-3 py-2 text-sm text-navy md:mx-5" role="note" data-testid="kannada-note">
+              ಕನ್ನಡ ಉತ್ತರಗಳು ಇನ್ನೂ ಲಭ್ಯವಿಲ್ಲ. Kannada answers and modules are not available yet (the Kannada textbook is not yet in a
+              machine-readable form). Menus are in Kannada; please ask your question in English.
+            </p>
+          ) : null}
           {econtentLoading ? (
             <p
               className="mx-3 mt-3 border border-brass/40 bg-cream px-3 py-2 text-sm text-navy md:mx-5"

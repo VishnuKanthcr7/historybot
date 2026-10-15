@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import Home from "./pages/Home.jsx";
 import Chat from "./pages/Chat.jsx";
 import Login from "./pages/Login.jsx";
@@ -9,6 +9,12 @@ import Quizzes from "./pages/Quizzes.jsx";
 import QuizPlayer from "./pages/QuizPlayer.jsx";
 import Activities from "./pages/Activities.jsx";
 import { QuestionnaireList, QuestionnairePlayer } from "./pages/Questionnaires.jsx";
+
+// A new attempt (e.g. after "Try again") must start fresh at question 1, so the player is remounted per attempt.
+function AttemptRoute() {
+  const { attemptId } = useParams();
+  return <QuizPlayer key={attemptId} />;
+}
 
 export default function App() {
   return (
@@ -22,7 +28,7 @@ export default function App() {
         <Route path="/chat" element={<Chat />} />
         <Route path="/quizzes" element={<Quizzes />} />
         <Route path="/activities" element={<Activities />} />
-        <Route path="/attempts/:attemptId" element={<QuizPlayer />} />
+        <Route path="/attempts/:attemptId" element={<AttemptRoute />} />
         <Route path="/questionnaires" element={<QuestionnaireList />} />
         <Route path="/questionnaires/:instrumentId" element={<QuestionnairePlayer />} />
       </Route>

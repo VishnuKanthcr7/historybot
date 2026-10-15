@@ -13,6 +13,8 @@ function parseJson(value, fallback = null) {
   }
 }
 
+import { compact, expandAccepted } from "./answerVariants.js";
+
 export function normalizeText(value) {
   return String(value ?? "")
     .toLowerCase()
@@ -40,7 +42,8 @@ export function gradeQuestion(question, response) {
     case "fill_blank": {
       const accepted = (Array.isArray(answer) ? answer : [answer]).map(normalizeText).filter(Boolean);
       const given = normalizeText(typeof response === "string" ? response.slice(0, 200) : "");
-      const correct = Boolean(given) && accepted.includes(given);
+      // Exact accepted answers, plus curated name/spelling variants of the SAME person or term (answerVariants.js).
+      const correct = Boolean(given) && (accepted.includes(given) || expandAccepted(accepted).has(compact(given)));
       return { correct, fraction: correct ? 1 : 0 };
     }
     case "order": {

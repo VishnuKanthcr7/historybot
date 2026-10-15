@@ -94,5 +94,14 @@ check("legacy array layout still readable", JSON.stringify(layoutOf({ question_o
 const r = rng("abc");
 check("PRNG is deterministic", r() === rng("abc")());
 
+// --- fill-in-the-blank name variants (server-side grading)
+const fb = (answer) => ({ qtype: "fill_blank", answer_json: JSON.stringify(answer) });
+const ok = (answer, given) => gradeQuestion(fb(answer), given).correct;
+check("full name accepted for a short answer (Babur)", ok(["babur"], "Zahir-ud-din Muhammad Babur") && ok(["babur"], "Zahiruddin Muhammad Babur") && ok(["babur"], "babar"));
+check("short name accepted for a full-name answer", ok(["zahir ud din muhammad babur"], "Babur"));
+check("spacing/hyphen variants accepted (Jija Bai, Din-i-Ilahi, Sukapha)", ok(["jijabai"], "Jija Bai") && ok(["din-e-ilahi"], "Din i Ilahi") && ok(["din-e-ilahi"], "DinEIlahi") && ok(["sukaphaa"], "Sukapha"));
+check("a different person is still wrong (Humayun for Babur, Akbar for Shivaji's mother)", !ok(["babur"], "Humayun") && !ok(["jijabai"], "Akbar") && !ok(["babur"], "Muhammad"));
+check("partial or empty answers are wrong", !ok(["babur"], "") && !ok(["babur"], "bab") && !ok(["turkish"], "persian") && !ok(["sukaphaa"], "Ahom"));
+
 console.log(`analytics_unit ${pass}/${pass + fail} ${fail ? "FAIL" : "PASS"}`);
 process.exit(fail ? 1 : 0);
