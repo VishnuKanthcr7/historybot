@@ -94,6 +94,18 @@ async function main(db, created) {
     const [[msg]] = await db.query("SELECT COUNT(*) AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN anonymous_sessions s ON s.id = c.session_id WHERE s.user_id = ? AND m.role = 'user'", [u.id]);
     check("chat question answered in the browser and stored once", answer.length > 40 && Number(msg.n) === 1, { chars: answer.length, stored: msg.n });
 
+    // --- Sources: expandable list of chapter/page + excerpt, matching the stored citation pages
+    const art = page.locator("article").nth(1);
+    await art.getByRole("button", { name: /^(Sources|Source)/ }).click();
+    const rows = await art.getByTestId("source-row").allInnerTexts();
+    const expanded = await art.getByRole("button", { name: /^(Sources|Source)/ }).getAttribute("aria-expanded");
+    const [[stored]] = await db.query("SELECT m.content, m.source_pages, m.chunk_ids FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN anonymous_sessions s ON s.id = c.session_id WHERE s.user_id = ? AND m.role = 'assistant' ORDER BY m.created_at DESC LIMIT 1", [u.id]);
+    const storedSources = typeof stored.source_pages === "string" ? JSON.parse(stored.source_pages) : stored.source_pages || [];
+    fs.writeFileSync(path.join(OUT, "akbar-answer.json"), JSON.stringify(stored, null, 1));
+    const dbPages = new Set(storedSources.map((x) => Number(x.printed_page_number)));
+    const uiPages = rows.map((r) => Number((r.match(/page (\d+)/) || [])[1]));
+    check("Sources expand to chapter/page rows with a textbook excerpt; pages match the stored citation", expanded === "true" && rows.length > 0 && rows.every((r) => /Chapter \d+, page \d+/.test(r) && /“.{20,}”/s.test(r)) && uiPages.every((pg) => dbPages.has(pg)), { rows: rows.length, uiPages, dbPages: [...dbPages] });
+
     // --- learning module, Mark complete, PDF
     await page.getByRole("button", { name: "Make a learning module" }).click();
     await page.getByRole("button", { name: /Mark complete/ }).waitFor({ timeout: 300000 });

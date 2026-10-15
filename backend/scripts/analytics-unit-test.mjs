@@ -2,6 +2,7 @@
 import { buildSeries, enumerateBuckets, istDayKey } from "../src/services/timeseries.js";
 import { applyOptionOrder, buildLayout, layoutOf, rng, shouldRandomize } from "../src/services/quizRandom.js";
 import { gradeQuestion } from "../src/services/quizScoring.js";
+import { DEFINITIONS, HEADLINE_LABELS } from "../src/services/metricDefinitions.js";
 
 let pass = 0;
 let fail = 0;
@@ -102,6 +103,17 @@ check("short name accepted for a full-name answer", ok(["zahir ud din muhammad b
 check("spacing/hyphen variants accepted (Jija Bai, Din-i-Ilahi, Sukapha)", ok(["jijabai"], "Jija Bai") && ok(["din-e-ilahi"], "Din i Ilahi") && ok(["din-e-ilahi"], "DinEIlahi") && ok(["sukaphaa"], "Sukapha"));
 check("a different person is still wrong (Humayun for Babur, Akbar for Shivaji's mother)", !ok(["babur"], "Humayun") && !ok(["jijabai"], "Akbar") && !ok(["babur"], "Muhammad"));
 check("partial or empty answers are wrong", !ok(["babur"], "") && !ok(["babur"], "bab") && !ok(["turkish"], "persian") && !ok(["sukaphaa"], "Ahom"));
+
+// --- metric definitions match the SQL in overviewData() (checked 15 Oct 2026)
+const D = DEFINITIONS;
+check("every headline card has a label and a definition", Object.keys(HEADLINE_LABELS).every((k) => typeof D[k] === "string" && D[k].length > 20));
+check("registered: student role only, created in range", /student role/.test(D.registered_in_range) && /created in the date range/.test(D.registered_in_range) && /Teacher accounts are not counted/.test(D.registered_in_range));
+check("active: chat, module open, finished quiz incl. timed out, questionnaire; sign-in alone excluded", ["chat question", "opened a learning module", "timed out", "questionnaire", "Signing in alone does not count"].every((p) => D.active_students.includes(p)));
+check("assessment attempts: every attempt, timed out included, assessment mode incl. pre/post, practice/personal excluded", ["Every attempt counts", "timed out", "assessment mode", "pre/post", "personal revision quizzes are not included"].every((p) => D.assessments_submitted.includes(p)) && HEADLINE_LABELS.assessments_submitted === "Assessment attempts");
+check("timed out: any quiz or activity, in the date range, also counted as finished", ["any quiz or activity", "in the date range", "also counted in the finished attempts"].every((p) => D.timed_out.includes(p)));
+check("practice average: practice mode + personal revision, all attempts, assessment excluded", ["practice mode", "personal revision quizzes", "every attempt counts", "Assessment-mode quizzes are excluded"].every((p) => D.practice_mean_percent.includes(p)));
+check("assessment average: first finished attempt, must fall in range", ["FIRST finished attempt", "first attempt was finished in the date range"].every((p) => D.mean_percent.includes(p)));
+check("modules completed: once per student-module, first completed in range, Mark complete or checkpoint", ["first completed in the date range", "once per student", "Mark complete", "checkpoint quiz"].every((p) => D.modules_completed.includes(p)));
 
 console.log(`analytics_unit ${pass}/${pass + fail} ${fail ? "FAIL" : "PASS"}`);
 process.exit(fail ? 1 : 0);

@@ -88,6 +88,8 @@ def _public_sources(result: dict) -> list[dict]:
                 "authority": item.get("authority"),
                 "source_type": item.get("source_type"),
                 "document_name": item.get("document_name"),
+                "chapter": item.get("chapter"),
+                "excerpt": item.get("excerpt"),
             }
         )
     return sources
@@ -157,6 +159,8 @@ def econtent(body: EcontentRequest, x_internal_secret: str | None = Header(defau
                 "citation_label": item.get("citation_label"),
                 "authority": item.get("authority"),
                 "source_type": item.get("source_type"),
+                "chapter": item.get("chapter"),
+                "excerpt": item.get("excerpt"),
             }
             for item in result.get("sources") or []
             if item.get("textbook_page_number") is not None or item.get("printed_page_number") is not None

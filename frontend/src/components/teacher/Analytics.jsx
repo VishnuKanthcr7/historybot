@@ -4,10 +4,10 @@ import { Bars, Card, Empty, ErrorText, TableWrap, btn, field, fmtDate, fmtDateTi
 
 // Headline cards first, then the detail cards. Every value comes from the API; null means "not available".
 const HEADLINE = [
-  ["registered_in_range", "Registered (in range)"],
+  ["registered_in_range", "Students registered"],
   ["active_students", "Active students"],
   ["modules_completed", "Modules completed"],
-  ["assessments_submitted", "Assessments submitted"],
+  ["assessments_submitted", "Assessment attempts"],
   ["mean_percent", "Assessment average"],
   ["practice_mean_percent", "Practice average"],
 ];
@@ -25,9 +25,9 @@ const DETAIL = [
 
 function StatCard({ label, value, percent, definition, n, nNote, strong }) {
   return (
-    <div className={`min-w-0 rounded-3xl border p-4 ${strong ? "border-navy/40 bg-cream" : "border-rule bg-cream"}`}>
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-1 font-serif text-3xl text-navy" data-testid="stat-value">
+    <div className={`min-w-0 rounded-2xl border p-3 sm:rounded-3xl sm:p-4 ${strong ? "border-navy/40 bg-cream" : "border-rule bg-cream"}`}>
+      <p className="break-words text-[11px] font-semibold uppercase leading-tight tracking-wide text-muted sm:text-xs">{label}</p>
+      <p className="mt-1 font-serif text-2xl text-navy sm:text-3xl" data-testid="stat-value">
         {value == null ? (percent ? <span className="text-xl text-muted">No data</span> : "—") : percent ? `${value}%` : value}
       </p>
       {n != null ? <p className="text-xs text-muted">{n === 0 ? "No qualifying attempts" : `n = ${n} attempt${n === 1 ? "" : "s"}${nNote ? ` (${nNote})` : ""}`}</p> : null}
@@ -119,7 +119,7 @@ export function Overview({ range }) {
       <p className="text-xs text-muted" data-testid="data-as-of">
         Data as of {fmtDateTime(data.data_as_of)} · {data.range.from} to {data.range.to} inclusive (IST)
       </p>
-      <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6" data-testid="headline-cards">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-6" data-testid="headline-cards">
         {HEADLINE.map(([key, label]) => (
           <StatCard
             key={key}
@@ -139,7 +139,7 @@ export function Overview({ range }) {
       <Card title="Activity over time">
         <Trend range={range} />
       </Card>
-      <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-5">
         {DETAIL.map(([key, label]) => (
           <StatCard key={key} label={label} value={data.cards[key]} percent={pct.has(key)} definition={data.definitions[key]} />
         ))}

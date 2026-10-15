@@ -58,23 +58,8 @@ const ABANDON_HOURS = 24;
 
 const round1 = (x) => (x == null || Number.isNaN(x) ? null : Math.round(x * 10) / 10);
 
-export const DEFINITIONS = {
-  students_total: "Student accounts that exist now (role student), regardless of activity.",
-  registered_in_range: "Student accounts created in the date range.",
-  active_students: "Students with at least one chat question, opened module, or submitted quiz/activity/questionnaire in the date range. Not attendance.",
-  sign_ins: "Successful sign-ins in the date range (recorded since progress tracking began). A sign-in is not attendance.",
-  chat_questions: "Questions students typed in chat in the date range (count only; chat text is never shown).",
-  modules_generated: "Learning modules students generated in the date range.",
-  modules_opened: "Distinct student-module pairs first opened in the date range (refreshing does not count again).",
-  modules_completed: "Modules marked complete in the date range: the student clicked 'Mark complete' or submitted the module's checkpoint quiz. Opening or downloading is not completion.",
-  pdf_downloads: "Module PDF downloads by students in the date range (each download counts).",
-  quiz_attempts: "Quiz and activity attempts finished (submitted or timed out) in the date range.",
-  timed_out: "Finished attempts closed by the timer (scored from the last autosave).",
-  abandoned: "Untimed attempts still in progress more than 24 hours after they started (started in the date range).",
-  assessments_submitted: "Finished attempts on teacher quizzes in assessment mode in the date range.",
-  mean_percent: "Assessment average: mean percent of the FIRST finished attempt (submitted or timed out) per student on each teacher quiz in assessment mode (including pre/post tests) in the date range. Practice quizzes, activities and personal revision quizzes are excluded; a timed-out attempt with no saved answers scores 0%.",
-  practice_mean_percent: "Practice average: mean percent of ALL finished practice quizzes, activities and personal revision quizzes in the date range (every attempt counts, including retries).",
-};
+export { DEFINITIONS } from "../services/metricDefinitions.js";
+import { DEFINITIONS } from "../services/metricDefinitions.js";
 
 const round2 = (x) => (x == null || Number.isNaN(x) ? null : Math.round(x * 100) / 100);
 

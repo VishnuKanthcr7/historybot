@@ -193,6 +193,14 @@ async function main() {
           const r = el.getBoundingClientRect();
           return { left: Math.round(r.left), right: Math.round(document.documentElement.clientWidth - r.right) };
         });
+        if (w < 640) {
+          const qh = await sp.evaluate(() => {
+            const prompt = document.getElementById("q-prompt")?.getBoundingClientRect();
+            const nav = document.querySelector("nav[aria-label='Question navigation']");
+            return { promptTop: prompt && Math.round(prompt.top), progress: Boolean(document.querySelector("[role=progressbar]")), nav: Boolean(nav && nav.querySelectorAll("button").length >= 2), answers: document.querySelectorAll("#q-prompt ~ div button, #q-prompt ~ div input, #q-prompt ~ div [role=radio]").length };
+          });
+          check(`[${w}x${h}] quiz header compact: question starts within 200px; progress, question nav and answer controls present`, qh.promptTop != null && qh.promptTop <= 200 && qh.progress && qh.nav && qh.answers > 0, JSON.stringify(qh));
+        }
         check(`[${w}x${h}] quiz-player column is centred`, Boolean(centre) && Math.abs(centre.left - centre.right) <= 2, JSON.stringify(centre));
       }
       // Chat: a long unbroken word must wrap and the composer must not cover the last message.
@@ -254,6 +262,37 @@ async function main() {
             return { days: days.length, withData: withData.length, drawn: drawn.length, empty: Boolean(document.body.innerText.match(/No chat questions, quiz attempts or module activity/)) };
           });
           check(`[${w}x${h}] overview: activity chart draws every day that has data`, (chart.days > 0 && chart.withData === chart.drawn) || chart.empty, JSON.stringify(chart));
+        }
+      }
+      // Every dashboard section is reachable and selectable by the visible control at this width.
+      {
+        await tp.goto(`${APP}/admin?tab=overview`, { waitUntil: "networkidle" });
+        const sections = [["overview", "Overview"], ["students", "Students"], ["topics", "Topics & trends"], ["achievement", "Achievement"], ["quizzes", "Quizzes"], ["questions", "Question bank"], ["research", "Research"], ["reports", "Reports"]];
+        const reached = [];
+        const useSelect = await tp.getByLabel("Dashboard section", { exact: true }).isVisible().catch(() => false);
+        for (const [key, label] of sections) {
+          if (useSelect) await tp.getByLabel("Dashboard section", { exact: true }).selectOption(key);
+          else {
+            const t = tp.getByRole("tab", { name: label, exact: true });
+            const box = await t.boundingBox();
+            if (!box || box.x < 0 || box.x + box.width > w + 1) continue; // must be visible without sideways scrolling
+            await t.click();
+          }
+          await tp.waitForFunction((k) => new URL(location.href).searchParams.get("tab") === k, key, { timeout: 5000 }).catch(() => {});
+          if (new URL(tp.url()).searchParams.get("tab") === key) reached.push(key);
+        }
+        const sideways = await tp.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+        check(`[${w}x${h}] dashboard: all 8 sections reachable and selectable (${useSelect ? "section menu" : "wrapped tabs"})`, reached.length === 8 && !sideways, JSON.stringify({ reached: reached.length, sideways }));
+        if (w < 640) {
+          await tp.goto(`${APP}/admin?tab=overview`, { waitUntil: "networkidle" });
+          const cards = await tp.evaluate(() => {
+            const g = document.querySelector("[data-testid=headline-cards]");
+            const r = g?.getBoundingClientRect();
+            const vals = [...document.querySelectorAll("[data-testid=headline-cards] [data-testid=stat-value]")].map((v) => parseFloat(getComputedStyle(v).fontSize));
+            return { height: r && Math.round(r.height), cols: g ? getComputedStyle(g).gridTemplateColumns.split(" ").length : 0, minValueFont: Math.min(...vals) };
+          });
+          await tp.screenshot({ path: path.join(OUT, `dashboard-cards-${w}.png`) });
+          check(`[${w}x${h}] overview cards: 2 columns, readable values (>= 20px), headline block <= 420px tall`, cards.cols === 2 && cards.minValueFont >= 20 && cards.height <= 420, JSON.stringify(cards));
         }
       }
       // Forms open inside tabs

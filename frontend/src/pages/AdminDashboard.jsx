@@ -51,8 +51,26 @@ export default function AdminDashboard() {
             </button>
           </div>
         </header>
-        <nav className="-mx-3 mb-4 overflow-x-auto px-3" aria-label="Dashboard sections">
-          <div role="tablist" className="flex min-w-max gap-2">
+        {/* Phones: one labelled menu lists every section (nothing hidden off-screen); wider screens: wrapped tabs. */}
+        <div className="mb-4 sm:hidden">
+          <label htmlFor="dash-section" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">
+            Dashboard section
+          </label>
+          <select
+            id="dash-section"
+            value={tab}
+            onChange={(e) => setParams({ tab: e.target.value })}
+            className="min-h-11 w-full rounded-full border border-navy bg-cream px-4 text-sm text-navy"
+          >
+            {TABS.map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <nav className="mb-4 hidden sm:block" aria-label="Dashboard sections">
+          <div role="tablist" className="flex flex-wrap gap-2">
             {TABS.map(([key, label]) => (
               <button
                 key={key}

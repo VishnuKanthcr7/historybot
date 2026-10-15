@@ -275,10 +275,11 @@ export default function QuizPlayer() {
   return (
     <PageShell
       narrow
+      compact
       eyebrow={`${ACTIVITY_LABELS[data.quiz.activity_type] || "Quiz"} · ${data.quiz.mode === "assessment" ? "Assessment" : "Practice"}`}
       title={data.quiz.title}
     >
-      <div className="sticky top-0 z-10 -mx-3 mb-4 border-b border-rule bg-paper/95 px-3 py-2 backdrop-blur sm:mx-0 sm:rounded-2xl sm:border">
+      <div className="sticky top-0 z-10 -mx-3 mb-3 border-b border-rule bg-paper/95 px-3 py-1.5 backdrop-blur sm:mb-4 sm:py-2 sm:mx-0 sm:rounded-2xl sm:border">
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
           <span>
             Question <strong>{index + 1}</strong> of {questions.length} · {answered} answered
@@ -296,8 +297,8 @@ export default function QuizPlayer() {
             </span>
           ) : null}
         </div>
-        <div className="mt-2 h-2 rounded-full bg-rule" role="progressbar" aria-valuemin={0} aria-valuemax={questions.length} aria-valuenow={answered} aria-label="Questions answered">
-          <div className="h-2 rounded-full bg-brass" style={{ width: `${(answered / questions.length) * 100}%` }} />
+        <div className="mt-1.5 h-1.5 rounded-full bg-rule sm:mt-2 sm:h-2" role="progressbar" aria-valuemin={0} aria-valuemax={questions.length} aria-valuenow={answered} aria-label="Questions answered">
+          <div className="h-full rounded-full bg-brass" style={{ width: `${(answered / questions.length) * 100}%` }} />
         </div>
       </div>
 

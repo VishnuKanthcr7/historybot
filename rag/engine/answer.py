@@ -1829,6 +1829,32 @@ def _fix_swapped_subjects(answer: str, evidence: list[dict]) -> tuple[str, int]:
 _SUPPORT_MIN_RATIO = 0.5
 
 
+_GLOSS_RE = re.compile(r",\s+(?:meaning|which means|that is|i\.e\.|an?)\s+(?P<tail>[^,;]+?)\s*([.!?])?\s*$", re.I)
+
+
+def _split_unsupported_gloss(sentence: str, support_stems: set[str], generic: set[str]) -> tuple[str, str]:
+    """Split "X, a/an/meaning <gloss>." when the gloss is mostly not in the passages.
+
+    Returns (head, supplementary gloss) or (sentence, "") when there is no unsupported gloss.
+    """
+    from rag.engine.validate import _support_stems
+
+    match = _GLOSS_RE.search(sentence or "")
+    if not match:
+        return sentence, ""
+    tail = match.group("tail").strip()
+    stems = _support_stems(tail) - generic
+    if len(stems) < 2 or len(stems & support_stems) / len(stems) >= _SUPPORT_MIN_RATIO:
+        return sentence, ""
+    head = sentence[: match.start()].rstrip(" ,") + "."
+    term_words = re.sub(r"\*+", "", head).rstrip(".").split()
+    term = " ".join(term_words[-2:]) if term_words else ""
+    if term.lower().startswith("the "):
+        term = term[4:]
+    gloss = f"{term[:1].upper() + term[1:]}: {tail}." if term else tail[:1].upper() + tail[1:] + "."
+    return head, gloss
+
+
 def _drop_unsupported_sentences(
     answer: str, support: list[dict], collect: list[str] | None = None
 ) -> tuple[str, int]:
@@ -1874,6 +1900,15 @@ def _drop_unsupported_sentences(
                 if collect is not None:
                     collect.append(text)
                 continue
+            # An explanatory gloss ("..., a system of official ranks." / "..., meaning respect for ...")
+            # that the passages do not back is not a textbook fact: the textbook part keeps the head,
+            # the gloss moves to the supplementary (uncited) section.
+            head, gloss = _split_unsupported_gloss(text, support_stems, generic)
+            if gloss:
+                dropped += 1
+                if collect is not None:
+                    collect.append(gloss)
+                text = head
             kept.append(text)
         if kept:
             out_lines.append(prefix + " ".join(kept))
@@ -2734,6 +2769,33 @@ def _limited(language: str, retrieval_query: str, hits: list[dict], selected: li
     }
 
 
+def _source_excerpt(text: str, limit: int = 240) -> str:
+    """A short, readable quote from a retrieved passage for the student's "Sources" list.
+
+    The PDF text layer repeats some runs; repeated sentences are removed and a cut-off first
+    fragment is skipped, so the excerpt starts at a sentence boundary.
+    """
+    clean = re.sub(r"\s+", " ", (text or "").replace("\ufffd", "'")).strip()
+    if not clean:
+        return ""
+    parts = re.split(r"(?<=[.!?])\s+", clean)
+    if len(parts) > 1 and parts[0][:1].islower():
+        parts = parts[1:]
+    out, seen = [], set()
+    for part in parts:
+        key = part.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(part)
+        if len(" ".join(out)) >= limit:
+            break
+    excerpt = " ".join(out)
+    if len(excerpt) > limit:
+        excerpt = excerpt[:limit].rsplit(" ", 1)[0] + "…"
+    return excerpt
+
+
 def _sources(selected: list[dict]) -> list[dict]:
     seen = []
     used = set()
@@ -2748,8 +2810,11 @@ def _sources(selected: list[dict]) -> list[dict]:
             continue
         used.add(key)
         page = item.get("printed_page_number") or item.get("textbook_page_number")
+        chapter = re.search(r"_ch(\d+)_", str(item.get("chunk_id") or ""))
         seen.append(
             {
+                "chapter": f"Chapter {chapter.group(1)}" if chapter else None,
+                "excerpt": _source_excerpt(item.get("text") or ""),
                 "textbook_page_number": page,
                 "printed_page_number": page,
                 "pdf_page_number": item.get("pdf_page_number"),

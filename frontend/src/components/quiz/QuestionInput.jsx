@@ -237,14 +237,15 @@ export function formatSeconds(total) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-export function PageShell({ eyebrow, title, children, actions, narrow = false }) {
+export function PageShell({ eyebrow, title, children, actions, narrow = false, compact = false }) {
+  // compact: quiz in progress on phones gets a smaller title so the question and answers stay in view.
   return (
-    <div className="min-h-dvh bg-paper px-3 py-6 font-sans text-ink sm:px-6">
+    <div className={`min-h-dvh bg-paper px-3 font-sans text-ink sm:px-6 ${compact ? "py-3 sm:py-6" : "py-6"}`}>
       <div className={`mx-auto w-full ${narrow ? "max-w-3xl" : "max-w-5xl"}`} data-testid="quiz-column">
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-          <div>
+        <div className={`flex flex-wrap items-end justify-between gap-3 ${compact ? "mb-2 sm:mb-5" : "mb-5"}`}>
+          <div className="min-w-0">
             {eyebrow ? <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brass">{eyebrow}</p> : null}
-            <h1 className="mt-1 font-serif text-3xl text-navy">{title}</h1>
+            <h1 className={`mt-1 font-serif text-navy ${compact ? "text-xl leading-tight sm:text-3xl" : "text-3xl"}`}>{title}</h1>
           </div>
           <div className="flex flex-wrap gap-2">{actions}</div>
         </div>

@@ -7,5 +7,8 @@ export function publicSources(items) {
       citation_label: item.citation_label || undefined,
       authority: item.authority || undefined,
       source_type: item.source_type || undefined,
+      // Shown to students under "Sources": chapter and a short quote of the retrieved passage.
+      chapter: typeof item.chapter === "string" ? item.chapter.slice(0, 40) : undefined,
+      excerpt: typeof item.excerpt === "string" && item.excerpt.trim() ? item.excerpt.trim().slice(0, 300) : undefined,
     }));
 }

@@ -2219,10 +2219,23 @@ def _pages(facts: list[Fact]) -> list[int]:
 def _sources(facts: list[Fact]) -> list[dict]:
     rows = []
     seen = set()
+    # The textbook sentences each cited page actually supplied (shown to students under "Sources").
+    sentences: dict[int, list[str]] = {}
+    for fact in facts:
+        if fact.printed_page is None:
+            continue
+        text = re.sub(r"\s+", " ", (fact.sentence or "").replace("\ufffd", "'")).strip()
+        bucket = sentences.setdefault(fact.printed_page, [])
+        if text and text not in bucket:
+            bucket.append(text)
     for fact in facts:
         if fact.printed_page is None or fact.printed_page in seen:
             continue
         seen.add(fact.printed_page)
+        chapter = re.search(r"_ch(\d+)_", fact.chunk_id or "")
+        excerpt = " … ".join(sentences.get(fact.printed_page, [])[:2])
+        if len(excerpt) > 240:
+            excerpt = excerpt[:240].rsplit(" ", 1)[0] + "…"
         rows.append(
             {
                 "textbook_page_number": fact.printed_page,
@@ -2233,6 +2246,8 @@ def _sources(facts: list[Fact]) -> list[dict]:
                 "authority": "primary",
                 "citation_label": fact.citation_label or CITE_LABEL,
                 "document_name": fact.document_name,
+                "chapter": f"Chapter {chapter.group(1)}" if chapter else None,
+                "excerpt": excerpt,
             }
         )
     rows.sort(key=lambda item: int(item["printed_page_number"]))

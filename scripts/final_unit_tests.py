@@ -105,6 +105,28 @@ check("unsupported sentence dropped, supported kept", dropped == 1 and "Jizya" i
 kept, dropped = ans._drop_unsupported_sentences("| a | b |\n**Heading**\nThe textbook does not give his birthplace.", support)
 check("tables, headings and textbook notes are kept", dropped == 0, kept)
 
+# --- Akbar audit (15 Oct 2026): glosses the passages do not back leave the textbook part ----------
+_akbar = [
+    {"text": "The Mansabdari system was a unique feature of his administration. Akbar was the supreme head of his empire, the commander-in-chief of his army, head of the executive and judiciary. They were called 'Subhas'."},
+    {"text": "Akbar's Hindu policy : Akbar adopted a policy of tolerance towards Hindus. He permitted his Rajput wives to worship their gods in the palace itself. He abolished the 'Jizya tax' on Hindus."},
+    {"text": "Din-e-Ilahi : Akbar in his childhood got inspired by his mother, teachers, sufi saints and adopted religious harmony."},
+]
+moved = []
+kept, dropped = ans._drop_unsupported_sentences(
+    "- Akbar's administration included the **Mansabdari system**, a system of official ranks.\n"
+    "- Akbar followed religious tolerance, meaning respect for different religious beliefs.\n"
+    "- Akbar abolished **Jizya**, a tax imposed on Hindus.\n"
+    "- Akbar divided his empire into provinces called **Subhas**.",
+    _akbar,
+    collect=moved,
+)
+check("akbar: unsupported gloss 'a system of official ranks' leaves the textbook part", "official ranks" not in kept and "Mansabdari system**." in kept, kept)
+check("akbar: unsupported gloss 'meaning respect for different religious beliefs' leaves the textbook part", "respect for different" not in kept and "religious tolerance." in kept, kept)
+check("akbar: moved glosses become supplementary lines", any("official ranks" in m for m in moved) and any("respect for different" in m for m in moved), moved)
+check("akbar: supported gloss kept ('a tax imposed on Hindus') and plain facts kept", "a tax imposed on Hindus" in kept and "Subhas" in kept and dropped == 2, (kept, dropped))
+_src = ans._sources([{"chunk_id": "ktbs2026_en_ch17_pdf7_tb5_04", "printed_page_number": 5, "text": "st famous Mughal king, Akbar, was born in Amarkot in Sindh province. Humayun was his father. Humayun was his father."}])
+check("sources carry chapter, page and a clean excerpt", _src[0]["chapter"] == "Chapter 17" and _src[0]["printed_page_number"] == 5 and _src[0]["excerpt"].startswith("Humayun was his father.") and _src[0]["excerpt"].count("Humayun") == 1, _src)
+
 # --- PDF markdown flow ---------------------------------------------------------
 try:
     from rag.pdf import render
