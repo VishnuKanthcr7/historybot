@@ -21,7 +21,7 @@ const API = process.env.UI_AUDIT_API || "http://127.0.0.1:3100/api/v1";
 const APP = process.env.UI_AUDIT_APP || "http://127.0.0.1:4173";
 const OUT = process.env.UI_AUDIT_OUT || path.join(ROOT, "tmp", "final-dev", "ui-audit");
 fs.mkdirSync(OUT, { recursive: true });
-const VIEWPORTS = (process.env.UI_AUDIT_VIEWPORTS || "390x844,768x1024,1024x768,1366x768,1920x1080").split(",").map((v) => v.split("x").map(Number));
+const VIEWPORTS = (process.env.UI_AUDIT_VIEWPORTS || "360x800,390x844,768x1024,1024x768,1366x768,1920x1080").split(",").map((v) => v.split("x").map(Number));
 
 let pass = 0;
 let fail = 0;
@@ -216,6 +216,21 @@ async function main() {
       await sp.screenshot({ path: path.join(OUT, `chat-long-${w}.png`) });
       check(`[${w}x${h}] chat: long message wraps, no horizontal scroll`, chat.n >= 1 && chat.overflowing === 0 && !chat.pageOverflow, JSON.stringify(chat));
       check(`[${w}x${h}] chat: composer does not cover the last message`, chat.lastBottom != null && chat.composerTop != null && chat.lastBottom <= chat.composerTop + 1, JSON.stringify(chat));
+      // Header: on phones the secondary actions fold into "More"; the header must stay one short row.
+      const hdr = await sp.evaluate(() => Math.round(document.querySelector("header").getBoundingClientRect().height));
+      if (w < 768) {
+        const more = sp.getByRole("button", { name: "More" });
+        const hidden = !(await sp.getByRole("button", { name: "Log out" }).isVisible());
+        await more.click();
+        const shown = await sp.getByRole("button", { name: "Log out" }).isVisible() && await sp.getByLabel("Language").isVisible() && await sp.getByRole("link", { name: "Quizzes" }).isVisible();
+        await sp.screenshot({ path: path.join(OUT, `chat-menu-${w}.png`) });
+        await sp.keyboard.press("Escape");
+        const focusBack = await sp.evaluate(() => document.activeElement?.getAttribute("aria-controls") === "chat-more");
+        const closed = !(await sp.getByRole("button", { name: "Log out" }).isVisible());
+        check(`[${w}x${h}] chat header: one compact row (<= 72px); More menu shows module, language, Quizzes, Log out; Escape closes and returns focus`, hdr <= 72 && hidden && shown && focusBack && closed, JSON.stringify({ hdr, hidden, shown, focusBack, closed }));
+      } else {
+        check(`[${w}x${h}] chat header: actions visible without a menu`, await sp.getByRole("button", { name: "Log out" }).isVisible(), JSON.stringify({ hdr }));
+      }
       check(`[${w}x${h}] student pages have no script errors`, errors.length === 0, errors.join(" | "));
       await sctx.close();
 

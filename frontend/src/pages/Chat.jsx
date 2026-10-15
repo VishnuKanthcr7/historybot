@@ -115,6 +115,8 @@ export default function Chat() {
     setMenuOpen(false);
   }
 
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreBtn = useRef(null);
   const lastUser = [...messages].reverse().find((item) => item.role === "user");
 
   return (
@@ -122,36 +124,62 @@ export default function Chat() {
       <a href="#chat-main" className="skip-link">
         Skip to chat
       </a>
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-rule bg-cream px-3 py-2.5 md:px-5">
-        <div className="flex min-w-0 items-center gap-2">
+      <header
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && moreOpen) {
+            setMoreOpen(false);
+            moreBtn.current?.focus();
+          }
+        }}
+        className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-rule bg-cream px-3 py-2.5 max-[380px]:gap-1.5 max-[380px]:px-2 md:px-5">
+        <div className="flex min-w-0 items-center gap-2 max-[380px]:gap-1.5">
           <button
             type="button"
-            className="min-h-11 rounded-full border border-rule px-3 text-sm md:hidden"
+            className="min-h-11 rounded-full border border-rule px-3 text-sm max-[380px]:px-2.5 md:hidden"
             aria-label={menuOpen ? t.closeMenu : t.openMenu}
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((v) => !v)}
           >
             {t.history}
           </button>
-          <Link to="/" className="truncate font-serif text-xl text-navy">
+          <Link to="/" className="truncate font-serif text-xl text-navy max-[380px]:text-lg">
             HistoryBot
           </Link>
           <span className="hidden text-[10px] uppercase tracking-[0.16em] text-muted lg:inline">
             Class 9 Social Science
           </span>
         </div>
-        <div className="chat-actions">
+        <div className="ml-auto flex items-center gap-2 max-[380px]:gap-1.5">
           <button
             type="button"
             onClick={handleNewChat}
-            className="min-h-11 rounded-full border border-navy px-3 text-sm text-navy transition hover:bg-navy hover:text-cream"
+            className="min-h-11 rounded-full border border-navy px-3 text-sm text-navy transition hover:bg-navy hover:text-cream max-[380px]:px-2.5"
           >
             {t.newChat}
           </button>
+          {/* Phones: module, language and account links fold into one menu so the conversation keeps the screen. */}
+          <button
+            ref={moreBtn}
+            type="button"
+            className="min-h-11 min-w-11 rounded-full border border-rule px-3 text-sm text-navy max-[380px]:px-2.5 md:hidden"
+            aria-expanded={moreOpen}
+            aria-controls="chat-more"
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            {moreOpen ? "Close" : "More"}
+          </button>
+        </div>
+        <div
+          id="chat-more"
+          className={`chat-actions ${moreOpen ? "flex" : "hidden"} md:flex`}
+        >
           <button
             type="button"
             disabled={econtentLoading || !lastUser || loading}
-            onClick={() => requestEcontent(lastUser?.content)}
+            onClick={() => {
+              setMoreOpen(false);
+              requestEcontent(lastUser?.content);
+            }}
             className="chat-module min-h-11 rounded-full border border-rule bg-cream px-3 text-sm text-navy transition hover:border-brass disabled:opacity-50"
             title={!lastUser ? "Ask a question first" : undefined}
           >

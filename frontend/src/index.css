@@ -653,7 +653,7 @@ body {
 }
 
 .chat-actions {
-  display: flex;
+  /* display comes from the hidden/flex utilities (phones fold these into the "More" menu) */
   max-width: 100%;
   flex-wrap: wrap;
   align-items: center;

@@ -63,3 +63,18 @@ Totals: 41 questions; {"draft":5,"published":36}; 1 with findings; 0 set to need
   - order-battles / order-ahom (different event sets; order-ahom is a draft)
   - akbar-birth / shivaji-born
 - No duplicates were found, and no answer key is invalid.
+
+## Draft review against the textbook, 15 Oct 2026 (recommendations only; no status changed)
+
+I checked each item against the indexed KTBS Class 9 Social Science Part 2 (English) 2026-27 text, Chapter 17, reading it read-only from data/chroma. The source chunks contain duplicated OCR fragments (e.g. "The Ahom dynasty was founded by Ahom Dynasty Ahoms were…"), but the quoted sentences are present verbatim.
+
+| Key | Source checked | Finding | Recommendation |
+|---|---|---|---|
+| ahom-founder (fill blank) | ch17_pdf3_tb1_02: "The Ahom dynasty was founded by Sukaphaa in 1228." | The key is correct. The server also accepts the curated Sukaphaa spellings (answerVariants.js). | Ready to publish once the teacher approves. |
+| ahom-capital (MCQ) | ch17_pdf3_tb1_02: "Their first capital was Charaideo." | The key "Charaideo" is correct. The distractors (Guwahati, Itakhuli, Saraighat) are chapter place names that are never called the capital, so they are fair. | Ready to publish once the teacher approves. |
+| ahom-borphukan (MCQ) | ch17_pdf4_tb2_01: "Lachit, became the commanderin-chief of the Ahom army. This post was called 'Borphukan'." | The key is correct. Peshwa, Hawaldar and Mansabdar are posts from other parts of the chapter, which makes them good distractors. | Optional wording: "What was the post of commander-in-chief of the Ahom army (held by Lachit) called?" Then publish once the teacher approves. |
+| ahom-saraighat (true/false) | ch17_pdf4_tb2_02: "a significant naval attack took place at Saraighat in 1671, the Ahoms were victorious." | The statement "The Ahoms won the naval battle at Saraighat in 1671" is TRUE per the text. The book says "naval attack"; "naval battle" is a fair paraphrase. | Ready to publish once the teacher approves. |
+| order-ahom (order) | pdf3_tb1_02 (1228), pdf4_tb2_02 (1670, 1671), pdf5_tb3_01: "In 1682, under the rule of Gadadhar Singha, the last battle took place…" | All four dates are in the text, and the order 1228 → 1670 → 1671 → 1682 is correct. The 1670 and 1671 events are adjacent but the years are shown, so this is not ambiguous. | Ready to publish once the teacher approves. |
+| shershah-coin (published) | ch17_pdf7_tb5_02: "Sher Shah introduced a new coin the Dam (Copper) and Rupiya (Silver) into circulation." | Re-checked: the key Rupiya is correct, and "silver" in the prompt rules out Dam. | No change needed. The flag can be cleared at the teacher's discretion. |
+
+No draft has a factual error. Publishing is a teacher decision and has not been done. The database was not changed.
