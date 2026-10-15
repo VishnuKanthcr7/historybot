@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { buildSeries } from "../services/timeseries.js";
 import { pool } from "../db/pool.js";
 import { AppError } from "../utils/errors.js";
 import { mean, median } from "../services/quizScoring.js";
@@ -71,8 +72,8 @@ export const DEFINITIONS = {
   timed_out: "Finished attempts closed by the timer (scored from the last autosave).",
   abandoned: "Untimed attempts still in progress more than 24 hours after they started (started in the date range).",
   assessments_submitted: "Finished attempts on teacher quizzes in assessment mode in the date range.",
-  mean_percent: "Average achievement: mean percent of the FIRST finished attempt per student per teacher assessment in the date range. Practice and personal activities are excluded.",
-  practice_mean_percent: "Mean percent of all finished practice quizzes and activities in the date range.",
+  mean_percent: "Assessment average: mean percent of the FIRST finished attempt (submitted or timed out) per student on each teacher quiz in assessment mode (including pre/post tests) in the date range. Practice quizzes, activities and personal revision quizzes are excluded; a timed-out attempt with no saved answers scores 0%.",
+  practice_mean_percent: "Practice average: mean percent of ALL finished practice quizzes, activities and personal revision quizzes in the date range (every attempt counts, including retries).",
 };
 
 const round2 = (x) => (x == null || Number.isNaN(x) ? null : Math.round(x * 100) / 100);
@@ -115,13 +116,14 @@ export async function overviewData(range) {
   const quiz = await one(
     `SELECT COUNT(*) AS n, SUM(a.end_reason = 'timed_out') AS timed_out,
             SUM(z.mode = 'assessment' AND z.owner_user_id IS NULL) AS assessments,
-            AVG(IF(z.mode = 'practice' OR z.owner_user_id IS NOT NULL, a.percent, NULL)) AS practice_mean
+            AVG(IF(z.mode = 'practice' OR z.owner_user_id IS NOT NULL, a.percent, NULL)) AS practice_mean,
+            SUM(z.mode = 'practice' OR z.owner_user_id IS NOT NULL) AS practice_n
      FROM quiz_attempts a JOIN quizzes z ON z.id = a.quiz_id JOIN users u ON u.id = a.user_id AND u.role = 'student'
      WHERE a.status = 'submitted' AND a.submitted_at >= ? AND a.submitted_at < ?`,
     P
   );
   const achievementRow = await one(
-    `SELECT AVG(a.percent) AS mean, COUNT(*) AS n FROM quiz_attempts a JOIN quizzes z ON z.id = a.quiz_id
+    `SELECT AVG(a.percent) AS mean, COUNT(*) AS n, SUM(a.end_reason = 'timed_out') AS timed_out FROM quiz_attempts a JOIN quizzes z ON z.id = a.quiz_id
      JOIN users u ON u.id = a.user_id AND u.role = 'student'
      WHERE a.status = 'submitted' AND a.submitted_at >= ? AND a.submitted_at < ? AND z.mode = 'assessment' AND z.owner_user_id IS NULL
        AND a.attempt_no = (SELECT MIN(b.attempt_no) FROM quiz_attempts b WHERE b.quiz_id = a.quiz_id AND b.user_id = a.user_id AND b.status = 'submitted')`,
@@ -168,6 +170,8 @@ export async function overviewData(range) {
       assessments_submitted: num(quiz.assessments),
       mean_percent: achievementRow.mean == null ? null : round1(Number(achievementRow.mean)),
       mean_percent_n: num(achievementRow.n),
+      mean_percent_timed_out: num(achievementRow.timed_out),
+      practice_mean_percent_n: num(quiz.practice_n),
       practice_mean_percent: quiz.practice_mean == null ? null : round1(Number(quiz.practice_mean)),
     },
     notes: {
@@ -353,19 +357,21 @@ export async function timeseries(req, res, next) {
        WHERE m.role = 'user' AND m.created_at >= ? AND m.created_at < ? GROUP BY bucket ORDER BY bucket`,
       [range.start, range.end]
     );
-    const map = new Map();
-    for (const r of quiz) map.set(r.bucket, { bucket: r.bucket, quiz_attempts: Number(r.n), quiz_students: Number(r.students), mean_percent: round1(Number(r.mean_percent)), chat_questions: 0, chat_students: 0 });
-    for (const r of chat) {
-      const e = map.get(r.bucket) || { bucket: r.bucket, quiz_attempts: 0, quiz_students: 0, mean_percent: null, chat_questions: 0, chat_students: 0 };
-      e.chat_questions = Number(r.n);
-      e.chat_students = Number(r.students);
-      map.set(r.bucket, e);
-    }
+    const [events] = await pool.query(
+      `SELECT ${k("e.created_at")} AS bucket, e.event_type, COUNT(*) AS n
+       FROM analytics_events e
+       LEFT JOIN anonymous_sessions s ON s.id = e.session_id
+       JOIN users u ON u.id = COALESCE(e.user_id, s.user_id) AND u.role = 'student'
+       WHERE e.event_type IN ('MODULE_OPENED', 'MODULE_COMPLETED', 'PDF_DOWNLOADED', 'USER_SIGNED_IN')
+         AND e.created_at >= ? AND e.created_at < ? GROUP BY bucket, e.event_type`,
+      [range.start, range.end]
+    );
+    const built = buildSeries({ quiz, chat, events }, range.from, range.to, bucket);
     res.json({
-      range: { from: range.from, to: range.to },
+      range: { from: range.from, to: range.to, timezone: "IST (UTC+05:30)", inclusive: true },
       bucket,
-      note: "n = number of submitted attempts in the period. Means from small n are not reliable.",
-      series: [...map.values()].sort((a, b) => (a.bucket < b.bucket ? -1 : 1)),
+      note: "Every IST day (or week) in the range is listed, including days with no activity. n = number of finished attempts; means from small n are not reliable.",
+      ...built,
     });
   } catch (err) {
     next(err);
@@ -422,7 +428,7 @@ export async function achievement(req, res, next) {
 // pre-test attempts may be from any earlier date. Only students with both are compared (matched pairs).
 export async function prePostData(range) {
   const [pairs] = await pool.query(
-    `SELECT post.id AS post_id, post.title AS post_title, pre.id AS pre_id, pre.title AS pre_title
+    `SELECT post.id AS post_id, post.title AS post_title, post.status AS post_status, pre.id AS pre_id, pre.title AS pre_title, pre.status AS pre_status
      FROM quizzes post JOIN quizzes pre ON pre.id = post.pre_quiz_id
      WHERE post.owner_user_id IS NULL AND post.status <> 'draft' ORDER BY post.created_at`
   );
@@ -446,8 +452,8 @@ export async function prePostData(range) {
     const gains = matched.map((id) => post.get(id) - pre.get(id));
     const avg = (v) => (v.length ? round2(v.reduce((x, y) => x + y, 0) / v.length) : null);
     out.push({
-      pre_quiz: { id: pair.pre_id, title: pair.pre_title },
-      post_quiz: { id: pair.post_id, title: pair.post_title },
+      pre_quiz: { id: pair.pre_id, title: pair.pre_title, status: pair.pre_status, n: pre.size },
+      post_quiz: { id: pair.post_id, title: pair.post_title, status: pair.post_status, n: post.size },
       paired_n: matched.length,
       mean_pre: avg(preVals),
       mean_post: avg(postVals),

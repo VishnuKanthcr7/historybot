@@ -6,7 +6,7 @@ export default function AccountMenu({ variant = "chat", teacherLabel = "Teacher 
   const home = variant === "home";
   const className = home
     ? "home-account"
-    : "min-h-11 rounded-full border border-rule bg-cream px-3 text-sm text-navy";
+    : "inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-full border border-rule bg-cream px-3 text-sm text-navy";
 
   if (!user) {
     if (!home) {

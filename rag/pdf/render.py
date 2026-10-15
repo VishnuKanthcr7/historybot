@@ -106,6 +106,7 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
             textColor=NAVY,
             spaceBefore=10,
             spaceAfter=4,
+            keepWithNext=1,
         )
     )
     styles.add(
@@ -117,6 +118,7 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
             textColor=NAVY,
             spaceBefore=6,
             spaceAfter=2,
+            keepWithNext=1,
         )
     )
     styles.add(
@@ -148,6 +150,8 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
             textColor=BRASS,
         )
     )
+    # A note that belongs to the following text (never left alone at the bottom of a page).
+    styles.add(ParagraphStyle("HBMetaNext", parent=styles["HBMeta"], keepWithNext=1))
 
     story = []
     story.append(Paragraph(_esc(title), styles["HBTitle"]))
@@ -184,7 +188,7 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
             continue
         if key == "additional_explanation":
             story.append(Paragraph(_esc(heading), styles["HBH"]))
-            story.append(Paragraph("General history, not from the textbook pages.", styles["HBMeta"]))
+            story.append(Paragraph("General history, not from the textbook pages.", styles["HBMetaNext"]))
             story.extend(_flow_markdown(value, styles))
             continue
         if key == "detailed_explanation":
@@ -202,7 +206,7 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
         story.append(KeepTogether(block))
 
     if images:
-        story.append(Paragraph("Figures and images", styles["HBH"]))
+        figures_heading = Paragraph("Figures and images", styles["HBH"])
         for item in images:
             path = IMAGE_ROOT / str(item.get("file_path") or "")
             if not path.is_file():
@@ -212,13 +216,19 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
                 img = Image(str(path), width=90 * mm, height=70 * mm, kind="proportional")
             except Exception:
                 continue
-            story.append(img)
-            story.append(Paragraph(_esc(caption), styles["HBMeta"]))
+            # Image, caption and credit stay on one page.
+            figure = [img, Paragraph(_esc(caption), styles["HBMeta"])]
             credit = " · ".join(
                 str(part) for part in (item.get("source"), item.get("license")) if part
             )
             if credit:
-                story.append(Paragraph(_esc(credit[:400]), styles["HBMeta"]))
+                figure.append(Paragraph(_esc(credit[:400]), styles["HBMeta"]))
+            figure.append(Spacer(1, 6))
+            if figures_heading is not None:
+                # The section heading always sits on the same page as its first figure.
+                figure.insert(0, figures_heading)
+                figures_heading = None
+            story.append(KeepTogether(figure))
 
     source_lines = []
     textbook_label = "Class 9 Karnataka State Board 2026–27 textbook"
@@ -233,10 +243,11 @@ def render_econtent_pdf(document: dict, images: list[dict] | None = None) -> byt
         source_lines.append(f"Source: {item.get('citation_label') or textbook_label}, page {page}")
     if citations:
         story.append(Paragraph("Section page citations", styles["HBH"]))
-        for title, pages in citations.items():
+        # (loop variable must not shadow `title`, which is the PDF's document title below)
+        for section_title, pages in citations.items():
             line = _cite_line(pages)
             if line:
-                story.append(Paragraph(_esc(f"{title} — {line}"), styles["HBBody"]))
+                story.append(Paragraph(_esc(f"{section_title} — {line}"), styles["HBBody"]))
     extra_pages = [int(p) for p in (content.get("textbook_source_pages") or []) if str(p).isdigit()]
     if extra_pages and not source_lines:
         source_lines.append(
@@ -316,9 +327,13 @@ def _flow_markdown(text: str, styles) -> list:
             match = _BOLD_HEADING_RE.match(stripped)
             if match:
                 heading = match.group(1).strip().rstrip(":")
+        if heading and len(heading) > 90:
+            # A run-on "# Heading sentence sentence..." line from the model is body text, not a heading.
+            paragraph.append(heading)
+            continue
         if heading:
             flush()
-            flows.append(Paragraph(_esc(heading), styles[style]))
+            flows.append(Paragraph(_inline_markup(heading), styles[style]))
             continue
         paragraph.append(stripped)
     flush()

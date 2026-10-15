@@ -27,11 +27,16 @@ export async function markModulePdf(userId, econtentId) {
 // Idempotent: the first completion wins; later calls change nothing and record no new event.
 export async function markModuleCompleted(userId, econtentId, method, conn = pool) {
   await conn.query(
-    `INSERT INTO module_progress (user_id, econtent_id, completed_at, completion_method) VALUES (?, ?, UTC_TIMESTAMP(3), ?)
+    `INSERT INTO module_progress (user_id, econtent_id, first_opened_at, last_opened_at, open_count, completed_at, completion_method)
+     VALUES (?, ?, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), 0, UTC_TIMESTAMP(3), ?)
      ON DUPLICATE KEY UPDATE completion_method = IF(completed_at IS NULL, VALUES(completion_method), completion_method),
-       completed_at = COALESCE(completed_at, UTC_TIMESTAMP(3))`,
+       completed_at = COALESCE(completed_at, UTC_TIMESTAMP(3)),
+       first_opened_at = COALESCE(first_opened_at, UTC_TIMESTAMP(3))`,
     [userId, econtentId, method]
   );
+  // Completing a module (e.g. only through its checkpoint quiz) implies it was opened. The same idempotency
+  // key as markModuleOpened means a later or earlier real open never counts twice.
+  await recordUserEvent(userId, "MODULE_OPENED", { econtent_id: econtentId, via: method }, `open:${userId}:${econtentId}`);
   await recordUserEvent(userId, "MODULE_COMPLETED", { econtent_id: econtentId, method }, `done:${userId}:${econtentId}`);
 }
 

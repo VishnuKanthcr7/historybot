@@ -53,3 +53,49 @@ Everything in this document is descriptive data collection for a teacher or rese
 - wording.
 
 With `--apply`, flagged drafts become `needs_review`. The audit never publishes anything. The UI labels each quiz as Practice / Assessment / Pre-test / Post-test / Draft.
+
+## Which attempts count for each score (why the Shivaji practice quiz showed 40% while the Assessment average showed 0%)
+| Metric | Attempts that count | Attempts that do not count |
+|---|---|---|
+| **Assessment average** (Overview) | The FIRST finished attempt (submitted or timed out) of each student on each teacher quiz in assessment mode, including pre/post tests | Practice quizzes, activities, personal revision/checkpoint quizzes, and later attempts |
+| **Practice average** (Overview) | EVERY finished attempt on practice quizzes, activities and personal quizzes | Assessments |
+| **Quiz results** (Quizzes → Results) | All finished attempts on that one quiz | Other quizzes |
+
+- **The real case on 15 Oct 2026:**
+  - The "Find the Correct Answer: Shivaji and the Marathas" quiz is a practice activity; one student scored 40% on it.
+  - The only assessment attempt was on "Chapter 17 Pre-test". It timed out with no saved answers, so it was scored 0%.
+  - The Assessment average was therefore correctly 0% (n = 1, 1 timed out). The Shivaji 40% belongs only to the Practice average.
+- **What changed in the UI:**
+  - The cards are relabelled "Assessment average" and "Practice average".
+  - Each card shows its n and how many attempts timed out.
+  - A card shows "No data" (never 0%) when no attempt qualifies.
+- **Definitions:** unchanged.
+
+## Activity over time
+- **Days shown:** every IST day in the selected range is a column, including quiet days.
+- **What is counted:**
+  - chat questions
+  - finished quiz attempts
+  - modules opened
+  - modules completed
+  - PDF downloads
+  - sign-ins (in the API only; the chart does not draw them)
+- **Day boundaries:** events are bucketed by IST calendar day. An event at 23:59 IST and one at 00:01 IST fall on different days. Tests cover this in `backend/scripts/analytics-unit-test.mjs`.
+- **Earlier bug:** the chart was blank because each day column was a flex item with auto height, so the bars' percentage heights resolved to 0.
+
+## Quiz randomisation and retries
+- **Practice and regular assessments:**
+  - Every attempt uses each question of the same published quiz exactly once, in a server-chosen order.
+  - MCQ, ordering and match options are shuffled by stable option ids, so answer keys never change.
+  - The layout and its seed are stored on the attempt, so a reload shows the same layout.
+- **Pre/post tests:** never randomised, so both forms stay equivalent.
+- **Try again:**
+  - It creates a new attempt and keeps all earlier ones, which the results page lists.
+  - It appears only when the server would accept a new start: the quiz is published, it is inside its open/close window, and the attempt limit is not reached.
+  - Double clicks are harmless. The button locks while a start is in progress, and the server serialises starts and resumes any open attempt instead of creating another.
+
+## Pre/post linking rules
+- The linked quiz must exist and be a teacher quiz marked pre-test (400 otherwise).
+- A pre-test can be linked by only one post-test (409 otherwise).
+- A post-test cannot be published until its pre-test is linked and published.
+- The Research tab shows, for each pair: both statuses, the number of pre- and post-test takers, the matched n, the unmatched counts and the limitations.

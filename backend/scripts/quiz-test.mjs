@@ -173,8 +173,31 @@ async function main() {
   const s2 = await api("POST", `/quizzes/${quizId}/attempts`, { token: A.token });
   const empty = await api("POST", `/attempts/${s2.data.attempt.id}/submit`, { token: A.token, body: { responses: {} } });
   check("empty submission scores 0%", empty.data.attempt?.percent === 0);
+  check("first result offered Try again (1 of 2 used)", submit.data.can_retry === true && submit.data.attempts_allowed === 2, JSON.stringify({ c: submit.data.can_retry, a: submit.data.attempts_allowed }));
+  check(
+    "Try again created a new attempt and kept the old one (attempts 1 and 2 listed)",
+    s2.status === 201 && s2.data.attempt.id !== attemptId && s2.data.attempt.attempt_no === 2 && empty.data.previous_attempts?.map((p) => p.attempt_no).join(",") === "1,2" && empty.data.previous_attempts[0].percent === 80,
+    JSON.stringify(empty.data.previous_attempts)
+  );
+  check("after the last allowed attempt Try again is withheld with a reason", empty.data.can_retry === false && /used all attempts/.test(empty.data.retry_blocked_reason || ""), JSON.stringify({ c: empty.data.can_retry, r: empty.data.retry_blocked_reason }));
+  const sameOrder = JSON.stringify(start.data.questions.map((q) => q.id)) === JSON.stringify(s2.data.questions.map((q) => q.id));
+  const sameIds = [...start.data.questions.map((q) => q.id)].sort().join() === [...s2.data.questions.map((q) => q.id)].sort().join();
+  check("practice retry draws the same question pool, each once (order may differ)", sameIds && new Set(s2.data.questions.map((q) => q.id)).size === s2.data.questions.length, `sameOrder=${sameOrder}`);
+  const [[layoutRow]] = await pool.query("SELECT question_order_json FROM quiz_attempts WHERE id = ?", [s2.data.attempt.id]);
+  const layout = typeof layoutRow.question_order_json === "string" ? JSON.parse(layoutRow.question_order_json) : layoutRow.question_order_json;
+  check("practice layout is stored with its seed on the attempt", layout?.v === 2 && typeof layout.seed === "string" && layout.order.length === s2.data.questions.length);
   const s3 = await api("POST", `/quizzes/${quizId}/attempts`, { token: A.token });
   check("attempt limit enforced (max 2)", s3.status === 409 && s3.data.error?.code === "ATTEMPT_LIMIT");
+  // Open/close window enforced on the server.
+  const past = new Date(Date.now() - 2 * 86400000).toISOString();
+  const future = new Date(Date.now() + 2 * 86400000).toISOString();
+  for (const [label, win] of [["closed", { available_until: past }], ["not yet open", { available_from: future }]]) {
+    const wq = await api("POST", "/teacher/quizzes", { token: T1.token, body: { title: `Window ${label} ${stamp}`, topic: "Test topic", mode: "assessment", max_attempts: 1, question_ids: qids.slice(0, 2), ...win } });
+    created.quizzes.push(wq.data.quiz?.id);
+    await api("POST", `/teacher/quizzes/${wq.data.quiz?.id}/status`, { token: T1.token, body: { status: "published" } });
+    const ws = await api("POST", `/quizzes/${wq.data.quiz?.id}/attempts`, { token: A.token });
+    check(`assessment ${label}: start refused (409 QUIZ_CLOSED)`, wq.status === 201 && ws.status === 409 && ws.data.error?.code === "QUIZ_CLOSED", `${wq.status} ${ws.status}`);
+  }
   const parallel = await Promise.all([1, 2, 3].map(() => api("POST", `/quizzes/${quizId}/attempts`, { token: B.token })));
   const bAttemptIds = new Set(parallel.filter((r) => r.status < 300).map((r) => r.data.attempt.id));
   check("parallel starts create one attempt", bAttemptIds.size === 1, [...bAttemptIds].length);
@@ -205,6 +228,7 @@ async function main() {
   check("post-test cannot be published before it is linked to a pre-test", unlinked.status >= 400, `status=${unlinked.status}`);
   const pre = await api("POST", "/teacher/quizzes", { token: T1.token, body: { title: `Pre-test ${stamp}`, topic: "Test topic", mode: "assessment", assessment_phase: "pre", reveal_answers: "after_close", max_attempts: 1, question_ids: qids.slice(0, 3) } });
   created.quizzes.push(pre.data.quiz.id);
+  await api("POST", `/teacher/quizzes/${pre.data.quiz.id}/status`, { token: T1.token, body: { status: "published" } });
   const linkBody = { title: `Post-test ${stamp}`, topic: "Test topic", mode: "assessment", assessment_phase: "post", pre_quiz_id: pre.data.quiz.id, reveal_answers: "after_close", max_attempts: 1, question_ids: qids.slice(0, 3) };
   await api("POST", `/teacher/quizzes/${assess.data.quiz.id}`, { token: T1.token, body: linkBody });
   const linked = await api("POST", `/teacher/quizzes/${assess.data.quiz.id}/status`, { token: T1.token, body: { status: "published" } });

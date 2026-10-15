@@ -320,10 +320,18 @@ const quizBody = z.object({
 async function checkPreQuiz(b, selfId = null) {
   if (b.assessment_phase !== "post" || !b.pre_quiz_id) return null;
   if (b.pre_quiz_id === selfId) throw new AppError(400, "VALIDATION_ERROR", "A quiz cannot be its own pre-test.");
-  const pre = await getQuiz(b.pre_quiz_id);
+  let pre;
+  try {
+    pre = await getQuiz(b.pre_quiz_id);
+  } catch {
+    throw new AppError(400, "VALIDATION_ERROR", "The linked pre-test does not exist.");
+  }
   if (pre.owner_user_id || pre.assessment_phase !== "pre") {
     throw new AppError(400, "VALIDATION_ERROR", "The linked quiz must be a teacher quiz marked as a pre-test.");
   }
+  // One post-test per pre-test, so every matched comparison is unambiguous.
+  const [dupe] = await pool.query("SELECT id FROM quizzes WHERE pre_quiz_id = ? AND id <> ? LIMIT 1", [pre.id, selfId || ""]);
+  if (dupe.length) throw new AppError(409, "PRE_TEST_ALREADY_LINKED", "That pre-test is already linked to another post-test.");
   return pre.id;
 }
 
@@ -463,6 +471,10 @@ export async function setQuizStatus(req, res, next) {
       }
       if (quiz.assessment_phase === "post" && !quiz.pre_quiz_id) {
         throw new AppError(400, "VALIDATION_ERROR", "Link this post-test to its pre-test before publishing.");
+      }
+      if (quiz.assessment_phase === "post") {
+        const pre = await getQuiz(quiz.pre_quiz_id);
+        if (pre.status === "draft") throw new AppError(400, "VALIDATION_ERROR", "Publish the linked pre-test before publishing this post-test.");
       }
     }
     await pool.query(

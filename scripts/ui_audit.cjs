@@ -21,7 +21,7 @@ const API = process.env.UI_AUDIT_API || "http://127.0.0.1:3100/api/v1";
 const APP = process.env.UI_AUDIT_APP || "http://127.0.0.1:4173";
 const OUT = process.env.UI_AUDIT_OUT || path.join(ROOT, "tmp", "final-dev", "ui-audit");
 fs.mkdirSync(OUT, { recursive: true });
-const VIEWPORTS = [[1920, 1080], [1366, 768], [768, 1024], [390, 844], [360, 800]];
+const VIEWPORTS = (process.env.UI_AUDIT_VIEWPORTS || "390x844,768x1024,1024x768,1366x768,1920x1080").split(",").map((v) => v.split("x").map(Number));
 
 let pass = 0;
 let fail = 0;
@@ -169,6 +169,9 @@ async function main() {
       const sp = await sctx.newPage();
       const errors = [];
       sp.on("pageerror", (e) => errors.push(String(e)));
+      sp.on("console", (m) => {
+        if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push(`console: ${m.text().slice(0, 160)}`);
+      });
       for (const [name, url] of [["quizzes", "/quizzes"], ["activities", "/activities"], ["questionnaires", "/questionnaires"], ["questionnaire-player", `/questionnaires/${instrumentId}`], ["chat", "/chat"]]) {
         await sp.goto(`${APP}${url}`, { waitUntil: "networkidle" });
         await audit(sp, name, w, h);
@@ -183,7 +186,36 @@ async function main() {
         await sp.goto(`${APP}/attempts/${attemptId}`, { waitUntil: "networkidle" });
         await sp.getByText(/Question 1 of/).waitFor();
         await audit(sp, "quiz-player", w, h);
+        // The quiz column must be centred in the viewport (no app sidebar on this page).
+        const centre = await sp.evaluate(() => {
+          const el = document.querySelector("[data-testid=quiz-column]");
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { left: Math.round(r.left), right: Math.round(document.documentElement.clientWidth - r.right) };
+        });
+        check(`[${w}x${h}] quiz-player column is centred`, Boolean(centre) && Math.abs(centre.left - centre.right) <= 2, JSON.stringify(centre));
       }
+      // Chat: a long unbroken word must wrap and the composer must not cover the last message.
+      await sp.goto(`${APP}/chat`, { waitUntil: "networkidle" });
+      const box = sp.getByRole("textbox").first();
+      await box.fill(`Who was Akbar ${"Abcdefghij".repeat(14)} and why does this very long question matter for the layout?`);
+      await box.press("Enter");
+      await sp.waitForFunction(() => document.querySelectorAll("article").length >= 2, null, { timeout: 20000 }).catch(() => {});
+      await sp.waitForTimeout(800);
+      const chat = await sp.evaluate(() => {
+        const arts = [...document.querySelectorAll("article")];
+        const wide = arts.filter((a) => [...a.querySelectorAll("*")].some((c) => c.scrollWidth > c.clientWidth + 2 && getComputedStyle(c).overflowX === "visible" && c.clientWidth > 0 && c.getBoundingClientRect().right > a.getBoundingClientRect().right + 2));
+        const form = document.querySelector("form");
+        const last = arts[arts.length - 1];
+        const scroller = last ? last.closest(".overflow-y-auto") : null;
+        if (scroller) scroller.scrollTop = scroller.scrollHeight;
+        const lr = last ? last.getBoundingClientRect() : null;
+        const fr = form ? form.getBoundingClientRect() : null;
+        return { n: arts.length, overflowing: wide.length, lastBottom: lr && Math.round(lr.bottom), composerTop: fr && Math.round(fr.top), pageOverflow: document.documentElement.scrollWidth > window.innerWidth + 1 };
+      });
+      await sp.screenshot({ path: path.join(OUT, `chat-long-${w}.png`) });
+      check(`[${w}x${h}] chat: long message wraps, no horizontal scroll`, chat.n >= 1 && chat.overflowing === 0 && !chat.pageOverflow, JSON.stringify(chat));
+      check(`[${w}x${h}] chat: composer does not cover the last message`, chat.lastBottom != null && chat.composerTop != null && chat.lastBottom <= chat.composerTop + 1, JSON.stringify(chat));
       check(`[${w}x${h}] student pages have no script errors`, errors.length === 0, errors.join(" | "));
       await sctx.close();
 
@@ -193,9 +225,21 @@ async function main() {
       const tp = await tctx.newPage();
       const terrors = [];
       tp.on("pageerror", (e) => terrors.push(String(e)));
+      tp.on("console", (m) => {
+        if (m.type() === "error" && !/Failed to load resource/.test(m.text())) terrors.push(`console: ${m.text().slice(0, 160)}`);
+      });
       for (const tab of ["overview", "students", "topics", "achievement", "quizzes", "questions", "research", "reports"]) {
         await tp.goto(`${APP}/admin?tab=${tab}`, { waitUntil: "networkidle" });
         await audit(tp, `dashboard-${tab}`, w, h);
+        if (tab === "overview") {
+          const chart = await tp.evaluate(() => {
+            const days = [...document.querySelectorAll("[data-testid=trend-day]")];
+            const withData = days.filter((d) => Number(d.dataset.total) > 0);
+            const drawn = withData.filter((d) => [...d.children].some((b) => b.getBoundingClientRect().height > 0.5));
+            return { days: days.length, withData: withData.length, drawn: drawn.length, empty: Boolean(document.body.innerText.match(/No chat questions, quiz attempts or module activity/)) };
+          });
+          check(`[${w}x${h}] overview: activity chart draws every day that has data`, (chart.days > 0 && chart.withData === chart.drawn) || chart.empty, JSON.stringify(chart));
+        }
       }
       // Forms open inside tabs
       await tp.goto(`${APP}/admin?tab=quizzes`, { waitUntil: "networkidle" });

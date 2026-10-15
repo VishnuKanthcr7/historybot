@@ -254,6 +254,44 @@ function Results({ id, range }) {
   );
 }
 
+function PrePostSummary({ range }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    setData(null);
+    teacherApi.achievement({ from: range.from, to: range.to }).then((d) => setData(d.pre_post)).catch((e) => setError(e.message));
+  }, [range.from, range.to]);
+  if (error) return <ErrorText>{error}</ErrorText>;
+  if (!data) return <p className="text-sm text-muted">Loading…</p>;
+  return (
+    <>
+      {!data.pairs.length ? (
+        <Empty>{data.note}</Empty>
+      ) : (
+        <ul className="space-y-2" data-testid="prepost-pairs">
+          {data.pairs.map((p) => (
+            <li key={p.post_quiz.id} className="min-w-0 rounded-2xl border border-rule p-3 text-sm">
+              <p className="font-medium break-words">
+                {p.pre_quiz.title} ({p.pre_quiz.status}) → {p.post_quiz.title} ({p.post_quiz.status})
+              </p>
+              <p className="text-xs text-muted" data-testid="prepost-counts">
+                Pre-test takers {p.pre_quiz.n} · post-test takers in range {p.post_quiz.n} · <strong>matched n = {p.paired_n}</strong> · unmatched: {p.unmatched.pre_only.length} pre only, {p.unmatched.post_only.length} post only
+              </p>
+              <p className="text-xs text-muted">
+                {p.paired_n ? `Mean pre ${p.mean_pre}% → post ${p.mean_post}% (gain ${p.mean_gain})` : "No matched students yet, so no comparison is shown."}
+                {p.paired_n && p.paired_n < 2 ? " · n too small for a t statistic." : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-xs text-muted">
+        Limitations: {data.method} No control group; small n is unreliable; first finished attempts only (timed-out attempts count with their autosaved answers). Full detail is in Analytics → Achievement.
+      </p>
+    </>
+  );
+}
+
 export default function Research({ range }) {
   const [list, setList] = useState(null);
   const [error, setError] = useState("");
@@ -297,6 +335,9 @@ export default function Research({ range }) {
           <Results id={panel.id} range={range} />
         </Card>
       ) : null}
+      <Card title="Pre/post comparisons">
+        <PrePostSummary range={range} />
+      </Card>
       <Card
         title="Research questionnaires"
         actions={
@@ -319,6 +360,7 @@ export default function Research({ range }) {
             {list.instruments.map((i) => (
               <li key={i.id} className="min-w-0 rounded-2xl border border-rule p-3 text-sm" data-testid="instrument">
                 <StatusBadge inst={i} />
+                {i.is_shell ? <p className="mt-1 text-xs font-semibold text-red-800">Blocked: requires researcher-approved items before publishing.</p> : null}
                 <p className="mt-1 font-medium">{i.title}</p>
                 <p className="text-xs text-muted">
                   {i.construct} · {i.item_count} items{i.placeholder_count ? ` (${i.placeholder_count} placeholders)` : ""} · {i.submitted} submitted
@@ -331,7 +373,7 @@ export default function Research({ range }) {
                   <button type="button" className={`${small} border-rule`} onClick={() => setPanel({ kind: "results", id: i.id })}>
                     Results
                   </button>
-                  {i.status === "draft" ? (
+                  {i.status === "draft" && !i.is_shell ? (
                     <button type="button" className={`${small} border-navy bg-navy text-cream`} onClick={() => status(i, "published")}>
                       Publish
                     </button>

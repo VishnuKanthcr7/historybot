@@ -68,6 +68,7 @@ const IST = 330 * 60000;
 const istDay = (offset = 0) => new Date(Date.now() + IST + offset * 86400000).toISOString().slice(0, 10);
 const today = istDay(0);
 const yesterday = istDay(-1);
+const twoDaysAgo = istDay(-2);
 const dayStart = (d) => new Date(`${d}T00:00:00+05:30`);
 const ref = (id) => `S-${String(id).replace(/-/g, "").slice(0, 8)}`;
 
@@ -158,7 +159,15 @@ async function main() {
   check("a post-test can only link to a quiz marked pre-test", badLink.status === 400, badLink.status);
   const post = await mk({ title: `${tag} Post-test`, topic: "E2E", mode: "assessment", assessment_phase: "post", pre_quiz_id: pre.data.quiz.id, reveal_answers: "after_submit", max_attempts: 1, question_ids: qids });
   check("teacher creates pre-test and linked post-test", pre.status === 201 && post.status === 201 && post.data.quiz.pre_quiz_id === pre.data.quiz.id);
+  const ghost = await mk({ title: `${tag} Post (missing pre)`, topic: "E2E", mode: "assessment", assessment_phase: "post", pre_quiz_id: "00000000-0000-4000-8000-000000000000", question_ids: qids });
+  check("linking to a pre-test that does not exist is 400", ghost.status === 400, ghost.status);
+  const dupe = await mk({ title: `${tag} Post (duplicate)`, topic: "E2E", mode: "assessment", assessment_phase: "post", pre_quiz_id: pre.data.quiz.id, question_ids: qids });
+  check("a pre-test can be linked to only one post-test (409)", dupe.status === 409, dupe.status);
+  const postWhilePreDraft = await api("POST", `/teacher/quizzes/${post.data.quiz.id}/status`, { token: T.token, body: { status: "published" } });
+  check("a post-test cannot be published while its pre-test is still a draft", postWhilePreDraft.status === 400, postWhilePreDraft.status);
   for (const z of [pre, post]) await api("POST", `/teacher/quizzes/${z.data.quiz.id}/status`, { token: T.token, body: { status: "published" } });
+  const postPub = await api("GET", `/teacher/quizzes/${post.data.quiz.id}`, { token: T.token });
+  check("after the pre-test is published, the linked post-test publishes", postPub.data.quiz?.status === "published", postPub.data.quiz?.status);
   const practice = await mk({ title: `${tag} Practice`, topic: "E2E", mode: "practice", question_ids: qids.slice(0, 2) });
   const timed = await mk({ title: `${tag} Timed`, topic: "E2E", mode: "practice", time_limit_sec: 60, question_ids: qids.slice(0, 2) });
   for (const z of [practice, timed]) await api("POST", `/teacher/quizzes/${z.data.quiz.id}/status`, { token: T.token, body: { status: "published" } });
@@ -254,6 +263,12 @@ async function main() {
   const cpCount = (cpStart.data.questions || []).length;
   const [[mp2]] = await pool.query("SELECT completed_at, completion_method FROM module_progress WHERE user_id = ? AND econtent_id = ?", [A.id, m2]);
   check("submitting the module checkpoint completes the module (method checkpoint)", cp.status === 201 && cpSub.status === 200 && mp2?.completion_method === "checkpoint" && mp2.completed_at !== null, mp2);
+  const [[mp2o]] = await pool.query("SELECT first_opened_at FROM module_progress WHERE user_id = ? AND econtent_id = ?", [A.id, m2]);
+  const opensM2 = async () => (await pool.query("SELECT COUNT(*) AS n FROM analytics_events WHERE user_id = ? AND event_type = 'MODULE_OPENED' AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.econtent_id')) = ?", [A.id, m2]))[0][0].n;
+  const opensBefore = Number(await opensM2());
+  await api("GET", `/econtent/${m2}?session_id=${A.session}`, { token: A.token });
+  const opensAfter = Number(await opensM2());
+  check("checkpoint-only completion records the module as opened once; a later open does not double count", mp2o?.first_opened_at && opensBefore === 1 && opensAfter === 1, { opensBefore, opensAfter });
   check("checkpoint scored 100% with known keys", cpSub.data.attempt?.percent === 100, cpSub.data.attempt?.percent);
 
   // ---------- Timed out and abandoned (D) ----------
@@ -291,8 +306,8 @@ async function main() {
   const d = (k) => (ov.cards[k] ?? 0) - (base0.cards[k] ?? 0);
   check("overview: registered_in_range +4", d("registered_in_range") === 4, d("registered_in_range"));
   check("overview: student sign-ins +1 (registrations are not sign-ins)", d("sign_ins") === 1, d("sign_ins"));
-  // m1 was opened; m2 was completed through its checkpoint without being opened in this test.
-  check("overview: modules completed +2, opened +1, generated +2, PDF downloads +1", d("modules_completed") === 2 && d("modules_opened") === 1 && d("modules_generated") === 2 && d("pdf_downloads") === 1, { c: d("modules_completed"), o: d("modules_opened"), g: d("modules_generated"), p: d("pdf_downloads") });
+  // m1 was opened; m2 was completed through its checkpoint without being opened, which now also counts as opened (once).
+  check("overview: modules completed +2, opened +2, generated +2, PDF downloads +1", d("modules_completed") === 2 && d("modules_opened") === 2 && d("modules_generated") === 2 && d("pdf_downloads") === 1, { c: d("modules_completed"), o: d("modules_opened"), g: d("modules_generated"), p: d("pdf_downloads") });
   check("overview: assessments submitted +4 (C's moved to yesterday)", d("assessments_submitted") === 4, d("assessments_submitted"));
   check("overview: finished attempts +8, timed out +1", d("quiz_attempts") === 8 && d("timed_out") === 1, { a: d("quiz_attempts"), t: d("timed_out") });
   check("overview: active students +3 (A, B, D today; C only yesterday)", d("active_students") === 3, d("active_students"));
@@ -304,7 +319,18 @@ async function main() {
     [dayStart(today), new Date(dayStart(today).getTime() + 86400000)]
   );
   check("overview: average achievement equals the independent DB query", near(ov.cards.mean_percent, Math.round(Number(ach.m) * 10) / 10, 0.05) && ov.cards.mean_percent_n === Number(ach.n), `${ov.cards.mean_percent} vs ${ach.m} (n ${ach.n})`);
-  check("overview has 'data as of' and definitions for every card", Boolean(ov.data_as_of) && Object.keys(ov.cards).filter((k) => !k.endsWith("_n")).every((k) => ov.definitions[k]));
+  check("overview has 'data as of' and definitions for every card", Boolean(ov.data_as_of) && Object.keys(ov.cards).filter((k) => !k.endsWith("_n") && !k.endsWith("_timed_out")).every((k) => ov.definitions[k]));
+  // Activity-over-time API: every IST day in the range, and today's bucket agrees with the overview cards.
+  const ts1 = (await api("GET", `/teacher/analytics/timeseries?from=${today}&to=${today}&bucket=day`, { token: T.token })).data;
+  const t0 = ts1.series?.[0] || {};
+  check("timeseries one-day range: one bucket (today, IST)", ts1.series?.length === 1 && t0.bucket === today, ts1.series?.map((p) => p.bucket));
+  check(
+    "timeseries today agrees with overview (chat, finished attempts, modules completed, PDFs, sign-ins)",
+    t0.chat_questions === ov.cards.chat_questions && t0.quiz_attempts === ov.cards.quiz_attempts && t0.modules_completed === ov.cards.modules_completed && t0.pdf_downloads === ov.cards.pdf_downloads && t0.sign_ins === ov.cards.sign_ins,
+    { ts: t0, cards: ov.cards }
+  );
+  const ts3 = (await api("GET", `/teacher/analytics/timeseries?from=${twoDaysAgo}&to=${today}&bucket=day`, { token: T.token })).data;
+  check("timeseries 3-day range lists all 3 IST days including quiet ones", ts3.series?.length === 3 && ts3.series[0].bucket === twoDaysAgo, ts3.series?.map((p) => p.bucket));
   const ovY = await overview(T, yesterday, yesterday);
   const baseY = baseWide; // only used for shape
   check("date filter: yesterday shows C's assessment, today does not", ovY.cards.assessments_submitted >= 1 && Boolean(baseY));

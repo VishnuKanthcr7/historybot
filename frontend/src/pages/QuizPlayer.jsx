@@ -3,9 +3,12 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { quizApi } from "../services/api.js";
 import QuestionInput, { ACTIVITY_LABELS, PageShell, answerText, formatSeconds, isAnswered } from "../components/quiz/QuestionInput.jsx";
 
+const fmtIst = (d) =>
+  d ? new Date(d).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }) + " IST" : "";
+
 const btn = "inline-flex min-h-11 items-center justify-center rounded-full px-4 text-sm";
 
-function Results({ data, onRetry, retryBusy }) {
+function Results({ data, onRetry, retryBusy, error }) {
   const a = data.attempt;
   const navigate = useNavigate();
   const [revError, setRevError] = useState("");
@@ -20,9 +23,12 @@ function Results({ data, onRetry, retryBusy }) {
     }
   };
   return (
-    <PageShell eyebrow={ACTIVITY_LABELS[data.quiz.activity_type] || "Quiz"} title={data.quiz.title}>
+    <PageShell narrow eyebrow={ACTIVITY_LABELS[data.quiz.activity_type] || "Quiz"} title={data.quiz.title}>
       <section className="rounded-3xl border border-rule bg-cream p-5" aria-live="polite">
-        <p className="text-sm text-muted">Attempt {a.attempt_no} · submitted {new Date(a.submitted_at).toLocaleString()}</p>
+        <p className="text-sm text-muted" data-testid="attempt-line">
+          Attempt {a.attempt_no}
+          {data.attempts_allowed ? ` of ${data.attempts_allowed}` : ""} · submitted {fmtIst(a.submitted_at)}
+        </p>
         <p className="mt-2 font-serif text-4xl text-navy">{a.percent}%</p>
         <p className="text-sm">
           {a.score} of {a.max_score} points{a.duration_sec != null ? ` · ${formatSeconds(a.duration_sec)} taken` : ""}
@@ -37,12 +43,33 @@ function Results({ data, onRetry, retryBusy }) {
             My results
           </Link>
           {onRetry ? (
-            <button type="button" onClick={onRetry} disabled={retryBusy} className={`${btn} bg-navy text-cream`}>
-              Try again
+            <button type="button" onClick={onRetry} disabled={retryBusy} aria-busy={retryBusy} className={`${btn} bg-navy text-cream disabled:opacity-60`}>
+              {retryBusy ? "Starting…" : "Try again"}
             </button>
+          ) : data.retry_blocked_reason ? (
+            <p className="self-center text-sm text-muted">{data.retry_blocked_reason}</p>
           ) : null}
         </div>
+        {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
       </section>
+      {data.previous_attempts?.length > 1 ? (
+        <section className="mt-4 rounded-3xl border border-rule bg-cream p-5" data-testid="previous-attempts">
+          <h2 className="font-serif text-xl text-navy">Your attempts</h2>
+          <ul className="mt-2 divide-y divide-rule text-sm">
+            {data.previous_attempts.map((p) => (
+              <li key={p.id} className="flex flex-wrap justify-between gap-2 py-1.5">
+                <span>
+                  Attempt {p.attempt_no}
+                  {p.id === a.id ? " (this one)" : ""}
+                </span>
+                <span className="tabular-nums">
+                  {p.status === "in_progress" ? "in progress" : `${p.percent}%${p.end_reason === "timed_out" ? " · timed out" : ""} · ${fmtIst(p.submitted_at)}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {data.topics_to_revise?.length ? (
         <section className="mt-4 rounded-3xl border border-rule bg-cream p-5">
           <h2 className="font-serif text-xl text-navy">Topics to revise</h2>
@@ -204,13 +231,23 @@ export default function QuizPlayer() {
     setDirty(true);
   };
 
+  // One start request at a time: a double click cannot create two attempts (the server also serialises starts
+  // and resumes an open attempt instead of creating another).
+  const [retryBusy, setRetryBusy] = useState(false);
+  const retryRef = useRef(false);
   const retry = async () => {
+    if (retryRef.current) return;
+    retryRef.current = true;
+    setRetryBusy(true);
     try {
       const d = await quizApi.start(data.quiz.id);
       submittedRef.current = false;
       navigate(`/attempts/${d.attempt.id}`);
     } catch (err) {
       setError(err.message);
+    } finally {
+      retryRef.current = false;
+      setRetryBusy(false);
     }
   };
 
@@ -226,8 +263,7 @@ export default function QuizPlayer() {
   }
   if (!data) return <p className="p-8 text-sm text-muted">Loading…</p>;
   if (!inProgress) {
-    const canRetry = data.quiz && (!data.quiz.max_attempts || data.attempt.attempt_no < data.quiz.max_attempts) && data.quiz.status === "published";
-    return <Results data={data} onRetry={canRetry ? retry : null} />;
+    return <Results data={data} onRetry={data.can_retry ? retry : null} retryBusy={retryBusy} error={error} />;
   }
 
   const questions = data.questions;
@@ -238,6 +274,7 @@ export default function QuizPlayer() {
 
   return (
     <PageShell
+      narrow
       eyebrow={`${ACTIVITY_LABELS[data.quiz.activity_type] || "Quiz"} · ${data.quiz.mode === "assessment" ? "Assessment" : "Practice"}`}
       title={data.quiz.title}
     >

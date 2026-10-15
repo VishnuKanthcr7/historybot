@@ -8,7 +8,8 @@ const HEADLINE = [
   ["active_students", "Active students"],
   ["modules_completed", "Modules completed"],
   ["assessments_submitted", "Assessments submitted"],
-  ["mean_percent", "Average achievement"],
+  ["mean_percent", "Assessment average"],
+  ["practice_mean_percent", "Practice average"],
 ];
 const DETAIL = [
   ["students_total", "Student accounts (all time)"],
@@ -20,45 +21,83 @@ const DETAIL = [
   ["quiz_attempts", "Quiz/activity attempts finished"],
   ["timed_out", "Timed out"],
   ["abandoned", "Abandoned"],
-  ["practice_mean_percent", "Practice mean score"],
 ];
 
-function StatCard({ label, value, percent, definition, n, strong }) {
+function StatCard({ label, value, percent, definition, n, nNote, strong }) {
   return (
     <div className={`min-w-0 rounded-3xl border p-4 ${strong ? "border-navy/40 bg-cream" : "border-rule bg-cream"}`}>
       <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
       <p className="mt-1 font-serif text-3xl text-navy" data-testid="stat-value">
-        {value == null ? "—" : percent ? `${value}%` : value}
+        {value == null ? (percent ? <span className="text-xl text-muted">No data</span> : "—") : percent ? `${value}%` : value}
       </p>
-      {n != null ? <p className="text-xs text-muted">n = {n}</p> : null}
-      <p className="mt-1 text-xs leading-snug text-muted">{value == null && !percent ? "Data not available. " : ""}{definition}</p>
+      {n != null ? <p className="text-xs text-muted">{n === 0 ? "No qualifying attempts" : `n = ${n} attempt${n === 1 ? "" : "s"}${nNote ? ` (${nNote})` : ""}`}</p> : null}
+      {value == null && !percent ? <p className="mt-1 text-xs text-muted">Data not available.</p> : null}
+      {definition ? (
+        <details className="mt-1 text-xs leading-snug text-muted">
+          <summary className="cursor-pointer select-none py-1 text-navy underline-offset-2 hover:underline">What counts?</summary>
+          <p className="mt-1">{definition}</p>
+        </details>
+      ) : null}
     </div>
   );
 }
 
-function Trend({ range }) {
+const TREND_SERIES = [
+  ["chat_questions", "Chat questions", "bg-brass/70"],
+  ["quiz_attempts", "Quiz attempts", "bg-navy"],
+  ["modules_opened", "Modules opened", "bg-emerald-700"],
+  ["modules_completed", "Modules completed", "bg-sky-800"],
+  ["pdf_downloads", "PDF downloads", "bg-stone-500"],
+];
+
+// Root cause of the earlier blank chart: each day column was a flex child with height "auto", so the bars'
+// percentage heights resolved to 0. Columns now stretch to the fixed chart height (h-40, self-stretch) and
+// bar heights are a share of the busiest day. Every IST day in the range is a column (zeros included).
+export function Trend({ range }) {
   const [data, setData] = useState(null);
+  const [error, setError] = useState("");
   useEffect(() => {
     setData(null);
-    teacherApi.timeseries({ ...range, bucket: "day" }).then(setData).catch(() => setData({ series: [] }));
-  }, [range]);
+    setError("");
+    teacherApi.timeseries({ from: range.from, to: range.to, bucket: "day" }).then(setData).catch((e) => setError(e.message));
+  }, [range.from, range.to]);
+  if (error) return <ErrorText>{error}</ErrorText>;
   if (!data) return <p className="text-sm text-muted">Loading…</p>;
-  if (!data.series.length) return <Empty>No chat questions or quiz attempts in this date range.</Empty>;
-  const max = Math.max(1, ...data.series.map((d) => d.quiz_attempts + d.chat_questions));
+  if (!data.series?.length || data.empty) return <Empty>No chat questions, quiz attempts or module activity in this date range.</Empty>;
+  const total = (d) => TREND_SERIES.reduce((s, [k]) => s + (d[k] || 0), 0);
+  const max = Math.max(1, ...data.series.map(total));
+  const n = data.series.length;
+  const labelEvery = Math.max(1, Math.ceil(n / 8));
   return (
     <>
-      <div className="flex h-32 items-end gap-1" role="img" aria-label="Daily activity: chat questions and quiz attempts">
-        {data.series.map((d) => (
-          <div key={d.bucket} className="flex min-w-0 flex-1 flex-col justify-end" title={`${d.bucket}: ${d.chat_questions} chat, ${d.quiz_attempts} quiz (n students ${d.quiz_students})`}>
-            <div className="bg-brass/70" style={{ height: `${(d.chat_questions / max) * 100}%` }} />
-            <div className="bg-navy" style={{ height: `${(d.quiz_attempts / max) * 100}%` }} />
-          </div>
-        ))}
+      <div className="overflow-x-auto">
+        <div className="flex h-40 items-stretch gap-px border-b border-rule" style={{ minWidth: `${Math.min(n * 10, 1200)}px` }} role="img" aria-label={`Daily activity from ${data.range.from} to ${data.range.to}`} data-testid="trend-chart">
+          {data.series.map((d) => (
+            <div
+              key={d.bucket}
+              data-testid="trend-day"
+              data-total={total(d)}
+              className="flex min-w-[6px] flex-1 flex-col-reverse self-stretch"
+              title={`${d.bucket}: ${TREND_SERIES.map(([k, l]) => `${d[k] || 0} ${l.toLowerCase()}`).join(", ")}`}
+            >
+              {TREND_SERIES.map(([k, , color]) => (d[k] ? <div key={k} className={color} style={{ height: `${(d[k] / max) * 100}%` }} /> : null))}
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-px text-[10px] text-muted" style={{ minWidth: `${Math.min(n * 10, 1200)}px` }} aria-hidden="true">
+          {data.series.map((d, i) => (
+            <span key={d.bucket} className="min-w-[6px] flex-1 overflow-visible whitespace-nowrap">{i % labelEvery === 0 ? d.bucket.slice(5) : ""}</span>
+          ))}
+        </div>
       </div>
       <p className="mt-2 flex flex-wrap gap-3 text-xs text-muted">
-        <span><span className="mr-1 inline-block h-2 w-3 bg-navy align-middle" />Quiz attempts</span>
-        <span><span className="mr-1 inline-block h-2 w-3 bg-brass/70 align-middle" />Chat questions</span>
-        <span>{data.series[0].bucket} to {data.series[data.series.length - 1].bucket} (IST days with activity)</span>
+        {TREND_SERIES.map(([k, label, color]) => (
+          <span key={k}>
+            <span className={`mr-1 inline-block h-2 w-3 align-middle ${color}`} />
+            {label} ({data.totals[k]})
+          </span>
+        ))}
+        <span>IST days {data.range.from} to {data.range.to}, inclusive; tallest day = {max}.</span>
       </p>
     </>
   );
@@ -80,7 +119,7 @@ export function Overview({ range }) {
       <p className="text-xs text-muted" data-testid="data-as-of">
         Data as of {fmtDateTime(data.data_as_of)} · {data.range.from} to {data.range.to} inclusive (IST)
       </p>
-      <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-5" data-testid="headline-cards">
+      <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6" data-testid="headline-cards">
         {HEADLINE.map(([key, label]) => (
           <StatCard
             key={key}
@@ -89,7 +128,8 @@ export function Overview({ range }) {
             value={data.cards[key]}
             percent={pct.has(key)}
             definition={data.definitions[key]}
-            n={key === "mean_percent" ? data.cards.mean_percent_n : null}
+            n={key === "mean_percent" ? data.cards.mean_percent_n : key === "practice_mean_percent" ? data.cards.practice_mean_percent_n : null}
+            nNote={key === "mean_percent" && data.cards.mean_percent_timed_out ? `${data.cards.mean_percent_timed_out} timed out` : ""}
           />
         ))}
       </div>
@@ -347,7 +387,7 @@ export function TopicsAndTrends({ range }) {
       >
         {!series ? (
           <p className="text-sm text-muted">Loading…</p>
-        ) : series.series.length === 0 ? (
+        ) : series.empty || !series.series.some((p) => p.quiz_attempts || p.chat_questions) ? (
           <p className="text-sm text-muted">No activity in this date range.</p>
         ) : (
           <>
@@ -362,7 +402,7 @@ export function TopicsAndTrends({ range }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {series.series.map((p) => (
+                  {series.series.filter((p) => p.quiz_attempts || p.chat_questions).map((p) => (
                     <tr key={p.bucket} className="border-t border-rule">
                       <td className="py-1 pr-2">{p.bucket}</td>
                       <td className="py-1 pr-2">{p.mean_percent == null ? "—" : `${p.mean_percent}%`}</td>

@@ -237,10 +237,10 @@ export function formatSeconds(total) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-export function PageShell({ eyebrow, title, children, actions }) {
+export function PageShell({ eyebrow, title, children, actions, narrow = false }) {
   return (
     <div className="min-h-dvh bg-paper px-3 py-6 font-sans text-ink sm:px-6">
-      <div className="mx-auto max-w-5xl">
+      <div className={`mx-auto w-full ${narrow ? "max-w-3xl" : "max-w-5xl"}`} data-testid="quiz-column">
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
             {eyebrow ? <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brass">{eyebrow}</p> : null}

@@ -4,6 +4,7 @@ import { AppError } from "../utils/errors.js";
 import { newId } from "../utils/ids.js";
 import { recordUserEvent } from "../services/analytics.js";
 import { markModuleCompleted } from "../services/moduleProgress.js";
+import { applyOptionOrder, buildLayout, layoutOf, orderIds } from "../services/quizRandom.js";
 import { requireOwnedEcontent } from "./econtentController.js";
 import {
   revealedQuestion,
@@ -85,7 +86,7 @@ function deadlinePassed(attempt, now = new Date()) {
 // Scores an attempt inside an open transaction (the attempt row is already locked).
 async function finalizeAttempt(conn, attempt, quiz, responses, { late }) {
   const items = await getQuizItems(quiz.id, conn);
-  const order = parseJson(attempt.question_order_json, []);
+  const order = orderIds(attempt);
   const byId = new Map(items.map((item) => [item.id, item]));
   const ordered = order.map((id) => byId.get(id)).filter(Boolean);
   const clean = sanitizeResponses(responses, ordered.map((q) => q.id));
@@ -142,13 +143,24 @@ async function buildResult(attemptId, userId) {
   const attempt = rows[0];
   const quiz = await getQuiz(attempt.quiz_id);
   const reveal = revealAllowed(quiz);
+  // Every attempt is kept; the results page lists them and offers "Try again" only when the server would allow it.
+  const [history] = await pool.query(
+    `SELECT id, attempt_no, status, end_reason, percent, submitted_at FROM quiz_attempts
+     WHERE quiz_id = ? AND user_id = ? ORDER BY attempt_no`,
+    [quiz.id, userId]
+  );
+  const used = history.length;
+  const hasOpen = history.some((h) => h.status === "in_progress");
+  const canRetry =
+    studentCanSee(quiz, { id: userId }) && quizIsOpen(quiz) && (hasOpen || !quiz.max_attempts || used < quiz.max_attempts);
   const [answers] = await pool.query(
     `SELECT a.*, q.qtype, q.prompt, q.options_json, q.answer_json, q.explanation, q.topic, q.difficulty,
             q.textbook_page, q.source_document
      FROM quiz_answers a JOIN quiz_questions q ON q.id = a.question_id WHERE a.attempt_id = ?`,
     [attemptId]
   );
-  const order = parseJson(attempt.question_order_json, []);
+  const order = orderIds(attempt);
+  const optionLayout = layoutOf(attempt).options;
   answers.sort((x, y) => order.indexOf(x.question_id) - order.indexOf(y.question_id));
   const revise = new Map();
   for (const a of answers) {
@@ -173,6 +185,22 @@ async function buildResult(attemptId, userId) {
       percent: Number(attempt.percent),
     },
     quiz: publicQuiz(quiz),
+    attempts_used: used,
+    attempts_allowed: quiz.max_attempts || null,
+    can_retry: canRetry,
+    retry_blocked_reason: canRetry
+      ? null
+      : !quizIsOpen(quiz)
+        ? "This quiz is closed."
+        : "You have used all attempts for this quiz.",
+    previous_attempts: history.map((h) => ({
+      id: h.id,
+      attempt_no: h.attempt_no,
+      status: h.status,
+      end_reason: h.end_reason,
+      percent: h.percent == null ? null : Number(h.percent),
+      submitted_at: h.submitted_at,
+    })),
     reveal,
     reveal_note: reveal
       ? null
@@ -183,7 +211,7 @@ async function buildResult(attemptId, userId) {
       const base = { id: a.question_id, qtype: a.qtype, prompt: a.prompt, topic: a.topic };
       if (!reveal) return base;
       return {
-        ...revealedQuestion({ ...a, id: a.question_id }),
+        ...applyOptionOrder(revealedQuestion({ ...a, id: a.question_id }), optionLayout[a.question_id]),
         response: parseJson(a.response_json),
         correct: Boolean(a.is_correct),
         points: Number(a.points),
@@ -201,7 +229,8 @@ async function buildResult(attemptId, userId) {
 async function inProgressPayload(attempt, quiz) {
   const items = await getQuizItems(quiz.id);
   const byId = new Map(items.map((item) => [item.id, item]));
-  const order = parseJson(attempt.question_order_json, []);
+  const layout = layoutOf(attempt);
+  const order = layout.order;
   return {
     attempt: {
       id: attempt.id,
@@ -213,7 +242,7 @@ async function inProgressPayload(attempt, quiz) {
     },
     server_now: new Date().toISOString(),
     quiz: publicQuiz(quiz),
-    questions: order.map((id) => byId.get(id)).filter(Boolean).map(studentQuestion),
+    questions: order.map((id) => byId.get(id)).filter(Boolean).map((q) => applyOptionOrder(studentQuestion(q), layout.options[q.id])),
     autosave: parseJson(attempt.autosave_json, {}) || {},
   };
 }
@@ -279,7 +308,7 @@ export async function startAttempt(req, res, next) {
     await conn.query(
       `INSERT INTO quiz_attempts (id, quiz_id, user_id, attempt_no, status, started_at, deadline_at, question_order_json, autosave_json)
        VALUES (?,?,?,?, 'in_progress', ?, ?, ?, ?)`,
-      [id, quiz.id, req.user.id, Number(n) + 1, now, deadline, JSON.stringify(items.map((q) => q.id)), JSON.stringify({})]
+      [id, quiz.id, req.user.id, Number(n) + 1, now, deadline, JSON.stringify(buildLayout(items, quiz)), JSON.stringify({})]
     );
     await conn.commit();
     if (expired) await afterFinalize(open[0], quiz, expired, true);
@@ -337,7 +366,7 @@ export async function autosaveAttempt(req, res, next) {
     const attempt = await ownedAttempt(req.params.attemptId, req.user);
     if (attempt.status !== "in_progress") throw new AppError(409, "ALREADY_SUBMITTED", "This attempt was already submitted.");
     if (deadlinePassed(attempt)) throw new AppError(409, "TIME_UP", "Time is up for this attempt.");
-    const ids = parseJson(attempt.question_order_json, []);
+    const ids = orderIds(attempt);
     const clean = sanitizeResponses(body.responses, ids);
     await pool.query("UPDATE quiz_attempts SET autosave_json = ? WHERE id = ? AND status = 'in_progress'", [
       JSON.stringify(clean),

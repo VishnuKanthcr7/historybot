@@ -18,6 +18,7 @@ const { newId } = await import("../src/utils/ids.js");
 
 const base = process.env.HISTORYBOT_TEST_API || "http://127.0.0.1:3100/api/v1";
 const topic = process.env.HISTORYBOT_MODULE_TOPIC || "Akbar";
+const lang = process.env.HISTORYBOT_MODULE_LANG === "kn" ? "kn" : "en";
 const outDir = path.join(root, "tmp", "final-dev");
 const results = [];
 const createdUserIds = [];
@@ -54,7 +55,7 @@ async function moduleFlow(role, token, sessionId) {
   const made = await api("/econtent", {
     method: "POST",
     headers: auth,
-    body: JSON.stringify({ session_id: sessionId, topic, language: "en" }),
+    body: JSON.stringify({ session_id: sessionId, topic, language: lang }),
   });
   const secs = Math.round((Date.now() - t0) / 1000);
   const doc = made.data || {};
@@ -83,7 +84,7 @@ async function moduleFlow(role, token, sessionId) {
   const pdf = await api(`/econtent/${doc.id}/pdf`, { method: "POST", headers: auth, body: JSON.stringify({ session_id: sessionId }) });
   const ok = pdf.status === 200 && /application\/pdf/.test(pdf.type) && pdf.buffer?.subarray(0, 4).toString() === "%PDF";
   check(`${role}: PDF downloads`, ok, `${pdf.status} ${pdf.buffer ? pdf.buffer.length : 0} bytes`);
-  if (ok) fs.writeFileSync(path.join(outDir, `module-${role}.pdf`), pdf.buffer);
+  if (ok) fs.writeFileSync(path.join(outDir, `module-${role}${lang === "kn" ? "-kn" : ""}.pdf`), pdf.buffer);
   return { id: doc.id, sessionId };
 }
 
