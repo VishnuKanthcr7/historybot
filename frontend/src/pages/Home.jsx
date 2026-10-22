@@ -320,24 +320,14 @@ export default function Home() {
               <figure className="hb-scene">
                 <div className="hb-figures">
                   <picture className="hb-fig-shivaji">
-                    <source srcSet="/images/shivaji-upper.webp" type="image/webp" />
+                    <source srcSet="/images/shivaji-full.webp" type="image/webp" />
                     <img
-                      src="/images/shivaji-upper.png"
-                      alt="Portrait of Chhatrapati Shivaji Maharaj."
-                      width="770"
-                      height="1090"
+                      src="/images/shivaji-full.png"
+                      alt="Portrait of Chhatrapati Shivaji Maharaj with sword and shield."
+                      width="880"
+                      height="872"
                       decoding="async"
                       fetchPriority="high"
-                    />
-                  </picture>
-                  <picture className="hb-fig-bot">
-                    <source srcSet="/images/mascot-books.webp" type="image/webp" />
-                    <img
-                      src="/images/mascot-books.png"
-                      alt="HistoryBot robot reading on a stack of Class 9 books."
-                      width="434"
-                      height="420"
-                      decoding="async"
                     />
                   </picture>
                 </div>

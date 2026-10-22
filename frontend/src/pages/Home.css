@@ -421,8 +421,7 @@
 /* ------------------------------------------------------------------ hero */
 
 /* The hero is one scene: the researcher's Red Fort photograph (no diya)
-   with two separate figures in front of it: a framed portrait of
-   Chhatrapati Shivaji Maharaj and the HistoryBot mascot, side by side. */
+   with a full-figure portrait of Chhatrapati Shivaji Maharaj in front. */
 .hb-hero {
   --hb-backdrop: url("/images/red-fort-hero.jpg");
   --hb-backdrop-set: image-set(
@@ -613,35 +612,23 @@
   mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
 }
 
-/* hero group: upper-body portrait of Chhatrapati Shivaji Maharaj
-   (shivaji-upper, 770x1090 canvas) with the mascot reading on Class 9 books
-   (mascot-books) in front of its lower right. The mascot box is fixed inside
-   the group canvas, so both scale together; height sets the size and the
-   group stands on the band/hero bottom edge. */
+/* hero figure: Chhatrapati Shivaji Maharaj with sword and shield
+   (shivaji-full, 880x872, soft painted bottom fade). Height sets the size;
+   the fade stands on the band/hero bottom edge. */
 .hb-figures {
   position: absolute;
   z-index: 1;
   right: 0;
   bottom: 0;
   height: 100%;
-  aspect-ratio: 770 / 1090;
+  aspect-ratio: 880 / 872;
   pointer-events: none;
 }
 
-.hb-fig-shivaji,
-.hb-fig-bot {
+.hb-fig-shivaji {
   position: absolute;
   display: block;
-}
-
-.hb-fig-shivaji {
   inset: 0;
-}
-
-.hb-fig-bot {
-  left: 45.45%;
-  top: 59.8%;
-  width: 52%;
 }
 
 .hb-figures img {
@@ -1145,6 +1132,12 @@
     mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 100%);
   }
 
+  /* phones: full figure, smaller, so the fort stays readable on the left */
+  .hb-figures {
+    right: 2%;
+    height: 86%;
+  }
+
   .hb-cta-row {
     flex-wrap: nowrap;
     gap: 0.5rem;
@@ -1365,7 +1358,7 @@
      ~97% of the page, fort centre left of it */
   .hb-figures {
     right: 3%;
-    height: 93%;
+    height: 84%;
   }
 
   .hb-hero-inner {
