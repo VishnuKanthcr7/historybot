@@ -613,49 +613,27 @@
   mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
 }
 
-/* one group: the soft-edged portrait, with the smaller mascot at its
-   lower-right, overlapping only the portrait's lower edge (armour), never
-   the face. Group height = 0.78 * 244/200 = 0.95 x its width. */
+/* hero figure (hero-figure.png): Chhatrapati Shivaji Maharaj with the
+   saffron flag and the HistoryBot mascot on books, feathered alpha on the
+   left/top/bottom. Anchored bottom-right so it bleeds off the hero edge. */
 .hb-figures {
   position: absolute;
   z-index: 1;
-  right: 3%;
-  bottom: 5%;
-  display: block;
-  width: min(170px, 44%);
-  aspect-ratio: 1 / 0.95;
-}
-
-.hb-fig-shivaji,
-.hb-fig-bot {
-  position: absolute;
-  display: block;
-}
-
-.hb-fig-shivaji {
-  left: 0;
-  top: 0;
-  width: 78%;
-}
-
-.hb-fig-bot {
   right: 0;
   bottom: 0;
-  width: 32%;
+  display: block;
+  height: 90%;
+  aspect-ratio: 303 / 374;
 }
 
-.hb-figures img {
+.hb-fig,
+.hb-fig img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
 }
 
-/* shivaji-portrait-soft: the same artwork with feathered left/top/bottom
-   alpha edges (face and turban kept fully opaque), so no frame is needed */
 
-.hb-fig-bot img {
-  filter: drop-shadow(0 6px 10px rgba(40, 22, 6, 0.22));
-}
 
 .hb-examples {
   grid-area: chips;
@@ -1150,9 +1128,8 @@
   }
 
   .hb-figures {
-    right: 3%;
-    bottom: 4%;
-    width: min(160px, 42%);
+    right: 0;
+    height: 92%;
   }
 
   .hb-cta-row {
@@ -1328,8 +1305,8 @@
   }
 
   .hb-figures {
-    right: 4%;
-    width: min(230px, 30%);
+    right: 2%;
+    height: 94%;
   }
 }
 
@@ -1373,11 +1350,10 @@
   /* figures: right third, vertically centred, clear of the flag (centre)
      and of the text column (left) */
   .hb-figures {
-    top: 50%;
-    right: 3%;
-    bottom: auto;
-    width: clamp(240px, 22vw, 300px);
-    transform: translateY(-50%);
+    right: 0;
+    bottom: 0;
+    height: 92%;
+    transform: none;
   }
 
   .hb-hero-inner {
@@ -1464,7 +1440,7 @@
 
 @media (min-width: 1601px) {
   .hb-figures {
-    right: calc(50% - 660px);
+    right: calc(50% - 800px);
   }
 
   /* very wide screens: the sharp painting itself runs edge to edge
@@ -1566,35 +1542,6 @@
 }
 
 @media (max-width: 767px) {
-  .hb-bar-row {
-    flex-wrap: nowrap;
-  }
-
-  .hb-bar-actions {
-    display: flex;
-    order: 2;
-    width: auto;
-    flex: 0 0 auto;
-  }
-
-  .hb-menu-btn {
-    order: 3;
-    flex: 0 0 auto;
-  }
-
-  .hb-bar-actions .hb-lang,
-  .hb-bar-actions .hb-bar-auth,
-  .hb-bar-actions label {
-    display: none;
-  }
-
-  .hb-bar-actions .hb-start {
-    grid-column: auto;
-    margin-left: 0;
-    padding: 0 0.85rem;
-    font-size: 0.86rem;
-  }
-
   .hb-brand-tag {
     display: none;
   }
@@ -1624,10 +1571,6 @@
 }
 
 @media (max-width: 479px) {
-  .hb-bar-actions {
-    display: none;
-  }
-
   .hb-brand-book,
   .hb-brand-rule {
     display: none;
@@ -1636,5 +1579,55 @@
   .hb-emblem-mark {
     width: 2.6rem;
     height: 2.6rem;
+  }
+}
+
+/* desktop header: one row */
+@media (min-width: 1200px) {
+  .hb-bar-actions {
+    flex-wrap: nowrap;
+  }
+
+  .hb-nav {
+    gap: 1.5rem;
+  }
+
+  .hb-nav a {
+    white-space: nowrap;
+  }
+}
+
+/* Features: outline icons in circles (mockup) */
+.hb-feature-list .hb-step-icon {
+  box-sizing: content-box;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0.6rem;
+  border: 1px solid var(--hb-gold-soft);
+  border-radius: 999px;
+  background: var(--hb-paper);
+}
+
+/* phones: research parts read as compact bordered rows */
+@media (max-width: 639px) {
+  .hb-research {
+    padding: 0 0.9rem;
+  }
+
+  .hb-research-item {
+    position: relative;
+    padding-right: 1.2rem;
+  }
+
+  .hb-research-item::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 0.2rem;
+    width: 7px;
+    height: 7px;
+    border-top: 1.5px solid var(--hb-gold-2);
+    border-right: 1.5px solid var(--hb-gold-2);
+    transform: translateY(-50%) rotate(45deg);
   }
 }
