@@ -618,9 +618,9 @@
 .hb-figures {
   position: absolute;
   z-index: 1;
-  right: 0;
-  bottom: 0;
-  height: 100%;
+  right: 2%;
+  bottom: 10px;
+  height: calc(100% - 20px);
   aspect-ratio: 880 / 872;
   pointer-events: none;
 }
@@ -634,7 +634,9 @@
 .hb-figures img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: contain;
+  object-position: 100% 100%;
 }
 
 
@@ -1134,8 +1136,7 @@
 
   /* phones: full figure, smaller, so the fort stays readable on the left */
   .hb-figures {
-    right: 2%;
-    height: 86%;
+    height: 80%;
   }
 
   .hb-cta-row {
@@ -1356,9 +1357,13 @@
      the text column; clear of the heading, buttons and chips */
   /* reference proportions: portrait ~90% of hero height, right edge at
      ~97% of the page, fort centre left of it */
+  /* desktop: width-capped so the figure starts at >=72% of the page and
+     its shield and fade sit 16px above the hero bottom */
   .hb-figures {
-    right: 3%;
-    height: 84%;
+    right: 2.5%;
+    bottom: 16px;
+    height: auto;
+    width: min(25vw, 420px);
   }
 
   .hb-hero-inner {
