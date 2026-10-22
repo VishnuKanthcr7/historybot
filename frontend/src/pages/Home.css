@@ -613,14 +613,18 @@
   mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
 }
 
-/* hero visuals: portrait of Chhatrapati Shivaji Maharaj (shivaji-hero-v6,
-   clean cutout, soft bottom fade) and, separately, the mascot reading on
-   Class 9 books (mascot-books), both bottom-right over the Red Fort photo.
-   Phones/tablets: portrait ~48% of the band width, mascot ~23%. */
+/* hero group: upper-body portrait of Chhatrapati Shivaji Maharaj
+   (shivaji-upper, 770x1090 canvas) with the mascot reading on Class 9 books
+   (mascot-books) in front of its lower right. The mascot box is fixed inside
+   the group canvas, so both scale together; height sets the size and the
+   group stands on the band/hero bottom edge. */
 .hb-figures {
   position: absolute;
-  inset: 0;
   z-index: 1;
+  right: 0;
+  bottom: 0;
+  height: 100%;
+  aspect-ratio: 770 / 1090;
   pointer-events: none;
 }
 
@@ -628,18 +632,16 @@
 .hb-fig-bot {
   position: absolute;
   display: block;
-  bottom: 0;
 }
 
 .hb-fig-shivaji {
-  right: 4%;
-  width: 48%;
+  inset: 0;
 }
 
 .hb-fig-bot {
-  right: 1%;
-  bottom: 2%;
-  width: 23%;
+  left: 45.45%;
+  top: 61.47%;
+  width: 52%;
 }
 
 .hb-figures img {
@@ -1315,12 +1317,8 @@
     background-position: 50% 34%;
   }
 
-  .hb-fig-shivaji {
-    width: 34%;
-  }
-
-  .hb-fig-bot {
-    width: 16%;
+  .hb-figures {
+    right: 4%;
   }
 }
 
@@ -1331,11 +1329,11 @@
     background: #efe1c4;
   }
 
-  /* responsive hero height: 500px at 1024px, up to 540px on wide screens */
+  /* responsive hero height: 500px at 1024px, up to 560px on wide screens */
   .hb-stage {
     max-width: 1600px;
     margin: 0 auto;
-    min-height: clamp(500px, 37vw, 540px);
+    min-height: clamp(500px, 38vw, 560px);
   }
 
   .hb-scene {
@@ -1363,21 +1361,11 @@
 
   /* group: right edge on the content container, vertically centred with
      the text column; clear of the heading, buttons and chips */
-  .hb-fig-shivaji {
-    right: 11%;
-    width: auto;
-    height: 61%;
-  }
-
-  .hb-fig-shivaji img {
-    width: auto;
-    height: 100%;
-  }
-
-  .hb-fig-bot {
-    right: 3.5%;
-    bottom: 3%;
-    width: clamp(94px, 8.5vw, 123px);
+  /* reference proportions: portrait ~90% of hero height, right edge at
+     ~79% of the page, fort centre left of it */
+  .hb-figures {
+    right: 19%;
+    height: 93%;
   }
 
   .hb-hero-inner {
