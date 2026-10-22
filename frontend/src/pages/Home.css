@@ -1361,16 +1361,16 @@
   /* group: right edge on the content container, vertically centred with
      the text column; clear of the heading, buttons and chips */
   .hb-fig-shivaji {
-    top: 6%;
+    top: 10%;
     right: 3%;
     bottom: auto;
-    height: 70%;
+    height: 78%;
   }
 
   .hb-fig-bot {
-    right: 1%;
-    bottom: 6%;
-    height: 29%;
+    right: 3%;
+    bottom: 4%;
+    height: 26%;
   }
 
   .hb-hero-inner {

@@ -323,9 +323,9 @@ export default function Home() {
                     <source srcSet="/images/shivaji-hero-v6.webp" type="image/webp" />
                     <img
                       src="/images/shivaji-hero-v6.png"
-                      alt="Chhatrapati Shivaji Maharaj with the saffron flag."
-                      width="505"
-                      height="499"
+                      alt="Portrait of Chhatrapati Shivaji Maharaj."
+                      width="420"
+                      height="442"
                       decoding="async"
                       fetchPriority="high"
                     />
