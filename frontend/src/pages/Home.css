@@ -613,24 +613,43 @@
   mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
 }
 
-/* hero figure (hero-figure.png): Chhatrapati Shivaji Maharaj with the
-   saffron flag and the HistoryBot mascot on books, feathered alpha on the
-   left/top/bottom. Anchored bottom-right so it bleeds off the hero edge. */
+/* hero group: the portrait of Chhatrapati Shivaji Maharaj (shivaji-hero,
+   short alpha edge fade, no frame) with the separate HistoryBot mascot at
+   its lower-right, below the face. Width sets the size; the group box keeps
+   the portrait's 296:300 ratio. Phones/tablets: bottom-right of the band. */
 .hb-figures {
   position: absolute;
   z-index: 1;
-  right: 0;
-  bottom: 0;
-  display: block;
-  height: 90%;
-  aspect-ratio: 303 / 374;
+  right: 4%;
+  bottom: 5%;
+  width: min(150px, 38%);
+  aspect-ratio: 296 / 300;
 }
 
-.hb-fig,
-.hb-fig img {
+.hb-fig-shivaji,
+.hb-fig-bot {
+  position: absolute;
+  display: block;
+}
+
+.hb-fig-shivaji {
+  inset: 0;
+}
+
+.hb-fig-bot {
+  right: 27%;
+  bottom: -1%;
+  width: 30%;
+}
+
+.hb-figures img {
   display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
+}
+
+.hb-fig-bot img {
+  filter: drop-shadow(0 3px 5px rgba(40, 22, 6, 0.22));
 }
 
 
@@ -1122,14 +1141,9 @@
 
   .hb-scene {
     margin: 0.35rem 0 0.2rem calc(50% - 50vw);
-    aspect-ratio: 1 / 0.9;
+    aspect-ratio: 16 / 10;
     -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 93%, transparent 100%);
     mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 93%, transparent 100%);
-  }
-
-  .hb-figures {
-    right: 0;
-    height: 92%;
   }
 
   .hb-cta-row {
@@ -1305,8 +1319,7 @@
   }
 
   .hb-figures {
-    right: 2%;
-    height: 94%;
+    width: min(210px, 28%);
   }
 }
 
@@ -1317,11 +1330,11 @@
     background: #efe1c4;
   }
 
-  /* responsive hero height: 520px at 1024px, up to 600px on wide screens */
+  /* responsive hero height: 480px at 1024px, up to 540px on wide screens */
   .hb-stage {
     max-width: 1600px;
     margin: 0 auto;
-    min-height: clamp(520px, 44vw, 600px);
+    min-height: clamp(480px, 38vw, 540px);
   }
 
   .hb-scene {
@@ -1347,13 +1360,14 @@
     pointer-events: none;
   }
 
-  /* figures: right third, vertically centred, clear of the flag (centre)
-     and of the text column (left) */
+  /* group: right edge on the content container, vertically centred with
+     the text column; clear of the heading, buttons and chips */
   .hb-figures {
-    right: 0;
-    bottom: 0;
-    height: 92%;
-    transform: none;
+    top: 50%;
+    right: calc((100% - min(1320px, 100% - 4.5rem)) / 2);
+    bottom: auto;
+    width: clamp(230px, 21vw, 300px);
+    transform: translateY(-50%);
   }
 
   .hb-hero-inner {
@@ -1439,10 +1453,6 @@
 }
 
 @media (min-width: 1601px) {
-  .hb-figures {
-    right: calc(50% - 800px);
-  }
-
   /* very wide screens: the sharp painting itself runs edge to edge
      (no blurred, faded extension beyond the 1600px stage) */
   .hb-hero {
