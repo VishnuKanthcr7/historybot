@@ -8,7 +8,10 @@ const DAILY_LIMIT_MESSAGE = "You have reached today's question limit. Please try
 
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 15,
+  // A whole class may sign up from one school IP, so only FAILED attempts count (brute-force guard).
+  // AUTH_RATE_MAX overrides the limit (default 15 failed attempts per 15 minutes per IP).
+  max: Number.parseInt(process.env.AUTH_RATE_MAX || '', 10) || 15,
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },

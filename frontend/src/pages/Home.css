@@ -1563,3 +1563,171 @@
     transition: none;
   }
 }
+
+/* ------------------------------------------------- Red Fort hero (Oct 2026)
+   Background: the photograph supplied by the researcher (Red Fort, Lahori
+   Gate), converted to JPG/WebP without other edits. The old painted
+   backdrop (with the diya) is no longer referenced. A light warm overlay
+   keeps text readable; the flag stays in view (centre, ~30-40% from top). */
+.hb-hero {
+  --hb-backdrop: url("/images/red-fort-hero.jpg");
+  --hb-backdrop-set: image-set(
+    url("/images/red-fort-hero.webp") type("image/webp"),
+    url("/images/red-fort-hero.jpg") type("image/jpeg")
+  );
+}
+
+.hb-scene {
+  background-position: 50% 32%;
+}
+
+.hb-scene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 244, 224, 0.22), rgba(255, 238, 210, 0.3));
+  pointer-events: none;
+}
+
+/* Figures: Chhatrapati Shivaji Maharaj portrait enlarged (behind, left),
+   HistoryBot robot reduced (front, right). Both are cut from the existing
+   approved illustration, not new artwork. */
+.hb-figures {
+  z-index: 1;
+  aspect-ratio: 571 / 636;
+}
+
+.hb-fig-shivaji,
+.hb-fig-bot {
+  position: absolute;
+  display: block;
+}
+
+.hb-fig-shivaji {
+  left: 0;
+  top: 0;
+  width: 60%;
+}
+
+.hb-fig-shivaji img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(40, 22, 6, 0.28);
+  border: 3px solid rgba(255, 248, 234, 0.9);
+}
+
+.hb-fig-bot {
+  right: 0;
+  bottom: 0;
+  width: 66%;
+  z-index: 1;
+}
+
+.hb-fig-bot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 8px 16px rgba(40, 22, 6, 0.25));
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .hb-scene {
+    background-position: 50% 34%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hb-scene {
+    background-position: 50% 36%;
+  }
+
+  .hb-scene::after {
+    display: none;
+  }
+
+  .hb-scene::before {
+    background:
+      linear-gradient(90deg, rgba(250, 240, 222, 0.88) 0, rgba(250, 240, 222, 0.7) 26%, rgba(250, 240, 222, 0.3) 40%, rgba(250, 240, 222, 0.12) 55%),
+      linear-gradient(0deg, rgba(60, 36, 12, 0.14) 0, rgba(60, 36, 12, 0) 20%);
+  }
+}
+
+.hb-research-meta {
+  margin: 0.15rem 0 0;
+  font-size: 0.95rem;
+  color: var(--hb-ink);
+}
+
+.hb-research-name + .hb-research-meta {
+  margin-top: 0.3rem;
+  font-weight: 600;
+  color: var(--hb-gold-text);
+}
+
+.hb-feature-list li {
+  grid-template-columns: auto 1fr;
+}
+
+
+/* Keep the flag on the Red Fort (centre of the photo, ~35% from the top) in
+   view: the figures sit to the right of it at every width. */
+.hb-figures {
+  left: auto;
+  right: 3%;
+  width: min(571px, 60%);
+  transform: none;
+}
+
+.hb-scene {
+  background-position: 100% 32%;
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .hb-figures {
+    left: auto;
+    right: 3%;
+    width: min(571px, 44%);
+  }
+
+  .hb-scene {
+    background-position: 50% 34%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hb-figures {
+    left: auto;
+    right: 2%;
+    width: var(--fig-w);
+  }
+
+  .hb-scene {
+    background-position: 50% 36%;
+  }
+}
+
+@media (min-width: 1601px) {
+  .hb-figures {
+    left: auto;
+    right: calc(50% - 800px + 32px);
+  }
+}
+/* Section order is now hero > research > features > how to use: the
+   overlap that used to tuck "How to Use" under the hero no longer applies. */
+@media (min-width: 1024px) {
+  .hb-features,
+  .hb-features + .hb-how {
+    margin-top: 0;
+    box-shadow: none;
+  }
+
+  .hb-feature-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .hb-feature-list li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+}

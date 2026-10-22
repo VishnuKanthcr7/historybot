@@ -1,0 +1,9 @@
+-- 007: email-free student accounts (roll number within a cohort). Additive only.
+-- Applied by: node backend/scripts/migrate-007.mjs (mysqldump backup first, idempotent). Equivalent DDL:
+--   ALTER TABLE users MODIFY email VARCHAR(255) NULL;
+--   ALTER TABLE users ADD COLUMN roll_number VARCHAR(2) NULL AFTER display_name;
+--   ALTER TABLE users ADD COLUMN cohort_code VARCHAR(40) NULL AFTER roll_number;
+--   ALTER TABLE users ADD UNIQUE KEY uq_users_cohort_roll (cohort_code, roll_number);
+--   ALTER TABLE users ADD CONSTRAINT chk_users_roll CHECK (roll_number IS NULL OR (roll_number REGEXP '^[0-9]{2}$' AND roll_number <> '00'));
+--   INSERT IGNORE INTO schema_migrations (id) VALUES ('007_student_roll');
+-- See docs/student-accounts.md.

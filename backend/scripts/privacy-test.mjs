@@ -64,7 +64,7 @@ async function run() {
 
   const me = await api("/auth/me", { token: a.token });
   check("/auth/me returns only public fields",
-    me.status === 200 && Object.keys(me.data.user || {}).sort().join(",") === "display_name,email,id,role", JSON.stringify(Object.keys(me.data.user || {})));
+    me.status === 200 && Object.keys(me.data.user || {}).sort().join(",") === "cohort_code,display_name,email,id,role,roll_number", JSON.stringify(Object.keys(me.data.user || {})));
 
   const dup = await api("/auth/register", { method: "POST", body: { display_name: "Dup", email: a.email.toUpperCase(), password: a.password } });
   check("duplicate email (different case) is rejected with 409", dup.status === 409, dup.status);

@@ -35,6 +35,12 @@ async function main(db, created) {
   const pw = `Br-${crypto.randomBytes(9).toString("hex")}`;
   const email = `browser.e2e.${stamp}@example.com`;
   const temail = `browser.e2e.teacher.${stamp}@example.com`;
+  // Email-free sign-up: a free two-digit roll number in the server's cohort.
+  const cohort = process.env.STUDENT_COHORT || "class9-default";
+  const [takenRolls] = await db.query("SELECT roll_number FROM users WHERE cohort_code = ?", [cohort]);
+  const usedRolls = new Set(takenRolls.map((r) => r.roll_number));
+  let roll = "";
+  for (let i = 99; i >= 1 && !roll; i -= 1) if (!usedRolls.has(String(i).padStart(2, "0"))) roll = String(i).padStart(2, "0");
   const { hashPassword } = await import(require("url").pathToFileURL(path.join(ROOT, "backend/src/services/passwords.js")).href);
   const tid = crypto.randomUUID();
   await db.query("INSERT INTO users (id, email, display_name, password_hash, role) VALUES (?,?,?,?, 'admin')", [tid, temail, "Browser E2E Teacher", await hashPassword(pw)]);
@@ -64,20 +70,20 @@ async function main(db, created) {
 
     // --- register, sign out, sign in
     await page.goto(`${APP}/signup`, { waitUntil: "networkidle" });
-    await page.getByLabel("Name").fill("Browser E2E Student");
-    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Full name").fill("Browser E2E Student");
+    await page.getByLabel("Roll number").fill(roll);
     await page.getByLabel("Password", { exact: true }).fill(pw);
     await page.getByLabel("Confirm password").fill(pw);
     await page.getByRole("button", { name: "Create student account" }).click();
     await page.waitForURL((u) => !/signup/.test(u.pathname), { timeout: 20000 });
-    const [[u]] = await db.query("SELECT id, role FROM users WHERE email = ?", [email]);
+    const [[u]] = await db.query("SELECT id, role, roll_number FROM users WHERE cohort_code = ? AND roll_number = ?", [cohort, roll]);
     if (u) created.users.push(u.id);
     check("student registers through the form (role student)", u?.role === "student", u?.role);
     await page.goto(`${APP}/chat`, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "Log out" }).click();
     await page.waitForTimeout(800);
     await page.goto(`${APP}/login`, { waitUntil: "networkidle" });
-    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Roll number").fill(roll);
     await page.getByLabel("Password").fill(pw);
     await page.getByRole("button", { name: "Log in" }).click();
     await page.waitForURL((x) => !/login/.test(x.pathname), { timeout: 20000 });
@@ -155,7 +161,7 @@ async function main(db, created) {
     await answerAll();
     const tryAgain = await page.getByRole("button", { name: "Try again" }).count();
     const blocked = await page.getByText("You have used all attempts for this quiz.").count();
-    const again = await api("POST", `/quizzes/${assess.id}/attempts`, (await api("POST", "/auth/login", null, { email, password: pw })).data.token);
+    const again = await api("POST", `/quizzes/${assess.id}/attempts`, (await api("POST", "/auth/login", null, { roll_number: roll, password: pw })).data.token);
     check("assessment: submitted once, no Try again, server refuses a second attempt", tryAgain === 0 && blocked === 1 && again.status === 409, { tryAgain, blocked, second: again.status });
 
     // --- sign out
@@ -216,7 +222,7 @@ async function main(db, created) {
     await tp.goto(`${APP}/admin?tab=reports`, { waitUntil: "networkidle" });
     const csvs = {};
     for (const [i, kind] of ["attempts", "students"].entries()) {
-      const [d] = await Promise.all([tp.waitForEvent("download"), tp.getByRole("button", { name: "Download CSV" }).nth(i).click()]);
+      const [d] = await Promise.all([tp.waitForEvent("download"), tp.locator("li", { hasText: i === 0 ? "Assessment report (quiz attempts)" : "Student activity (all students)" }).getByRole("button", { name: "CSV", exact: true }).click()]);
       const f = path.join(OUT, `${kind}.csv`);
       await d.saveAs(f);
       csvs[kind] = fs.readFileSync(f, "utf8");

@@ -1,3 +1,80 @@
+# Hosting options for HistoryBot (updated 22 Oct 2026)
+
+Nothing has been bought, signed up for or activated. All prices below were read on 22 Oct 2026 from provider pages or recent
+price trackers (links at the end) and must be re-checked at checkout. Conversions use the RBI reference rate of 22 Oct 2026:
+**US$1 = ₹94.71, €1 = ₹106.28**. Indian cards usually add a 2–3.5% foreign-currency markup, which is not included.
+**GST:** foreign cloud providers normally charge 18% IGST to Indian customers; it is included in the "total" columns.
+
+## What actually has to run (measured on the laptop, 22 Oct 2026)
+
+| Part | Measured | Needed in production? |
+|---|---|---|
+| Frontend | Netlify (free) | Keep Netlify; only `VITE_API_BASE_URL` changes. |
+| Node backend (:3000) | ~80 MB private memory | Yes. |
+| Python RAG service (:8000, ChromaDB + ReportLab) | ~580 MB private memory | Yes. Internal only (never public). |
+| Ollama + `nomic-embed-text` (274 MB model) | ~320 MB when the model is loaded | Yes, unless embeddings are changed (see below). |
+| MySQL 8 | ~110–400 MB (depends on buffer settings); database dump 2.4 MB | Yes. Internal only. |
+| Data on disk | `data/` (Chroma index, textbooks, images, fonts) 58 MB | Yes. |
+| Answer model | OpenAI Responses API (paid per use, already in use) | Unchanged. llama3/llama3.2 are NOT needed in production. |
+
+**Total:** about 1.3–1.6 GB RAM in steady use plus the OS. A **2 GB** server works only with swap and a small MySQL buffer;
+**4 GB** is comfortable. Disk: 20 GB is plenty.
+
+### Is Ollama needed in production?
+Every question is embedded with `nomic-embed-text` to search the ChromaDB index, so *something* must produce the same
+embeddings. Options, honestly:
+1. **Keep Ollama with only `nomic-embed-text`** (recommended): ~320 MB RAM, no code change, no re-indexing, ₹0 per query.
+2. Run the same model through a Python library (e.g. sentence-transformers/fastembed) inside the RAG process: saves the
+   Ollama process but needs a code change and a check that vectors match the existing index. Not done.
+3. Switch to a paid embeddings API (e.g. OpenAI): needs a full re-index, a new paid call on every question, and new
+   retrieval testing. Not recommended.
+
+## Options compared (backend + RAG + MySQL on one server; Netlify frontend stays free)
+
+| Option | Spec | Price | Approx. ₹/month incl. 18% GST | Notes |
+|---|---|---|---|---|
+| **Oracle Cloud Always Free (Ampere A1)** | up to 2 OCPU / 12 GB RAM (Arm), 200 GB block storage | ₹0 | **₹0** | Limits were cut in Jul 2026 from 4 OCPU/24 GB to 2 OCPU/12 GB — still far more than needed. Needs a card for identity verification. Must be in the home region; **Mumbai/Hyderabad A1 capacity is often "out of host capacity"** and launching can take days of retries. Oracle may reclaim idle Always Free instances. No SLA. Backups must be your own (cron mysqldump to the free block/object storage). Realistic ₹0 if an instance can be created. |
+| **Hetzner Cloud CX23** (Germany/Finland) | 2 vCPU / 4 GB / 40 GB NVMe / 20 TB | €5.99 incl. IPv4 (+20% for backups = €1.10) | **≈ ₹750** (≈ ₹890 with backups) | Cheapest reliable paid option found. Prices rose on 15 Jun 2026. Europe only for this plan (≈150 ms from India — fine for chat). Stock of EU CX/CAX plans was reported "not available" on 21 Oct 2026; check before planning. |
+| Contabo Cloud VPS 4 (EU) | 4 vCPU / 8 GB / 100 GB SSD | €5.50/month on a 1-month term | ≈ ₹690 | Lots of RAM; 200 Mbit/s port; slower support; no Indian GST invoice. |
+| Contabo Cloud VPS 4 (Navi Mumbai) | same | €5.50 + €2.40 India location fee; auto-backup €1.65 | ≈ ₹990 (≈ ₹1,200 with backups) | Lowest latency in this list. |
+| DigitalOcean Basic, Bangalore 2 GB | 1 vCPU / 2 GB / 50 GB | US$12 (+20% backups) | ≈ ₹1,340 (≈ ₹1,610 with backups) | Works only with swap; tight. |
+| DigitalOcean Basic, Bangalore 4 GB | 2 vCPU / 4 GB / 80 GB | US$24 (+20% backups) | ≈ ₹2,680 (≈ ₹3,220 with backups) | The option the guide quoted; comfortable but the most expensive here. |
+| Railway (Hobby) | usage-based: $10 per GB RAM-month, $20 per vCPU-month, volumes $0.15/GB | $5 plan includes $5 usage | ≈ ₹1,700–2,300 | ~1.5 GB always-on RAM across backend, RAG, Ollama and MySQL ≈ $15–20/month. Free plan (0.5 GB per service, $1 credit) cannot run the stack. |
+
+OpenAI usage is billed separately as today and is the same on every option.
+
+## Recommendation
+1. **Try Oracle Always Free first (₹0).** It is the only genuinely free option that can run the whole stack with data
+   persistence. The risk is availability (capacity errors, possible reclaim), not features.
+2. **If Oracle cannot create an instance within a few days, use Hetzner CX23 (≈ ₹750–890/month)**, or Contabo Mumbai
+   (≈ ₹990–1,200) if lower latency in India matters more.
+3. Keep the Netlify site; point `VITE_API_BASE_URL` at the new `https://api.<domain>` (or a stable Cloudflare named tunnel,
+   which is free) and redeploy only after the new backend is verified.
+
+## Security and migration plan (nothing done yet; needs your approval)
+- Firewall: allow only 22 (SSH, key-only, no password login) and 443. MySQL (3306), RAG (8000) and Ollama (11434) bind to
+  127.0.0.1 only. Never exposed.
+- HTTPS via Caddy/nginx with Let's Encrypt, or a Cloudflare named tunnel (free, no open ports).
+- CORS: `FRONTEND_ORIGIN=https://historybot-vsku.netlify.app` only. Rate limits already in the backend.
+- Secrets: a `.env` created on the server by hand (never committed, never pasted in chat).
+- Data: `mysqldump` on the laptop → copy over SSH → restore → compare row counts per table → run tests on the server copy
+  → switch the frontend → keep the laptop backend running until the server is verified. Daily `mysqldump` cron with
+  14-day retention, plus a weekly copy off the server.
+- Apply migration 007 (roll numbers) on the production database only with approval, after a backup.
+
+## Sources (checked 22 Oct 2026)
+- Hetzner price adjustment, 15 Jun 2026: https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/
+- Oracle Always Free resources: https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm
+- Oracle A1 allocation change (Jul 2026): https://community.oracle.com/customerconnect/discussion/970310/oci-always-free-updated-ampere-a1-compute-allocation
+- DigitalOcean Droplet pricing: https://www.digitalocean.com/pricing/droplets
+- Railway pricing: https://railway.com/pricing and https://docs.railway.com/pricing
+- Contabo prices and India location fee (third-party reviews of the configurator, Oct 2026): https://technicaladda.in/contabo-vps-review/ , https://comparehost.in/best-cheap-vps-under-1000-india-2026/
+- RBI reference rates: https://www.msei.in/markets/currency/historical-data/rbireferenceratearchives
+
+---
+
+*The 15 Oct 2026 assessment below is kept for reference; where it differs, the update above is current.*
+
 # Hosting options for the HistoryBot backend (assessment only, 15 Oct 2026)
 
 Nothing has been bought or signed up for. Prices are monthly, in USD, before tax (GST may be added for Indian billing).

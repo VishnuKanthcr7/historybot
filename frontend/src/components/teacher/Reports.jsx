@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import { downloadReportCsv, teacherApi } from "../../services/api.js";
+import { downloadReport, teacherApi } from "../../services/api.js";
 import { Card, ErrorText, btn, field } from "./ui.jsx";
 
 const REPORTS = [
-  ["attempts", "Quiz attempts", "One row per submitted attempt: quiz, topic, mode, score, time taken."],
-  ["students", "Students", "One row per student: chat questions, quiz attempts, mean score, last active."],
+  ["research_summary", "Research summary", "Totals for the dates: students, active students, log-ins, chat questions, modules, PDFs, quizzes, mean scores, and when tracking began."],
+  ["students", "Student activity (all students)", "One row per student: roll no., chat questions, quiz attempts, mean score, modules done, last active."],
+  ["class_activity", "Class activity by day", "One row per IST day and activity type: how many times, and how many students."],
+  ["attempts", "Assessment report (quiz attempts)", "One row per submitted attempt: quiz, topic, mode, score, time taken."],
+  ["progress", "Learning progress (modules)", "One row per student per learning module: opened, times opened, PDFs, completed."],
   ["topics", "Topics", "One row per topic: answers, students, accuracy."],
   ["prepost", "Pre/post (matched)", "One row per student per linked pre/post pair: pre %, post %, gain; unmatched students marked."],
 ];
@@ -21,16 +24,16 @@ export default function Reports({ range }) {
       .then((d) => setInstruments(d.instruments.filter((i) => i.status !== "draft")))
       .catch(() => setInstruments([]));
   }, []);
-  const download = async (kind) => {
+  const download = async (kind, ext = "csv") => {
     setError("");
-    setBusy(kind);
+    setBusy(`${kind}.${ext}`);
     try {
       const extra = kind === "questionnaires" ? { instrument_id: instrumentId } : {};
-      const blob = await downloadReportCsv(kind, { ...range, ...extra, include_names: names ? "1" : "" });
+      const blob = await downloadReport(kind, { ...range, ...extra, include_names: names ? "1" : "" }, ext);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `historybot-${kind}-${range.from}-to-${range.to}.csv`;
+      a.download = `historybot-${kind}-${range.from}-to-${range.to}.${ext}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -42,9 +45,9 @@ export default function Reports({ range }) {
     }
   };
   return (
-    <Card title="Reports and CSV exports">
+    <Card title="Reports (CSV and PDF)">
       <p className="text-sm text-muted">
-        Exports use the date range above. Students appear as pseudonymous codes (S-xxxxxxxx) unless you include names. Emails, passwords and chat text are never exported.
+        Exports use the date range above. Students appear as pseudonymous codes (S-xxxxxxxx) unless you include names. Emails, passwords and chat text are never exported. A single student's activity timeline (CSV/PDF) is in Students: open a student. Activity from before tracking began is not available (see the research summary).
       </p>
       <label className="mt-3 flex items-center gap-2 text-sm">
         <input type="checkbox" className="h-5 w-5" checked={names} onChange={(e) => setNames(e.target.checked)} /> Include student names
@@ -56,9 +59,14 @@ export default function Reports({ range }) {
               <p className="font-medium">{title}</p>
               <p className="text-xs text-muted">{text}</p>
             </div>
-            <button type="button" disabled={busy === kind} onClick={() => download(kind)} className={`${btn} bg-navy text-cream`}>
-              {busy === kind ? "Preparing…" : "Download CSV"}
-            </button>
+            <div className="flex gap-2">
+              <button type="button" disabled={busy === `${kind}.csv`} onClick={() => download(kind, "csv")} className={`${btn} bg-navy text-cream`}>
+                {busy === `${kind}.csv` ? "Preparing..." : "CSV"}
+              </button>
+              <button type="button" disabled={busy === `${kind}.pdf`} onClick={() => download(kind, "pdf")} className={`${btn} border border-navy text-navy`}>
+                {busy === `${kind}.pdf` ? "Preparing..." : "PDF"}
+              </button>
+            </div>
           </li>
         ))}
         <li className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-rule p-3">
@@ -76,8 +84,8 @@ export default function Reports({ range }) {
             </label>
             {!instruments.length ? <p className="mt-1 text-xs text-muted">No published questionnaires yet.</p> : null}
           </div>
-          <button type="button" disabled={!instrumentId || busy === "questionnaires"} onClick={() => download("questionnaires")} className={`${btn} bg-navy text-cream`}>
-            {busy === "questionnaires" ? "Preparing…" : "Download CSV"}
+          <button type="button" disabled={!instrumentId || busy === "questionnaires.csv"} onClick={() => download("questionnaires")} className={`${btn} bg-navy text-cream`}>
+            {busy === "questionnaires.csv" ? "Preparing…" : "Download CSV"}
           </button>
         </li>
       </ul>

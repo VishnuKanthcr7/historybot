@@ -26,6 +26,7 @@ except ImportError:
 from rag.engine.answer import answer_question
 from rag.engine.econtent import generate_econtent
 from rag.pdf.render import render_econtent_pdf
+from rag.engine import naming
 
 _LOG = logging.getLogger("historybot.internal_api")
 
@@ -122,7 +123,8 @@ def query(body: QueryRequest, x_internal_secret: str | None = Header(default=Non
         _log_failure("query", exc)
         raise HTTPException(status_code=502, detail="RAG engine failed.")
     payload = {
-        "answer": result.get("answer"),
+        # Generated text uses "Chhatrapati Shivaji Maharaj"; source excerpts stay verbatim.
+        "answer": naming.full_name(result.get("answer")),
         "language": result.get("language", language),
         "grounded": bool(result.get("grounded")),
         "used_supplementary": bool(result.get("used_supplementary")),
@@ -148,10 +150,10 @@ def econtent(body: EcontentRequest, x_internal_secret: str | None = Header(defau
         _log_failure("econtent", exc)
         raise HTTPException(status_code=502, detail="E-content engine failed.")
     return {
-        "title": result.get("title") or body.topic,
+        "title": naming.full_name(result.get("title") or body.topic),
         "language": result.get("language", language),
         "grounded": bool(result.get("grounded")),
-        "content": result.get("content"),
+        "content": naming.apply(result.get("content")),
         "sources": [
             {
                 "textbook_page_number": item.get("textbook_page_number") or item.get("printed_page_number"),
@@ -175,9 +177,9 @@ def econtent_pdf(body: PdfRequest, x_internal_secret: str | None = Header(defaul
     try:
         pdf_bytes = render_econtent_pdf(
             {
-                "title": body.title,
+                "title": naming.full_name(body.title),
                 "language": body.language,
-                "content": body.content,
+                "content": naming.apply(body.content),
                 "sources": body.sources,
             },
             images=body.images,

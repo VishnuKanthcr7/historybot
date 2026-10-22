@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { teacherApi } from "../../services/api.js";
+import { downloadReport, teacherApi } from "../../services/api.js";
 import { Bars, Card, Empty, ErrorText, TableWrap, btn, field, fmtDate, fmtDateTime } from "./ui.jsx";
 
 // Headline cards first, then the detail cards. Every value comes from the API; null means "not available".
@@ -158,7 +158,73 @@ export function Overview({ range }) {
   );
 }
 
-export function StudentProfile({ id, onClose }) {
+async function saveReport(kind, params, ext) {
+  const blob = await downloadReport(kind, params, ext);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `historybot-${kind}-${params.from || "all"}-to-${params.to || "today"}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Chronological activity for one student (no chat text).
+export function StudentTimeline({ id, range }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  useEffect(() => {
+    setData(null);
+    teacherApi.timeline(id, range).then(setData).catch((e) => setError(e.message));
+  }, [id, range]);
+  const get = async (ext) => {
+    setBusy(ext);
+    setError("");
+    try {
+      await saveReport("timeline", { ...range, user_id: id, include_names: "1" }, ext);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Activity timeline (selected dates)</h3>
+        <div className="flex gap-2">
+          <button type="button" className={`${btn} border border-navy text-navy`} disabled={busy === "csv"} onClick={() => get("csv")}>
+            {busy === "csv" ? "Preparing..." : "CSV"}
+          </button>
+          <button type="button" className={`${btn} border border-navy text-navy`} disabled={busy === "pdf"} onClick={() => get("pdf")}>
+            {busy === "pdf" ? "Preparing..." : "PDF"}
+          </button>
+        </div>
+      </div>
+      <ErrorText>{error}</ErrorText>
+      {!data ? (
+        <p className="text-sm text-muted">Loading.</p>
+      ) : data.items.length === 0 ? (
+        <p className="text-sm text-muted">No recorded activity in these dates.</p>
+      ) : (
+        <ol className="mt-2 max-h-80 space-y-1 overflow-y-auto text-sm" aria-label="Activity timeline">
+          {data.items.map((it, i) => (
+            <li key={i} className="flex flex-wrap gap-x-3 border-t border-rule py-1">
+              <span className="tabular-nums text-muted">{fmtDateTime(it.at)}</span>
+              <span className="font-medium">{it.label}</span>
+              {it.detail ? <span className="text-muted">{it.detail}</span> : null}
+            </li>
+          ))}
+        </ol>
+      )}
+      {data ? <p className="mt-2 text-xs text-muted">{data.note}</p> : null}
+    </div>
+  );
+}
+
+export function StudentProfile({ id, onClose, range }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -166,7 +232,7 @@ export function StudentProfile({ id, onClose }) {
   }, [id]);
   return (
     <Card
-      title={data ? data.student.display_name : "Student"}
+      title={data ? `${data.student.display_name}${data.student.roll_number ? ` · Roll ${data.student.roll_number}` : ""}` : "Student"}
       actions={
         <button type="button" onClick={onClose} className={`${btn} border border-navy text-navy`}>
           Close
@@ -217,12 +283,14 @@ export function StudentProfile({ id, onClose }) {
           </div>
         </div>
       )}
+      {range ? <StudentTimeline id={id} range={range} /> : null}
     </Card>
   );
 }
 
 const COLS = [
   ["name", "Student"],
+  ["roll", "Roll no."],
   ["joined", "Joined"],
   ["chat_questions", "Chat questions"],
   ["quiz_attempts", "Quiz attempts"],
@@ -249,13 +317,13 @@ export function StudentsTable({ range }) {
   const sortBy = (key) => setQ({ ...q, sort: key, dir: q.sort === key && q.dir === "asc" ? "desc" : "asc", page: 1 });
   return (
     <div className="space-y-4">
-      {open ? <StudentProfile id={open} onClose={() => setOpen(null)} /> : null}
+      {open ? <StudentProfile id={open} range={range} onClose={() => setOpen(null)} /> : null}
       <Card title="Students">
         <div className="mb-3 flex flex-wrap gap-2">
           <label className="sr-only" htmlFor="st-search">
             Search students
           </label>
-          <input id="st-search" className={`${field} flex-1`} placeholder="Search by name" value={q.search} onChange={(e) => setQ({ ...q, search: e.target.value, page: 1 })} />
+          <input id="st-search" className={`${field} flex-1`} placeholder="Search by name or roll number" value={q.search} onChange={(e) => setQ({ ...q, search: e.target.value, page: 1 })} />
           <label className="sr-only" htmlFor="st-activity">
             Activity filter
           </label>
@@ -291,6 +359,7 @@ export function StudentsTable({ range }) {
                 {s.display_name}
               </button>
               <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                <dt className="text-muted">Roll no.</dt><dd className="tabular-nums">{s.roll_number || "-"}</dd>
                 <dt className="text-muted">Chat questions</dt><dd className="tabular-nums">{s.chat_questions}</dd>
                 <dt className="text-muted">Quiz attempts</dt><dd className="tabular-nums">{s.quiz_attempts}</dd>
                 <dt className="text-muted">Mean score</dt><dd className="tabular-nums">{s.mean_percent == null ? "—" : `${s.mean_percent}%`}</dd>
@@ -321,6 +390,7 @@ export function StudentsTable({ range }) {
                       {s.display_name}
                     </button>
                   </td>
+                  <td className="py-2 pr-2 tabular-nums">{s.roll_number || "-"}</td>
                   <td className="py-2 pr-2">{fmtDate(s.joined)}</td>
                   <td className="py-2 pr-2 tabular-nums">{s.chat_questions}</td>
                   <td className="py-2 pr-2 tabular-nums">{s.quiz_attempts}</td>
@@ -347,7 +417,7 @@ export function StudentsTable({ range }) {
             </button>
           </div>
         </div>
-        <p className="mt-2 text-xs text-muted">Counts for the selected dates. Chat contents and emails are not shown.</p>
+        <p className="mt-2 text-xs text-muted">Counts for the selected dates. Chat contents and emails are not shown. Students who signed up with an email before roll numbers were introduced show "-" for roll no.</p>
       </Card>
     </div>
   );

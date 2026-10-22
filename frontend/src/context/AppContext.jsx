@@ -107,8 +107,8 @@ export function AppProvider({ children }) {
   }, [refreshList, useAccountSession]);
 
   const login = useCallback(
-    async (email, password) => {
-      const result = await api.loginAccount(email, password);
+    async (credentials, password) => {
+      const result = await api.loginAccount(credentials, password);
       api.setAuthToken(result.token);
       setError("");
       await useAccountSession(result.user, result.session_id);
@@ -117,8 +117,8 @@ export function AppProvider({ children }) {
   );
 
   const register = useCallback(
-    async (displayName, email, password) => {
-      const result = await api.registerAccount(displayName, email, password);
+    async (displayName, rollNumber, password, confirmPassword) => {
+      const result = await api.registerAccount(displayName, rollNumber, password, confirmPassword);
       api.setAuthToken(result.token);
       setError("");
       await useAccountSession(result.user, result.session_id);

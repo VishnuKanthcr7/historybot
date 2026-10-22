@@ -4,6 +4,7 @@ import { useApp } from "../context/AppContext.jsx";
 import { LABELS } from "../i18n/labels.js";
 import AccountMenu from "../components/AccountMenu.jsx";
 import { stashPendingQuestion } from "../pendingQuestion.js";
+import { RESEARCH } from "../config/research.js";
 import "./Home.css";
 
 const SUGGESTIONS = [
@@ -29,9 +30,28 @@ const STEPS = [
   },
 ];
 
-const RESEARCH_TOPIC =
-  "The Impact of Crossover Instructional Modules through Artificial Intelligence on Digital Attitude, Social Engagement and Academic Achievement in Social Science at Secondary Level.";
-
+const FEATURES = [
+  {
+    icon: "chat",
+    title: "Textbook-grounded answers",
+    text: "Answers come from the Class 9 Karnataka State Board textbook and show the chapter and printed page.",
+  },
+  {
+    icon: "pdf",
+    title: "Learning modules and PDFs",
+    text: "Open a short learning module on a topic and download it as a PDF to revise.",
+  },
+  {
+    icon: "book",
+    title: "Quizzes",
+    text: "Take quizzes set by your teacher and see your score and the correct answers.",
+  },
+  {
+    icon: "people",
+    title: "Teacher dashboard",
+    text: "Teachers see class activity, quiz results and progress reports for the research study.",
+  },
+];
 export default function Home() {
   const navigate = useNavigate();
   const { language, setLanguage, beginFreshChat, user } = useApp();
@@ -160,6 +180,7 @@ export default function Home() {
               Home
             </a>
             <a href="#about">About</a>
+            <a href="#features">Features</a>
             <a href="#how">How to Use</a>
           </nav>
 
@@ -247,6 +268,9 @@ export default function Home() {
                 <a href="#about" onClick={closeMenu}>
                   About
                 </a>
+                <a href="#features" onClick={closeMenu}>
+                  Features
+                </a>
                 <a href="#how" onClick={closeMenu}>
                   How to Use
                 </a>
@@ -294,17 +318,29 @@ export default function Home() {
               </div>
 
               <figure className="hb-scene">
-                <picture className="hb-figures">
-                  <source srcSet="/images/historybot-hero-figures.webp" type="image/webp" />
-                  <img
-                    src="/images/historybot-hero-figures.png"
-                    alt="HistoryBot robot reading the Karnataka State Board Class 9 Social Science History textbook, with Chhatrapati Shivaji Maharaj in the background."
-                    width="571"
-                    height="636"
-                    decoding="async"
-                    fetchPriority="high"
-                  />
-                </picture>
+                <div className="hb-figures">
+                  <picture className="hb-fig-shivaji">
+                    <source srcSet="/images/shivaji-portrait.webp" type="image/webp" />
+                    <img
+                      src="/images/shivaji-portrait.jpg"
+                      alt="Portrait of Chhatrapati Shivaji Maharaj."
+                      width="200"
+                      height="244"
+                      decoding="async"
+                    />
+                  </picture>
+                  <picture className="hb-fig-bot">
+                    <source srcSet="/images/historybot-robot.webp" type="image/webp" />
+                    <img
+                      src="/images/historybot-robot.png"
+                      alt="HistoryBot robot reading the Karnataka State Board Class 9 Social Science History textbook."
+                      width="542"
+                      height="600"
+                      decoding="async"
+                      fetchPriority="high"
+                    />
+                  </picture>
+                </div>
               </figure>
 
               <div className="hb-cta-row">
@@ -331,28 +367,6 @@ export default function Home() {
                 ))}
               </ul>
             </div>
-          </div>
-        </section>
-
-        <section id="how" className="hb-how" aria-labelledby="how-title">
-          <div className="hb-how-inner">
-            <div className="hb-how-head">
-              <h2 id="how-title">How to Use HistoryBot</h2>
-              <span className="hb-how-rule" aria-hidden="true" />
-            </div>
-            <ol className="hb-steps">
-              {STEPS.map((step) => (
-                <li key={step.no}>
-                  <span className="hb-step-no">{step.no}</span>
-                  <Icon name={step.icon} className="hb-step-icon" />
-                  <div className="hb-step-text">
-                    <h3>{step.title}</h3>
-                    <p>{step.text}</p>
-                  </div>
-                  <Chevron />
-                </li>
-              ))}
-            </ol>
           </div>
         </section>
 
@@ -407,9 +421,12 @@ export default function Home() {
                     <span className="hb-research-no" aria-hidden="true">
                       01 —{" "}
                     </span>
-                    Research Scholar
+                    {RESEARCH.scholar.role}
                   </dt>
-                  <dd className="hb-research-name">Pandurang Vajranthi</dd>
+                  <dd className="hb-research-name">{RESEARCH.scholar.name}</dd>
+                  <dd className="hb-research-meta">Reg. No. {RESEARCH.scholar.registrationNo}</dd>
+                  <dd className="hb-research-meta">Father&apos;s name: {RESEARCH.scholar.fatherName}</dd>
+                  <dd className="hb-research-meta">{RESEARCH.scholar.university}</dd>
                 </div>
                 <div className="hb-research-item">
                   <dt>
@@ -418,7 +435,10 @@ export default function Home() {
                     </span>
                     Research Guide
                   </dt>
-                  <dd className="hb-research-name">Dr. Sushma N. Jogan</dd>
+                  <dd className="hb-research-name">{RESEARCH.guide.name}</dd>
+                  <dd className="hb-research-meta">{RESEARCH.guide.designation}</dd>
+                  <dd className="hb-research-meta">{RESEARCH.guide.department}</dd>
+                  <dd className="hb-research-meta">{RESEARCH.guide.university}</dd>
                 </div>
                 <div className="hb-research-item hb-research-topic">
                   <dt>
@@ -427,12 +447,54 @@ export default function Home() {
                     </span>
                     Research Topic
                   </dt>
-                  <dd className="hb-topic">{RESEARCH_TOPIC}</dd>
+                  <dd className="hb-topic">{RESEARCH.title}</dd>
+                  <dd className="hb-research-meta">{RESEARCH.context}</dd>
                 </div>
               </dl>
             </div>
           </div>
         </section>
+        <section id="features" className="hb-how hb-features" aria-labelledby="features-title">
+          <div className="hb-how-inner">
+            <div className="hb-how-head">
+              <h2 id="features-title">Features</h2>
+              <span className="hb-how-rule" aria-hidden="true" />
+            </div>
+            <ul className="hb-steps hb-feature-list">
+              {FEATURES.map((f) => (
+                <li key={f.title}>
+                  <Icon name={f.icon} className="hb-step-icon" />
+                  <div className="hb-step-text">
+                    <h3>{f.title}</h3>
+                    <p>{f.text}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+        <section id="how" className="hb-how" aria-labelledby="how-title">
+          <div className="hb-how-inner">
+            <div className="hb-how-head">
+              <h2 id="how-title">How to Use HistoryBot</h2>
+              <span className="hb-how-rule" aria-hidden="true" />
+            </div>
+            <ol className="hb-steps">
+              {STEPS.map((step) => (
+                <li key={step.no}>
+                  <span className="hb-step-no">{step.no}</span>
+                  <Icon name={step.icon} className="hb-step-icon" />
+                  <div className="hb-step-text">
+                    <h3>{step.title}</h3>
+                    <p>{step.text}</p>
+                  </div>
+                  <Chevron />
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
       </main>
 
       <footer className="hb-foot">

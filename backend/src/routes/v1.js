@@ -50,6 +50,8 @@ import {
   achievement,
   overview,
   reportCsv,
+  reportPdf,
+  studentTimelineApi,
   studentProfile,
   students,
   timeseries,
@@ -123,6 +125,8 @@ router.get("/teacher/analytics/topics", requireAdmin, topics);
 router.get("/teacher/analytics/timeseries", requireAdmin, timeseries);
 router.get("/teacher/analytics/achievement", requireAdmin, achievement);
 router.get("/teacher/reports/:kind.csv", requireAdmin, reportCsv);
+router.get("/teacher/reports/:kind.pdf", requireAdmin, reportPdf);
+router.get("/teacher/analytics/students/:userId/timeline", requireAdmin, studentTimelineApi);
 
 // Research questionnaires: students answer published ones; teachers build, approve, publish and analyse.
 router.get("/questionnaires", requireAuth, listQuestionnaires);

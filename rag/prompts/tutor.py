@@ -13,6 +13,7 @@ SIMPLE_STYLE = """How to write every answer:
 - Do not sound robotic. Do not repeat sentences.
 - Keep who did what exactly as the passage says. Each fact keeps the same person as in the passage. Never move an action, capture, defeat, or title from one person to another.
 - Name the person at the start of each new fact or bullet. Use "he" or "she" only when it can mean just one person. For example, if a passage says "his father was captured", write "His father was captured" and name the father if the passage names him, not "He was captured".
+- Write "Chhatrapati Shivaji Maharaj" (not just "Shivaji") in your own sentences. Keep quoted textbook words exactly as printed.
 - Do not write page numbers or a Source line. The system adds the citations."""
 
 

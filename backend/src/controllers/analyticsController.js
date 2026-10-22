@@ -8,6 +8,7 @@ import { requireUuid } from "../services/quizData.js";
 import { studentTopicStats } from "./quizController.js";
 import { pairedT } from "../services/stats.js";
 import { questionnaireCsv } from "./researchController.js";
+import { EXTRA_REPORTS, REPORT_TITLES, renderPdf, requireStudent, researchSummaryRows, studentTimeline } from "../services/reports.js";
 
 // Dates are school days in India (IST, UTC+05:30); the database stores UTC.
 const IST = "+05:30";
@@ -182,6 +183,7 @@ export async function overview(req, res, next) {
 
 const SORTS = {
   name: "display_name",
+  roll: "roll_number",
   joined: "joined",
   chat_questions: "chat_questions",
   quiz_attempts: "quiz_attempts",
@@ -203,11 +205,11 @@ async function studentRows(range, f, { paginate = true } = {}) {
   const where = ["u.role = 'student'"];
   const params = [];
   if (f.search) {
-    where.push("u.display_name LIKE ?");
-    params.push(`%${f.search}%`);
+    where.push("(u.display_name LIKE ? OR u.roll_number = ?)");
+    params.push(`%${f.search}%`, f.search.trim());
   }
   const base = `
-    SELECT u.id, u.display_name, u.created_at AS joined,
+    SELECT u.id, u.display_name, u.roll_number, u.cohort_code, u.created_at AS joined,
       (SELECT COUNT(*) FROM messages m JOIN conversations c ON c.id = m.conversation_id
          JOIN anonymous_sessions s ON s.id = c.session_id
          WHERE s.user_id = u.id AND m.role = 'user' AND m.created_at >= ? AND m.created_at < ?) AS chat_questions,
@@ -238,6 +240,8 @@ async function studentRows(range, f, { paginate = true } = {}) {
     rows: rows.map((r) => ({
       id: r.id,
       display_name: r.display_name,
+      roll_number: r.roll_number || null,
+      cohort_code: r.cohort_code || null,
       joined: r.joined,
       chat_questions: Number(r.chat_questions),
       quiz_attempts: Number(r.quiz_attempts),
@@ -262,7 +266,7 @@ export async function students(req, res, next) {
 export async function studentProfile(req, res, next) {
   try {
     requireUuid(req.params.userId, "student id");
-    const [users] = await pool.query("SELECT id, display_name, created_at, role FROM users WHERE id = ?", [req.params.userId]);
+    const [users] = await pool.query("SELECT id, display_name, roll_number, cohort_code, created_at, role FROM users WHERE id = ?", [req.params.userId]);
     if (!users.length || users[0].role !== "student") throw new AppError(404, "NOT_FOUND", "Student not found.");
     const u = users[0];
     const [attempts] = await pool.query(
@@ -278,7 +282,7 @@ export async function studentProfile(req, res, next) {
     );
     const topics = await studentTopicStats(u.id);
     res.json({
-      student: { id: u.id, display_name: u.display_name, joined: u.created_at },
+      student: { id: u.id, display_name: u.display_name, roll_number: u.roll_number, cohort_code: u.cohort_code, joined: u.created_at },
       totals: { chat_questions: Number(chat.n), quiz_attempts: attempts.length },
       attempts: attempts.map((a) => ({ ...a, percent: Number(a.percent) })),
       observed_topics: topics,
@@ -474,13 +478,14 @@ function studentRef(id) {
   return `S-${String(id).replace(/-/g, "").slice(0, 8)}`;
 }
 
-export async function reportCsv(req, res, next) {
-  try {
+export async function buildReport(req) {
+  {
     const range = parseRange(req.query);
     const kind = req.params.kind;
     const withNames = req.query.include_names === "1";
     let header;
     let rows;
+    let title = REPORT_TITLES[kind] || kind;
     if (kind === "attempts") {
       const [data] = await pool.query(
         `SELECT a.user_id, u.display_name, z.title, z.topic, z.activity_type, z.mode, z.assessment_phase, a.attempt_no, a.end_reason,
@@ -496,8 +501,8 @@ export async function reportCsv(req, res, next) {
       ]);
     } else if (kind === "students") {
       const { rows: data } = await studentRows(range, { sort: "name", dir: "asc", page: 1, size: 100, activity: "all" }, { paginate: false });
-      header = ["student_ref", ...(withNames ? ["student_name"] : []), "joined_ist", "chat_questions", "quiz_attempts", "mean_percent", "modules_completed", "last_active_ist"];
-      rows = data.map((r) => [studentRef(r.id), ...(withNames ? [r.display_name] : []), istStamp(r.joined), r.chat_questions, r.quiz_attempts, r.mean_percent, r.modules_completed, istStamp(r.last_active)]);
+      header = ["student_ref", ...(withNames ? ["student_name"] : []), "roll_number", "joined_ist", "chat_questions", "quiz_attempts", "mean_percent", "modules_completed", "last_active_ist"];
+      rows = data.map((r) => [studentRef(r.id), ...(withNames ? [r.display_name] : []), r.roll_number || "", istStamp(r.joined), r.chat_questions, r.quiz_attempts, r.mean_percent, r.modules_completed, istStamp(r.last_active)]);
     } else if (kind === "topics") {
       const data = await topicRows(range);
       header = ["topic", "answers", "students", "attempts", "accuracy_percent"];
@@ -513,14 +518,67 @@ export async function reportCsv(req, res, next) {
       }
     } else if (kind === "questionnaires") {
       ({ header, rows } = await questionnaireCsv(range, req.query.instrument_id));
+    } else if (kind === "research_summary") {
+      header = ["measure", "value"];
+      rows = researchSummaryRows(await overviewData(range));
+    } else if (EXTRA_REPORTS[kind]) {
+      const extra = await EXTRA_REPORTS[kind](range, req.query, withNames);
+      ({ header, rows } = extra);
+      title = extra.title;
     } else {
       throw new AppError(404, "NOT_FOUND", "Unknown report.");
     }
+    return { kind, range, header, rows, title };
+  }
+}
+
+function reportFilename(kind, range, ext) {
+  return `historybot-${kind}-${range.from}-to-${range.to}.${ext}`;
+}
+
+export async function reportCsv(req, res, next) {
+  try {
+    const { kind, range, header, rows } = await buildReport(req);
     const csv = toCsv(header, rows);
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="historybot-${kind}-${range.from}-to-${range.to}.csv"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${reportFilename(kind, range, "csv")}"`);
     res.setHeader("Cache-Control", "no-store");
     res.send(`\ufeff${csv}`);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function reportPdf(req, res, next) {
+  try {
+    const { kind, range, header, rows, title } = await buildReport(req);
+    const pdf = await renderPdf({
+      title,
+      header,
+      rows,
+      range,
+      notes: ["Student names are hidden unless 'include names' was chosen. Only stored records are shown; nothing is estimated."],
+    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${reportFilename(kind, range, "pdf")}"`);
+    res.setHeader("Cache-Control", "no-store");
+    res.send(pdf);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function studentTimelineApi(req, res, next) {
+  try {
+    const u = await requireStudent(req.params.userId);
+    const range = req.query.from || req.query.to ? parseRange(req.query) : null;
+    const items = await studentTimeline(u.id, range, 1000);
+    res.json({
+      student: { id: u.id, display_name: u.display_name, roll_number: u.roll_number, cohort_code: u.cohort_code },
+      range: range ? { from: range.from, to: range.to } : null,
+      items,
+      note: "Times are stored in UTC and shown in IST. Chat question text is not shown here. Activity before tracking began is not available.",
+    });
   } catch (err) {
     next(err);
   }

@@ -101,23 +101,26 @@ async function request(path, options = {}) {
   return data;
 }
 
-export function registerAccount(displayName, email, password) {
+// Students sign up with full name + two-digit roll number + password (no email).
+export function registerAccount(displayName, rollNumber, password, confirmPassword) {
   return request("/auth/register", {
     method: "POST",
     auth: false,
     body: JSON.stringify({
       display_name: displayName,
-      email,
+      roll_number: rollNumber,
       password,
+      confirm_password: confirmPassword,
     }),
   });
 }
 
-export function loginAccount(email, password) {
+// credentials: { roll_number } for students, { email } for teachers and older email accounts.
+export function loginAccount(credentials, password) {
   return request("/auth/login", {
     method: "POST",
     auth: false,
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ ...credentials, password }),
   });
 }
 
@@ -285,6 +288,7 @@ export const teacherApi = {
   overview: (range) => request(`/teacher/analytics/overview${qs(range)}`),
   students: (params) => request(`/teacher/analytics/students${qs(params)}`),
   student: (id) => request(`/teacher/analytics/students/${id}`),
+  timeline: (id, range) => request(`/teacher/analytics/students/${id}/timeline${qs(range)}`),
   topics: (range) => request(`/teacher/analytics/topics${qs(range)}`),
   timeseries: (params) => request(`/teacher/analytics/timeseries${qs(params)}`),
   achievement: (params) => request(`/teacher/analytics/achievement${qs(params)}`),
@@ -296,12 +300,16 @@ export const teacherApi = {
   instrumentResults: (id, range) => request(`/teacher/instruments/${id}/results${qs(range)}`),
 };
 
-export async function downloadReportCsv(kind, params) {
+export function downloadReportCsv(kind, params) {
+  return downloadReport(kind, params, "csv");
+}
+
+export async function downloadReport(kind, params, ext = "csv") {
   const tokenHeaders = authHeaders();
   let response;
   try {
-    response = await fetch(`${BASE}/teacher/reports/${kind}.csv${qs(params)}`, {
-      headers: { Accept: "text/csv", ...tokenHeaders },
+    response = await fetch(`${BASE}/teacher/reports/${kind}.${ext}${qs(params)}`, {
+      headers: { Accept: ext === "pdf" ? "application/pdf" : "text/csv", ...tokenHeaders },
     });
   } catch {
     throw new ApiError("NETWORK", friendlyMessage("NETWORK"), 0);
