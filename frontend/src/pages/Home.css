@@ -613,14 +613,17 @@
   mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
 }
 
-/* hero visuals: two separate cutouts placed over the Red Fort photo.
-   .hb-figures fills the scene; sizes are a share of its height so the
-   proportions follow the approved reference (portrait ~66% of hero height,
-   mascot on books ~38%, both at the right). */
+/* hero group: Chhatrapati Shivaji Maharaj with the saffron flag
+   (shivaji-flag, 770x1090 canvas) and, in front, the mascot reading on Class 9
+   books (mascot-books). The mascot's box is fixed inside the group canvas, so
+   both scale together. Anchored bottom-right; height sets the size. */
 .hb-figures {
   position: absolute;
-  inset: 0;
   z-index: 1;
+  right: 3%;
+  bottom: 0;
+  height: 100%;
+  aspect-ratio: 770 / 1090;
   pointer-events: none;
 }
 
@@ -630,24 +633,20 @@
   display: block;
 }
 
-.hb-figures img {
-  display: block;
-  width: auto;
-  height: 100%;
-}
-
-/* phones/tablets: portrait ~60% of the band width, mascot small at
-   bottom-right */
 .hb-fig-shivaji {
-  right: 6%;
-  bottom: 6%;
-  height: 78%;
+  inset: 0;
 }
 
 .hb-fig-bot {
-  right: 1%;
-  bottom: 3%;
-  height: 30%;
+  left: 45.45%;
+  top: 61.47%;
+  width: 56.36%;
+}
+
+.hb-figures img {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 
@@ -1316,8 +1315,8 @@
     background-position: 50% 34%;
   }
 
-  .hb-fig-shivaji {
-    height: 84%;
+  .hb-figures {
+    right: 2%;
   }
 }
 
@@ -1360,17 +1359,9 @@
 
   /* group: right edge on the content container, vertically centred with
      the text column; clear of the heading, buttons and chips */
-  .hb-fig-shivaji {
-    top: 10%;
-    right: 3%;
-    bottom: auto;
-    height: 78%;
-  }
-
-  .hb-fig-bot {
-    right: 3%;
-    bottom: 4%;
-    height: 26%;
+  .hb-figures {
+    right: 2%;
+    height: 97%;
   }
 
   .hb-hero-inner {
