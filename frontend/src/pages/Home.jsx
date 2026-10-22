@@ -320,9 +320,9 @@ export default function Home() {
               <figure className="hb-scene">
                 <div className="hb-figures">
                   <picture className="hb-fig-shivaji">
-                    <source srcSet="/images/shivaji-portrait.webp" type="image/webp" />
+                    <source srcSet="/images/shivaji-portrait-soft.webp" type="image/webp" />
                     <img
-                      src="/images/shivaji-portrait.jpg"
+                      src="/images/shivaji-portrait-soft.png"
                       alt="Portrait of Chhatrapati Shivaji Maharaj."
                       width="200"
                       height="244"

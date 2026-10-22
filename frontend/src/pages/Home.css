@@ -613,30 +613,35 @@
   mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
 }
 
-/* portrait and mascot sit side by side (never overlapping), bottom-aligned */
+/* one group: the soft-edged portrait, with the smaller mascot at its
+   lower-right, overlapping only the portrait's lower edge (armour), never
+   the face. Group height = 0.78 * 244/200 = 0.95 x its width. */
 .hb-figures {
   position: absolute;
   z-index: 1;
-  right: 5%;
-  bottom: 7%;
-  display: flex;
-  align-items: flex-end;
-  gap: clamp(0.6rem, 2vw, 1.25rem);
-  width: min(300px, 62%);
+  right: 3%;
+  bottom: 5%;
+  display: block;
+  width: min(170px, 44%);
+  aspect-ratio: 1 / 0.95;
 }
 
 .hb-fig-shivaji,
 .hb-fig-bot {
+  position: absolute;
   display: block;
-  min-width: 0;
 }
 
 .hb-fig-shivaji {
-  flex: 0 0 56%;
+  left: 0;
+  top: 0;
+  width: 78%;
 }
 
 .hb-fig-bot {
-  flex: 0 0 38%;
+  right: 0;
+  bottom: 0;
+  width: 32%;
 }
 
 .hb-figures img {
@@ -645,15 +650,8 @@
   height: auto;
 }
 
-/* thin gold frame, light shadow; natural 200:244 ratio, so the face is
-   never cropped */
-.hb-fig-shivaji img {
-  padding: 4px;
-  border: 1px solid var(--hb-gold-soft);
-  border-radius: 6px;
-  background: var(--hb-paper);
-  box-shadow: 0 8px 20px -10px rgba(40, 22, 6, 0.45);
-}
+/* shivaji-portrait-soft: the same artwork with feathered left/top/bottom
+   alpha edges (face and turban kept fully opaque), so no frame is needed */
 
 .hb-fig-bot img {
   filter: drop-shadow(0 6px 10px rgba(40, 22, 6, 0.22));
@@ -1123,7 +1121,7 @@
 
   .hb-hero h1 {
     margin-top: 0;
-    font-size: clamp(2.35rem, 10.4vw, 2.9rem);
+    font-size: clamp(1.8rem, 9.2vw, 2.9rem);
     line-height: 1;
   }
 
@@ -1152,9 +1150,9 @@
   }
 
   .hb-figures {
-    right: 4%;
-    bottom: 6%;
-    width: min(250px, 64%);
+    right: 3%;
+    bottom: 4%;
+    width: min(160px, 42%);
   }
 
   .hb-cta-row {
@@ -1331,7 +1329,7 @@
 
   .hb-figures {
     right: 4%;
-    width: min(320px, 38%);
+    width: min(230px, 30%);
   }
 }
 
@@ -1378,7 +1376,7 @@
     top: 50%;
     right: 3%;
     bottom: auto;
-    width: clamp(290px, 29vw, 400px);
+    width: clamp(240px, 22vw, 300px);
     transform: translateY(-50%);
   }
 
@@ -1466,7 +1464,7 @@
 
 @media (min-width: 1601px) {
   .hb-figures {
-    right: 2rem;
+    right: calc(50% - 660px);
   }
 
   /* very wide screens: the sharp painting itself runs edge to edge
@@ -1551,5 +1549,92 @@
 @media (min-width: 1024px) {
   .hb-feature-list {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* ------------------------------------------------- phones: compact header
+   Header shows brand + (from 480px) a compact Start Learning + Menu.
+   Language, Student Login / Sign Up and Teacher Login live in the drawer,
+   which opens with Start Learning at the top. */
+.hb-drawer-head {
+  order: -2;
+}
+
+.hb-page .hb-drawer-start {
+  order: -1;
+  margin-top: 0;
+}
+
+@media (max-width: 767px) {
+  .hb-bar-row {
+    flex-wrap: nowrap;
+  }
+
+  .hb-bar-actions {
+    display: flex;
+    order: 2;
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .hb-menu-btn {
+    order: 3;
+    flex: 0 0 auto;
+  }
+
+  .hb-bar-actions .hb-lang,
+  .hb-bar-actions .hb-bar-auth,
+  .hb-bar-actions label {
+    display: none;
+  }
+
+  .hb-bar-actions .hb-start {
+    grid-column: auto;
+    margin-left: 0;
+    padding: 0 0.85rem;
+    font-size: 0.86rem;
+  }
+
+  .hb-brand-tag {
+    display: none;
+  }
+
+  .hb-campus img {
+    aspect-ratio: 16 / 9;
+    max-height: 200px;
+  }
+
+  .hb-research-item {
+    padding: 0.6rem 0;
+  }
+
+  .hb-step-no {
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: 1.05rem;
+  }
+
+  .hb-steps li {
+    padding: 0.6rem 0;
+  }
+
+  .hb-how-inner {
+    padding: 0.9rem 0 1rem;
+  }
+}
+
+@media (max-width: 479px) {
+  .hb-bar-actions {
+    display: none;
+  }
+
+  .hb-brand-book,
+  .hb-brand-rule {
+    display: none;
+  }
+
+  .hb-emblem-mark {
+    width: 2.6rem;
+    height: 2.6rem;
   }
 }
