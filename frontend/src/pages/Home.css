@@ -1362,9 +1362,9 @@
   /* group: right edge on the content container, vertically centred with
      the text column; clear of the heading, buttons and chips */
   /* reference proportions: portrait ~90% of hero height, right edge at
-     ~79% of the page, fort centre left of it */
+     ~97% of the page, fort centre left of it */
   .hb-figures {
-    right: 19%;
+    right: 3%;
     height: 93%;
   }
 
