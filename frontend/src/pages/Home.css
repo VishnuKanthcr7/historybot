@@ -1366,7 +1366,7 @@
   .hb-fig-shivaji {
     right: 5%;
     width: auto;
-    height: 72%;
+    height: 61%;
   }
 
   .hb-fig-shivaji img {
@@ -1375,7 +1375,7 @@
   }
 
   .hb-fig-bot {
-    right: 3%;
+    right: 5%;
     bottom: 3%;
     width: clamp(110px, 10vw, 145px);
   }
