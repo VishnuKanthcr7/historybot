@@ -613,43 +613,23 @@
   mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
 }
 
-/* hero group: the portrait of Chhatrapati Shivaji Maharaj (shivaji-hero,
-   short alpha edge fade, no frame) with the separate HistoryBot mascot at
-   its lower-right, below the face. Width sets the size; the group box keeps
-   the portrait's 296:300 ratio. Phones/tablets: bottom-right of the band. */
+/* hero group (shivaji-group): clean transparent cutout of Chhatrapati
+   Shivaji Maharaj with the HistoryBot mascot on books at lower right, from
+   the approved mockup. Height-driven; the base sits on the band/hero foot. */
 .hb-figures {
   position: absolute;
   z-index: 1;
-  right: 4%;
-  bottom: 5%;
-  width: min(150px, 38%);
-  aspect-ratio: 296 / 300;
+  right: 2%;
+  bottom: 0;
+  height: 96%;
+  aspect-ratio: 562 / 718;
 }
 
-.hb-fig-shivaji,
-.hb-fig-bot {
-  position: absolute;
-  display: block;
-}
-
-.hb-fig-shivaji {
-  inset: 0;
-}
-
-.hb-fig-bot {
-  right: 27%;
-  bottom: -1%;
-  width: 30%;
-}
-
-.hb-figures img {
+.hb-fig,
+.hb-fig img {
   display: block;
   width: 100%;
-  height: auto;
-}
-
-.hb-fig-bot img {
-  filter: drop-shadow(0 3px 5px rgba(40, 22, 6, 0.22));
+  height: 100%;
 }
 
 
@@ -1141,9 +1121,9 @@
 
   .hb-scene {
     margin: 0.35rem 0 0.2rem calc(50% - 50vw);
-    aspect-ratio: 16 / 10;
-    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 93%, transparent 100%);
-    mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 93%, transparent 100%);
+    aspect-ratio: 4 / 3;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 100%);
+    mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 100%);
   }
 
   .hb-cta-row {
@@ -1319,7 +1299,7 @@
   }
 
   .hb-figures {
-    width: min(210px, 28%);
+    right: 3%;
   }
 }
 
@@ -1330,11 +1310,11 @@
     background: #efe1c4;
   }
 
-  /* responsive hero height: 480px at 1024px, up to 540px on wide screens */
+  /* responsive hero height: 540px at 1024px, up to 600px on wide screens */
   .hb-stage {
     max-width: 1600px;
     margin: 0 auto;
-    min-height: clamp(480px, 38vw, 540px);
+    min-height: clamp(540px, 42vw, 600px);
   }
 
   .hb-scene {
@@ -1363,11 +1343,8 @@
   /* group: right edge on the content container, vertically centred with
      the text column; clear of the heading, buttons and chips */
   .hb-figures {
-    top: 50%;
     right: calc((100% - min(1320px, 100% - 4.5rem)) / 2);
-    bottom: auto;
-    width: clamp(230px, 21vw, 300px);
-    transform: translateY(-50%);
+    height: 88%;
   }
 
   .hb-hero-inner {
@@ -1558,7 +1535,7 @@
 
   .hb-campus img {
     aspect-ratio: 16 / 9;
-    max-height: 200px;
+    max-height: 180px;
   }
 
   .hb-research-item {
@@ -1639,5 +1616,67 @@
     border-top: 1.5px solid var(--hb-gold-2);
     border-right: 1.5px solid var(--hb-gold-2);
     transform: translateY(-50%) rotate(45deg);
+  }
+}
+
+/* phones: compact research identity and two-column scholar/guide */
+@media (max-width: 639px) {
+  .hb-identity {
+    gap: 0.6rem;
+  }
+
+  .hb-identity-emblem {
+    width: 44px;
+    height: 44px;
+  }
+
+  .hb-identity-text {
+    padding-left: 0.6rem;
+  }
+
+  .hb-about h2 {
+    font-size: 1.1rem;
+    line-height: 1.2;
+  }
+
+  .hb-dept {
+    font-size: 0.85rem;
+  }
+
+  .hb-research-name {
+    font-size: 1.1rem;
+  }
+
+  .hb-research-meta {
+    font-size: 0.85rem;
+  }
+
+  .hb-topic {
+    font-size: 0.95rem;
+  }
+}
+
+@media (min-width: 430px) and (max-width: 639px) {
+  .hb-research {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 0.9rem;
+  }
+
+  .hb-research-item + .hb-research-item {
+    border-top: 0;
+  }
+
+  .hb-research-item.hb-research-topic {
+    grid-column: 1 / -1;
+    border-top: 1px solid rgba(196, 154, 82, 0.45);
+  }
+
+  .hb-research-item::after {
+    display: none;
+  }
+
+  .hb-research-item {
+    padding-right: 0;
   }
 }
