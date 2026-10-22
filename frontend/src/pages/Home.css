@@ -420,15 +420,14 @@
 
 /* ------------------------------------------------------------------ hero */
 
-/* The hero is one scene: a wide painted backdrop (historybot-hero-backdrop,
-   generated, no people) with the approved robot + Shivaji Maharaj artwork
-   (historybot-hero-figures, cut from historybot-hero.png with a feathered
-   alpha mask) composited into it. */
+/* The hero is one scene: the researcher's Red Fort photograph (no diya)
+   with two separate figures in front of it: a framed portrait of
+   Chhatrapati Shivaji Maharaj and the HistoryBot mascot, side by side. */
 .hb-hero {
-  --hb-backdrop: url("/images/historybot-hero-backdrop.jpg");
+  --hb-backdrop: url("/images/red-fort-hero.jpg");
   --hb-backdrop-set: image-set(
-    url("/images/historybot-hero-backdrop.webp") type("image/webp"),
-    url("/images/historybot-hero-backdrop.jpg") type("image/jpeg")
+    url("/images/red-fort-hero.webp") type("image/webp"),
+    url("/images/red-fort-hero.jpg") type("image/jpeg")
   );
   position: relative;
   isolation: isolate;
@@ -603,32 +602,61 @@
   position: relative;
   width: 100vw;
   margin: 0.9rem 0 0.4rem calc(50% - 50vw);
-  aspect-ratio: 1 / 1.02;
+  aspect-ratio: 16 / 11;
   background-color: #e6d4b2;
   background-image: var(--hb-backdrop);
   background-image: var(--hb-backdrop-set);
   background-size: cover;
-  background-position: 66% 70%;
+  background-position: 50% 32%;
   background-repeat: no-repeat;
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
 }
 
+/* portrait and mascot sit side by side (never overlapping), bottom-aligned */
 .hb-figures {
   position: absolute;
-  left: 50%;
-  bottom: 5%;
+  z-index: 1;
+  right: 5%;
+  bottom: 7%;
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(0.6rem, 2vw, 1.25rem);
+  width: min(300px, 62%);
+}
+
+.hb-fig-shivaji,
+.hb-fig-bot {
   display: block;
-  width: min(571px, 80%);
-  transform: translateX(-50%);
+  min-width: 0;
+}
+
+.hb-fig-shivaji {
+  flex: 0 0 56%;
+}
+
+.hb-fig-bot {
+  flex: 0 0 38%;
 }
 
 .hb-figures img {
   display: block;
   width: 100%;
   height: auto;
-  /* gentle warm grade so the illustration sits in the painted light */
-  filter: sepia(0.08) saturate(0.97) brightness(0.985);
+}
+
+/* thin gold frame, light shadow; natural 200:244 ratio, so the face is
+   never cropped */
+.hb-fig-shivaji img {
+  padding: 4px;
+  border: 1px solid var(--hb-gold-soft);
+  border-radius: 6px;
+  background: var(--hb-paper);
+  box-shadow: 0 8px 20px -10px rgba(40, 22, 6, 0.45);
+}
+
+.hb-fig-bot img {
+  filter: drop-shadow(0 6px 10px rgba(40, 22, 6, 0.22));
 }
 
 .hb-examples {
@@ -809,7 +837,7 @@
 .hb-about-inner {
   width: var(--hb-wrap);
   margin: 0 auto;
-  padding: 2.25rem 0 2.5rem;
+  padding: 1.5rem 0 1.75rem;
 }
 
 .hb-about-kicker {
@@ -856,13 +884,13 @@
   display: flex;
   align-items: center;
   gap: 1rem;
-  margin-top: 1.1rem;
+  margin-top: 0.8rem;
 }
 
 .hb-identity-emblem {
   flex: 0 0 auto;
-  width: 60px;
-  height: 60px;
+  width: 52px;
+  height: 52px;
   object-fit: contain;
   mix-blend-mode: multiply;
 }
@@ -876,7 +904,7 @@
 .hb-about h2 {
   margin: 0;
   font-family: var(--hb-serif);
-  font-size: clamp(1.35rem, 5.4vw, 2.1rem);
+  font-size: clamp(1.2rem, 4.4vw, 1.6rem);
   font-weight: 700;
   line-height: 1.2;
   color: var(--hb-navy);
@@ -891,14 +919,14 @@
 
 .hb-about-grid {
   display: grid;
-  gap: 1.25rem;
-  margin-top: 1.5rem;
+  gap: 1rem;
+  margin-top: 1rem;
 }
 
-/* authentic campus photograph: natural 3:2 proportions, never cropped */
+/* campus photograph: 16:10 frame capped at 300px tall (centre crop) */
 .hb-campus {
   margin: 0;
-  padding: 6px;
+  padding: 5px;
   border: 1px solid var(--hb-gold-soft);
   border-radius: 4px;
   background: #fffdf8;
@@ -919,7 +947,9 @@
   display: block;
   width: 100%;
   height: auto;
-  aspect-ratio: 1600 / 1066;
+  aspect-ratio: 16 / 10;
+  max-height: 300px;
+  object-fit: cover;
   border-radius: 2px;
 }
 
@@ -937,7 +967,7 @@
 }
 
 .hb-research-item {
-  padding: 1.05rem 0;
+  padding: 0.75rem 0;
 }
 
 .hb-research-item + .hb-research-item {
@@ -967,9 +997,9 @@
   border-left: 2px solid var(--hb-gold-2);
   background: linear-gradient(90deg, rgba(196, 154, 82, 0.09), rgba(196, 154, 82, 0) 85%);
   font-family: var(--hb-serif);
-  font-size: 1.12rem;
+  font-size: 1.02rem;
   font-weight: 500;
-  line-height: 1.6;
+  line-height: 1.5;
   color: var(--hb-navy);
   text-wrap: pretty;
 }
@@ -1122,8 +1152,9 @@
   }
 
   .hb-figures {
-    bottom: 3.5%;
-    width: min(571px, 74%);
+    right: 4%;
+    bottom: 6%;
+    width: min(250px, 64%);
   }
 
   .hb-cta-row {
@@ -1222,17 +1253,17 @@
 /* tablet: photo full width, scholar and guide side by side, topic below */
 @media (min-width: 640px) {
   .hb-about-inner {
-    padding: 3rem 0 3.25rem;
+    padding: 2rem 0 2.25rem;
   }
 
   .hb-identity {
-    gap: 1.25rem;
-    margin-top: 1.4rem;
+    gap: 1rem;
+    margin-top: 1rem;
   }
 
   .hb-identity-emblem {
-    width: 76px;
-    height: 76px;
+    width: 60px;
+    height: 60px;
   }
 
   .hb-identity-text {
@@ -1243,7 +1274,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     column-gap: 2rem;
-    padding: 0.4rem 1.75rem;
+    padding: 0.25rem 1.5rem;
   }
 
   .hb-research-item + .hb-research-item {
@@ -1256,79 +1287,21 @@
   }
 }
 
-/* desktop: photo left, research panel right, matched heights */
+/* desktop: photo left (max 300px tall), compact panel right */
 @media (min-width: 1024px) {
   .hb-about-inner {
-    padding: 3.75rem 0 4rem;
-  }
-
-  .hb-identity-emblem {
-    width: 88px;
-    height: 88px;
+    padding: 2.25rem 0 2.5rem;
   }
 
   .hb-about-grid {
-    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
-    gap: 2rem;
-    align-items: stretch;
-    margin-top: 2rem;
-  }
-
-  .hb-campus {
-    align-self: center;
-  }
-
-  /* the panel stretches to the photo height; each part takes an equal
-     share of the spare height and centres its content in its band, so the
-     rhythm stays even and nothing pools at the bottom */
-  .hb-research {
-    display: flex;
-    padding: 0.35rem 1.5rem;
-  }
-
-  .hb-research-item + .hb-research-item {
-    border-top: 1px solid rgba(196, 154, 82, 0.45);
-  }
-
-  .hb-research-item {
-    display: flex;
-    flex: 1 1 auto;
-    flex-direction: column;
-    justify-content: center;
-    padding: 0.8rem 0;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 1.75rem;
+    align-items: center;
+    margin-top: 1.25rem;
   }
 
   .hb-research-name {
-    font-size: 1.35rem;
-  }
-
-  .hb-topic {
-    font-size: 1.04rem;
-    line-height: 1.55;
-  }
-}
-
-@media (min-width: 1280px) {
-  .hb-about-grid {
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-    gap: 2.25rem;
-  }
-
-  .hb-research {
-    padding: 0.5rem 2rem;
-  }
-
-  .hb-research-item {
-    padding: 1.1rem 0;
-  }
-
-  .hb-research-name {
-    font-size: 1.5rem;
-  }
-
-  .hb-topic {
-    font-size: 1.22rem;
-    line-height: 1.6;
+    font-size: 1.3rem;
   }
 }
 
@@ -1351,14 +1324,14 @@
 
 @media (min-width: 640px) and (max-width: 1023px) {
   .hb-scene {
-    aspect-ratio: 16 / 10;
-    background-position: 60% 72%;
+    aspect-ratio: 16 / 8;
+    max-height: 420px;
+    background-position: 50% 34%;
   }
 
   .hb-figures {
-    left: 37%;
-    width: min(571px, 49%);
-    transform: none;
+    right: 4%;
+    width: min(320px, 38%);
   }
 }
 
@@ -1366,14 +1339,14 @@
 
 @media (min-width: 1024px) {
   .hb-hero {
-    --fig-w: min(571px, 0.446 * min(100vw, 1600px));
     background: #efe1c4;
   }
 
+  /* responsive hero height: 520px at 1024px, up to 600px on wide screens */
   .hb-stage {
     max-width: 1600px;
     margin: 0 auto;
-    min-height: calc(var(--fig-w) * 636 / 571 / 0.9 + 2.5rem);
+    min-height: clamp(520px, 44vw, 600px);
   }
 
   .hb-scene {
@@ -1383,7 +1356,7 @@
     width: auto;
     margin: 0;
     aspect-ratio: auto;
-    background-position: 50% 72%;
+    background-position: 50% 36%;
     -webkit-mask-image: none;
     mask-image: none;
   }
@@ -1394,19 +1367,19 @@
     position: absolute;
     inset: 0;
     background:
-      linear-gradient(90deg, rgba(248, 239, 220, 0.82) 0, rgba(248, 239, 220, 0.6) 22%, rgba(248, 239, 220, 0.18) 36%, rgba(248, 239, 220, 0) 44%),
-      radial-gradient(ellipse 60% 70% at 6% 8%, rgba(255, 250, 238, 0.55), rgba(255, 250, 238, 0) 70%),
-      linear-gradient(0deg, rgba(60, 36, 12, 0.12) 0, rgba(60, 36, 12, 0) 18%);
+      linear-gradient(90deg, rgba(250, 240, 222, 0.88) 0, rgba(250, 240, 222, 0.7) 26%, rgba(250, 240, 222, 0.3) 40%, rgba(250, 240, 222, 0.12) 55%),
+      linear-gradient(0deg, rgba(60, 36, 12, 0.14) 0, rgba(60, 36, 12, 0) 20%);
     pointer-events: none;
   }
 
-  /* composited figures: centre-right, in front of the map, beside the books;
-     never rendered above native size (571 x 636) */
+  /* figures: right third, vertically centred, clear of the flag (centre)
+     and of the text column (left) */
   .hb-figures {
-    left: 42%;
-    bottom: calc(2.6rem + 1.5%);
-    width: var(--fig-w);
-    transform: none;
+    top: 50%;
+    right: 3%;
+    bottom: auto;
+    width: clamp(290px, 29vw, 400px);
+    transform: translateY(-50%);
   }
 
   .hb-hero-inner {
@@ -1415,7 +1388,7 @@
     flex-direction: column;
     justify-content: center;
     min-height: inherit;
-    padding: 1.5rem 0 4.25rem;
+    padding: 2rem 0;
   }
 
   .hb-hero-copy,
@@ -1465,13 +1438,6 @@
     background: rgba(255, 251, 243, 0.94);
   }
 
-  /* How to Use rises over the foot of the scene like the reference */
-  .hb-how {
-    margin-top: -3.4rem;
-    border-top: 1px solid rgba(196, 154, 82, 0.45);
-    background: rgba(255, 250, 241, 0.95);
-    box-shadow: 0 -14px 30px -24px rgba(60, 36, 12, 0.55);
-  }
 }
 
 /* 1024-1279: the four chips keep one line each as a wrapping row of pills */
@@ -1500,7 +1466,7 @@
 
 @media (min-width: 1601px) {
   .hb-figures {
-    left: 44.5%;
+    right: 2rem;
   }
 
   /* very wide screens: the sharp painting itself runs edge to edge
@@ -1564,170 +1530,26 @@
   }
 }
 
-/* ------------------------------------------------- Red Fort hero (Oct 2026)
-   Background: the photograph supplied by the researcher (Red Fort, Lahori
-   Gate), converted to JPG/WebP without other edits. The old painted
-   backdrop (with the diya) is no longer referenced. A light warm overlay
-   keeps text readable; the flag stays in view (centre, ~30-40% from top). */
-.hb-hero {
-  --hb-backdrop: url("/images/red-fort-hero.jpg");
-  --hb-backdrop-set: image-set(
-    url("/images/red-fort-hero.webp") type("image/webp"),
-    url("/images/red-fort-hero.jpg") type("image/jpeg")
-  );
-}
-
-.hb-scene {
-  background-position: 50% 32%;
-}
-
-.hb-scene::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgba(255, 244, 224, 0.22), rgba(255, 238, 210, 0.3));
-  pointer-events: none;
-}
-
-/* Figures: Chhatrapati Shivaji Maharaj portrait enlarged (behind, left),
-   HistoryBot robot reduced (front, right). Both are cut from the existing
-   approved illustration, not new artwork. */
-.hb-figures {
-  z-index: 1;
-  aspect-ratio: 571 / 636;
-}
-
-.hb-fig-shivaji,
-.hb-fig-bot {
-  position: absolute;
-  display: block;
-}
-
-.hb-fig-shivaji {
-  left: 0;
-  top: 0;
-  width: 60%;
-}
-
-.hb-fig-shivaji img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 14px;
-  box-shadow: 0 10px 28px rgba(40, 22, 6, 0.28);
-  border: 3px solid rgba(255, 248, 234, 0.9);
-}
-
-.hb-fig-bot {
-  right: 0;
-  bottom: 0;
-  width: 66%;
-  z-index: 1;
-}
-
-.hb-fig-bot img {
-  display: block;
-  width: 100%;
-  height: auto;
-  filter: drop-shadow(0 8px 16px rgba(40, 22, 6, 0.25));
-}
-
-@media (min-width: 640px) and (max-width: 1023px) {
-  .hb-scene {
-    background-position: 50% 34%;
-  }
-}
-
-@media (min-width: 1024px) {
-  .hb-scene {
-    background-position: 50% 36%;
-  }
-
-  .hb-scene::after {
-    display: none;
-  }
-
-  .hb-scene::before {
-    background:
-      linear-gradient(90deg, rgba(250, 240, 222, 0.88) 0, rgba(250, 240, 222, 0.7) 26%, rgba(250, 240, 222, 0.3) 40%, rgba(250, 240, 222, 0.12) 55%),
-      linear-gradient(0deg, rgba(60, 36, 12, 0.14) 0, rgba(60, 36, 12, 0) 20%);
-  }
-}
-
+/* research panel: Reg. No. sits directly under the scholar's name */
 .hb-research-meta {
   margin: 0.15rem 0 0;
-  font-size: 0.95rem;
+  font-size: 0.93rem;
   color: var(--hb-ink);
 }
 
 .hb-research-name + .hb-research-meta {
-  margin-top: 0.3rem;
+  margin-top: 0.2rem;
   font-weight: 600;
   color: var(--hb-gold-text);
 }
 
+/* Features and How to Use share one compact band layout */
 .hb-feature-list li {
-  grid-template-columns: auto 1fr;
-}
-
-
-/* Keep the flag on the Red Fort (centre of the photo, ~35% from the top) in
-   view: the figures sit to the right of it at every width. */
-.hb-figures {
-  left: auto;
-  right: 3%;
-  width: min(571px, 60%);
-  transform: none;
-}
-
-.hb-scene {
-  background-position: 100% 32%;
-}
-
-@media (min-width: 640px) and (max-width: 1023px) {
-  .hb-figures {
-    left: auto;
-    right: 3%;
-    width: min(571px, 44%);
-  }
-
-  .hb-scene {
-    background-position: 50% 34%;
-  }
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
 @media (min-width: 1024px) {
-  .hb-figures {
-    left: auto;
-    right: 2%;
-    width: var(--fig-w);
-  }
-
-  .hb-scene {
-    background-position: 50% 36%;
-  }
-}
-
-@media (min-width: 1601px) {
-  .hb-figures {
-    left: auto;
-    right: calc(50% - 800px + 32px);
-  }
-}
-/* Section order is now hero > research > features > how to use: the
-   overlap that used to tuck "How to Use" under the hero no longer applies. */
-@media (min-width: 1024px) {
-  .hb-features,
-  .hb-features + .hb-how {
-    margin-top: 0;
-    box-shadow: none;
-  }
-
   .hb-feature-list {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .hb-feature-list li {
-    grid-template-columns: auto minmax(0, 1fr);
   }
 }
