@@ -320,12 +320,12 @@ export default function Home() {
               <figure className="hb-scene">
                 <div className="hb-figures">
                   <picture className="hb-fig-shivaji">
-                    <source srcSet="/images/shivaji-flag.webp" type="image/webp" />
+                    <source srcSet="/images/shivaji-hero-v6.webp" type="image/webp" />
                     <img
-                      src="/images/shivaji-flag.png"
-                      alt="Chhatrapati Shivaji Maharaj with the saffron flag."
-                      width="770"
-                      height="1090"
+                      src="/images/shivaji-hero-v6.png"
+                      alt="Portrait of Chhatrapati Shivaji Maharaj."
+                      width="420"
+                      height="442"
                       decoding="async"
                       fetchPriority="high"
                     />

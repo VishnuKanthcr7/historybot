@@ -613,17 +613,14 @@
   mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
 }
 
-/* hero group: Chhatrapati Shivaji Maharaj with the saffron flag
-   (shivaji-flag, 770x1090 canvas) and, in front, the mascot reading on Class 9
-   books (mascot-books). The mascot's box is fixed inside the group canvas, so
-   both scale together. Anchored bottom-right; height sets the size. */
+/* hero visuals: portrait of Chhatrapati Shivaji Maharaj (shivaji-hero-v6,
+   clean cutout, soft bottom fade) and, separately, the mascot reading on
+   Class 9 books (mascot-books), both bottom-right over the Red Fort photo.
+   Phones/tablets: portrait ~48% of the band width, mascot ~23%. */
 .hb-figures {
   position: absolute;
+  inset: 0;
   z-index: 1;
-  right: 3%;
-  bottom: 0;
-  height: 100%;
-  aspect-ratio: 770 / 1090;
   pointer-events: none;
 }
 
@@ -631,16 +628,18 @@
 .hb-fig-bot {
   position: absolute;
   display: block;
+  bottom: 0;
 }
 
 .hb-fig-shivaji {
-  inset: 0;
+  right: 4%;
+  width: 48%;
 }
 
 .hb-fig-bot {
-  left: 45.45%;
-  top: 61.47%;
-  width: 56.36%;
+  right: 1%;
+  bottom: 2%;
+  width: 23%;
 }
 
 .hb-figures img {
@@ -1139,6 +1138,7 @@
   .hb-scene {
     margin: 0.35rem 0 0.2rem calc(50% - 50vw);
     aspect-ratio: 4 / 3;
+    background-position: 100% 40%;
     -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 100%);
     mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 100%);
   }
@@ -1315,8 +1315,12 @@
     background-position: 50% 34%;
   }
 
-  .hb-figures {
-    right: 2%;
+  .hb-fig-shivaji {
+    width: 34%;
+  }
+
+  .hb-fig-bot {
+    width: 16%;
   }
 }
 
@@ -1327,11 +1331,11 @@
     background: #efe1c4;
   }
 
-  /* responsive hero height: 540px at 1024px, up to 600px on wide screens */
+  /* responsive hero height: 500px at 1024px, up to 540px on wide screens */
   .hb-stage {
     max-width: 1600px;
     margin: 0 auto;
-    min-height: clamp(540px, 42vw, 600px);
+    min-height: clamp(500px, 37vw, 540px);
   }
 
   .hb-scene {
@@ -1359,9 +1363,21 @@
 
   /* group: right edge on the content container, vertically centred with
      the text column; clear of the heading, buttons and chips */
-  .hb-figures {
-    right: 2%;
-    height: 97%;
+  .hb-fig-shivaji {
+    right: 5%;
+    width: auto;
+    height: 72%;
+  }
+
+  .hb-fig-shivaji img {
+    width: auto;
+    height: 100%;
+  }
+
+  .hb-fig-bot {
+    right: 3%;
+    bottom: 3%;
+    width: clamp(110px, 10vw, 145px);
   }
 
   .hb-hero-inner {
