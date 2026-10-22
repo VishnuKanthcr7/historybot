@@ -319,15 +319,25 @@ export default function Home() {
 
               <figure className="hb-scene">
                 <div className="hb-figures">
-                  <picture className="hb-fig">
-                    <source srcSet="/images/shivaji-group.webp" type="image/webp" />
+                  <picture className="hb-fig-shivaji">
+                    <source srcSet="/images/shivaji-hero-v6.webp" type="image/webp" />
                     <img
-                      src="/images/shivaji-group.png"
-                      alt="Chhatrapati Shivaji Maharaj, with the HistoryBot robot reading the Class 9 Social Science History textbook on a stack of books."
-                      width="562"
-                      height="718"
+                      src="/images/shivaji-hero-v6.png"
+                      alt="Chhatrapati Shivaji Maharaj with the saffron flag."
+                      width="505"
+                      height="499"
                       decoding="async"
                       fetchPriority="high"
+                    />
+                  </picture>
+                  <picture className="hb-fig-bot">
+                    <source srcSet="/images/mascot-books.webp" type="image/webp" />
+                    <img
+                      src="/images/mascot-books.png"
+                      alt="HistoryBot robot reading on a stack of Class 9 books."
+                      width="305"
+                      height="361"
+                      decoding="async"
                     />
                   </picture>
                 </div>
