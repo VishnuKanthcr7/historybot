@@ -1136,8 +1136,10 @@
 
   /* phones: full figure, smaller, so the fort stays readable on the left */
   .hb-figures {
+    right: calc(2% - 6px);
     bottom: 4px;
-    height: 88%;
+    height: auto;
+    width: 52%;
   }
 
   .hb-cta-row {
@@ -1358,12 +1360,13 @@
      the text column; clear of the heading, buttons and chips */
   /* reference proportions: portrait ~90% of hero height, right edge at
      ~97% of the page, fort centre left of it */
-  /* desktop: grounded on the hero bottom, right-anchored; ~90% of hero
-     height keeps the left edge (~64%) right of the central minaret */
+  /* desktop: grounded on the hero bottom, right-anchored (10px of the
+     asset is transparent padding); ~73% of hero height, capped at 28vw so
+     the visible left edge stays at >=71% and the fort centre stays clear */
   .hb-figures {
-    right: 1.5vw;
+    right: calc(1.5vw - 10px);
     bottom: 4px;
-    height: clamp(400px, 90%, 520px);
+    height: clamp(360px, min(74%, 28vw), 480px);
   }
 
   .hb-hero-inner {
